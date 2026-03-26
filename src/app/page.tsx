@@ -15,6 +15,7 @@ export default function Home() {
         <div className="flex items-center gap-3">
           <img src="/logo.png" alt="Geolog Logo" className="h-10 w-auto" />
           <span className="text-2xl font-bold tracking-tight text-[var(--color-geolog-blue)]">Portal Geolog</span>
+          <span className="px-2 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-sm uppercase tracking-widest animate-pulse">Teste</span>
         </div>
         
         <Link href="/login">
