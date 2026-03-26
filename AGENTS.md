@@ -116,6 +116,19 @@ Certifique-se de que o `user.name` e `user.email` no repositório local (`git co
 - **Como corrigir:** Execute `echo "SEU_TOKEN" | GH_CONFIG_DIR=~/.gh-config1 gh auth login --with-token` para re-vincular o perfil ao token correto.
 - **Verificação:** Sempre valide com `GH_CONFIG_DIR=~/.gh-config1 gh api user --jq .login` antes de realizar operações de escrita (push/create repo).
 
+## 🚀 5. Deploy & Infraestrutura (Vercel)
+
+### Vercel CLI
+- **Autenticação:** Agentes devem usar o flag `--token` com o **Vercel Access Token** do usuário para operações de deploy, link e configuração de variáveis.
+- **Comandos Principais:**
+  - `vercel link --yes --token $VERCEL_TOKEN` (conecta a pasta ao projeto).
+  - `vercel env add <KEY> <ENV> --token $VERCEL_TOKEN` (adiciona variáveis ao dashboard).
+  - `vercel deploy --prod --yes --token $VERCEL_TOKEN` (deploy final em produção).
+
+### Links de Referência
+- **GitHub:** [https://github.com/git-portalgeolog/portalgeolog-web](https://github.com/git-portalgeolog/portalgeolog-web)
+- **Produção:** [https://portalgeolog.com.br](https://portalgeolog.com.br)
+
 ---
 
 *Assinado: Certify Web Core Team (2026)*
