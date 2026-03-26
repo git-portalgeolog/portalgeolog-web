@@ -111,6 +111,11 @@ Certifique-se de que o `user.name` e `user.email` no repositório local (`git co
 - **ERRO KIO CLIENT:** Se o sistema solicitar login via navegador, pare. A autenticação deve ser feita via CLI com as pastas acima para evitar o erro de protocolo `x-github-desktop-dev-auth`.
 - **SANDBOX:** Ao sugerir a abertura do GitHub Desktop (AppImage), sempre inclua a flag `--no-sandbox` e a variável `XDG_CONFIG_HOME` correta.
 
+## 4. Solução de Problemas (Troubleshooting)
+- **Usuário Incorreto no GitHub:** Se `gh` reportar um usuário diferente do esperado (ex: `nshsystem` em vez de `git-portalgeolog`), o token no diretório de configuração está incorreto. 
+- **Como corrigir:** Execute `echo "SEU_TOKEN" | GH_CONFIG_DIR=~/.gh-config1 gh auth login --with-token` para re-vincular o perfil ao token correto.
+- **Verificação:** Sempre valide com `GH_CONFIG_DIR=~/.gh-config1 gh api user --jq .login` antes de realizar operações de escrita (push/create repo).
+
 ---
 
 *Assinado: Certify Web Core Team (2026)*
