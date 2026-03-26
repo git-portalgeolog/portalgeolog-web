@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-geolog-blue: #001C3A; /* Azul Escuro profundo */
+    --color-geolog-secondary: #002D5C; /* Azul Médio */
+    --color-geolog-accent: #B0C4DE; /* Prata/Cinzento Metálico */
+    --color-geolog-white: #FFFFFF;
+    --color-geolog-dark: #001226; /* Azul quase preto para contrastes */
+    
+    --font-sans: var(--font-sora), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: var(--font-geist-mono);
+    --font-modal: var(--font-space-grotesk), "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+}
+
+:root {
+  --background: #FFFFFF;
+  --foreground: #001C3A;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  font-size: 15px; /* Slightly smaller base for better distribution */
+}
+
+/* Global font smoothing */
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-variant-ligatures: common-ligatures;
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+
+/* Reinforce on body and all text elements */
+body, h1, h2, h3, h4, h5, h6, p, span, div, button, input, select, textarea, label {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+}
+
+/* Chrome/Edge specific smoothing */
+@supports (-webkit-appearance: none) {
+  * {
+    -webkit-font-smoothing: subpixel-antialiased;
+    text-rendering: optimizeSpeed;
+  }
+}
+
+/* Safari specific */
+@supports (-webkit-backdrop-filter: none) {
+  * {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+/* Firefox specific */
+@supports (-moz-appearance: none) {
+  * {
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  .antialiased {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  .modal-font {
+    font-family: var(--font-modal);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-variant-ligatures: common-ligatures;
+    font-feature-settings: "kern" 1, "liga" 1;
+  }
+  
+  .modal-content {
+    font-family: var(--font-modal);
+    line-height: 1.6;
+    letter-spacing: 0.01em;
+    text-rendering: geometricPrecision;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .modal-content input:not([type='checkbox']):not([type='radio']),
+  .modal-content select,
+  .modal-content textarea,
+  .modal-content .geolog-select-trigger,
+  .modal-content .geolog-searchable-trigger {
+    border-width: 1px !important;
+    border-color: rgba(15, 23, 42, 0.2) !important;
+    background-color: rgba(248, 250, 252, 0.9) !important;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    transition: border-color 200ms ease, box-shadow 200ms ease, background-color 200ms ease;
+  }
+
+  .modal-content input:not([type='checkbox']):not([type='radio']):focus,
+  .modal-content select:focus,
+  .modal-content textarea:focus,
+  .modal-content .geolog-select-trigger:focus,
+  .modal-content .geolog-searchable-trigger:focus {
+    border-color: rgba(37, 99, 235, 0.8) !important;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+    background-color: #ffffff !important;
+  }
+}

@@ -1,0 +1,174 @@
+'use client';
+
+import React, { useState, useEffect, useRef } from 'react';
+import { MapPin, Loader2, Search } from 'lucide-react';
+
+interface Suggestion {
+  place_id: string;
+  display_name: string;
+  main_name: string;
+  sub_name: string;
+  lat: number;
+  lon: number;
+}
+
+interface GeologAddressInputProps {
+  label: string;
+  value: string;
+  onChange: (value: string, coords?: { lat: number; lng: number }) => void;
+  placeholder?: string;
+  required?: boolean;
+}
+
+export default function GeologAddressInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required = false
+}: GeologAddressInputProps) {
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const searchAddress = async (query: string) => {
+    if (query.length < 3) {
+      setSuggestions([]);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Nominatim Search - Very effective for neighborhoods (Palmital, etc.) 
+      // when using the 'q' parameter with countrycodes restriction
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=10&addressdetails=1&countrycodes=br&accept-language=pt-BR`
+      );
+      const data = await response.json();
+      
+      const formattedSuggestions = (data || []).map((item: any) => {
+        const addr = item.address || {};
+        
+        // Let's identify the most specific name (Street or Neighborhood)
+        const mainName = addr.road || addr.suburb || addr.neighbourhood || addr.city_district || item.display_name.split(',')[0];
+        
+        // Build the secondary label (Neighborhood, City, State)
+        const neighborhood = addr.suburb || addr.neighbourhood || addr.city_district || '';
+        const city = addr.city || addr.town || addr.municipality || '';
+        const state = addr.state || '';
+        
+        // Avoid repeating the mainName in the subLabel
+        const subParts = [neighborhood, city, state].filter(part => part && part !== mainName);
+        const subName = subParts.join(' - ');
+
+        return {
+          place_id: item.place_id.toString() || Math.random().toString(),
+          display_name: item.display_name,
+          main_name: mainName,
+          sub_name: subName || 'Brasil',
+          lat: parseFloat(item.lat),
+          lon: parseFloat(item.lon)
+        };
+      });
+
+      setSuggestions(formattedSuggestions);
+      setIsOpen(true);
+    } catch (error) {
+      console.error('Erro na busca Nominatim:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelect = (suggestion: Suggestion) => {
+    onChange(suggestion.display_name, {
+      lat: suggestion.lat,
+      lng: suggestion.lon
+    });
+    setIsOpen(false);
+    setSuggestions([]);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    onChange(val);
+
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    
+    debounceTimer.current = setTimeout(() => {
+      searchAddress(val);
+    }, 500); // 500ms delay to be gentle with the API
+  };
+
+  return (
+    <div className="space-y-2 group relative" ref={wrapperRef}>
+      <label className="text-[13px] font-bold text-slate-800 uppercase tracking-tight ml-1 group-focus-within:text-blue-600 transition-colors">
+        {label}
+      </label>
+      
+      <div className="relative">
+        <input
+          type="text"
+          value={value}
+          onChange={handleInputChange}
+          onFocus={() => (suggestions.length > 0 || value.length >= 3) && setIsOpen(true)}
+          placeholder={placeholder}
+          required={required}
+          className="w-full px-5 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white focus:ring-8 focus:ring-blue-500/5 transition-all shadow-sm pr-12 placeholder:text-slate-300"
+        />
+        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none">
+          {loading ? (
+            <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+          ) : (
+            <Search className="w-5 h-5 text-slate-300 group-focus-within:text-blue-600 transition-colors" />
+          )}
+        </div>
+      </div>
+
+      {isOpen && (value.length >= 3) && (
+        <div className="absolute z-[99999] top-full left-0 w-full mt-2 bg-white border-2 border-slate-100 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.15)] rounded-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="max-h-72 overflow-y-auto custom-scrollbar">
+            {!loading && suggestions.length === 0 ? (
+              <div className="px-6 py-8 text-center text-slate-400">
+                <p className="font-bold text-sm">Endereço não localizado</p>
+                <p className="text-[10px] font-black text-blue-600/50 uppercase tracking-widest mt-1">Dica: Digite o nome do bairro e a cidade</p>
+              </div>
+            ) : (
+              suggestions.map((item) => (
+                <div
+                  key={item.place_id + item.lat}
+                  onClick={() => handleSelect(item)}
+                  className="px-6 py-4 hover:bg-blue-50 cursor-pointer flex items-start gap-4 transition-colors border-b border-slate-50 last:border-none group/item"
+                >
+                  <div className="mt-1 p-1.5 bg-slate-100 rounded-lg group-hover/item:bg-blue-100 transition-colors">
+                    <MapPin size={16} className="text-slate-400 group-hover/item:text-blue-600" />
+                  </div>
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <span className="font-bold text-slate-800 text-[14px] leading-tight truncate">
+                      {item.main_name}
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight truncate">
+                      {item.sub_name}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
