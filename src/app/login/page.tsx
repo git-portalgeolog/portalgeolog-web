@@ -74,15 +74,15 @@ export default function Login() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, ease: "easeOut" }}
-          className="w-full max-w-md space-y-10"
+          className="w-full max-w-lg space-y-12"
         >
           <div className="text-center lg:text-left flex flex-col items-center lg:items-start">
              <div className="lg:hidden flex items-center gap-4 mb-10">
                <img src="/logo.png" alt="Geolog Logo" className="h-12 w-auto brightness-110" />
                <span className="text-2xl font-black tracking-tighter text-white uppercase">Portal Geolog</span>
              </div>
-             <h3 className="text-4xl font-black text-white tracking-tight">Login corporativo</h3>
-             <p className="text-blue-200/50 mt-3 font-medium">Faça o login com as suas credenciais para acessar o painel.</p>
+             <h3 className="text-5xl font-black text-white tracking-tight">Login corporativo</h3>
+             <p className="text-lg text-blue-200/70 mt-4 font-medium">Faça o login com as suas credenciais para acessar o painel.</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
@@ -100,7 +100,7 @@ export default function Login() {
             )}
             <div className="space-y-5">
               <div>
-                <label className="block text-xs font-black text-blue-200/40 uppercase tracking-widest mb-3 ml-1">E-mail corporativo</label>
+                <label className="block text-sm font-black text-blue-200/40 uppercase tracking-widest mb-4 ml-1">E-mail corporativo</label>
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                     <Mail className="h-5 w-5 text-blue-200/20 group-focus-within:text-cyan-400 transition-colors" />
@@ -110,14 +110,14 @@ export default function Login() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="block w-full pl-12 pr-4 py-4 border border-white/5 rounded-2xl bg-white/5 text-white placeholder:text-white/10 focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 outline-none transition-all text-sm font-bold"
+                    className="block w-full pl-14 pr-4 py-5 border border-white/5 rounded-2xl bg-white/5 text-white placeholder:text-white/10 focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 outline-none transition-all text-base font-bold"
                     placeholder="exemplo@geolog.com.br"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-black text-blue-200/40 uppercase tracking-widest mb-3 ml-1">Senha de acesso</label>
+                <label className="block text-sm font-black text-blue-200/40 uppercase tracking-widest mb-4 ml-1">Senha de acesso</label>
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                     <Lock className="h-5 w-5 text-blue-200/20 group-focus-within:text-cyan-400 transition-colors" />
@@ -127,7 +127,7 @@ export default function Login() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    className="block w-full pl-12 pr-4 py-4 border border-white/5 rounded-2xl bg-white/5 text-white placeholder:text-white/10 focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 outline-none transition-all text-sm font-bold"
+                    className="block w-full pl-14 pr-4 py-5 border border-white/5 rounded-2xl bg-white/5 text-white placeholder:text-white/10 focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 outline-none transition-all text-base font-bold"
                     placeholder="••••••••"
                   />
                 </div>
@@ -143,10 +143,10 @@ export default function Login() {
                 <div className="h-5 w-5 border-2 border-white/10 rounded-md peer-checked:bg-cyan-500 peer-checked:border-cyan-500 transition-all mr-3 flex items-center justify-center">
                    <div className="h-2 w-2 bg-white rounded-full opacity-0 peer-checked:opacity-100 transition-opacity"></div>
                 </div>
-                <span className="text-xs font-bold text-blue-200/40 group-hover:text-blue-200 transition-colors">Lembrar acesso</span>
+                <span className="text-sm font-bold text-blue-200/40 group-hover:text-blue-200 transition-colors">Lembrar acesso</span>
               </label>
 
-              <a href="#" className="text-xs font-black text-cyan-400/60 hover:text-cyan-400 uppercase tracking-widest transition-colors">
+              <a href="#" className="text-sm font-black text-cyan-400/60 hover:text-cyan-400 uppercase tracking-widest transition-colors">
                 Redefinir Senha
               </a>
             </div>
@@ -154,7 +154,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={isLoading}
-              className="group relative w-full flex justify-center py-4 px-4 border border-transparent text-sm font-black rounded-2xl text-white bg-blue-600 hover:bg-blue-500 focus:outline-none shadow-xl shadow-blue-900/40 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden"
+              className="group relative w-full flex justify-center py-5 px-4 border border-transparent text-base font-black rounded-2xl text-white bg-blue-600 hover:bg-blue-500 focus:outline-none shadow-xl shadow-blue-900/40 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden"
             >
               {isLoading ? (
                 <Loader2 className="w-6 h-6 animate-spin" />
