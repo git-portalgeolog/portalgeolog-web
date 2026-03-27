@@ -94,7 +94,8 @@ export interface OrderService {
   lucro: number;
   status: OSStatus;
   trecho: string;
-  rota: {
+  distancia?: number;
+  rota?: {
     waypoints: Waypoint[];
   };
 }

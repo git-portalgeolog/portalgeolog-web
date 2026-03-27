@@ -117,7 +117,7 @@ export default function OSOperationalPage() {
       solicitante: osItem.solicitante,
       tipoServico: osItem.tipoServico,
       motorista: osItem.motorista,
-      centroCusto: osItem.centroCusto || '',
+      centroCusto: osItem.centroCustoId || '',
       valorBruto: osItem.valorBruto,
       custo: osItem.custo,
       waypoints: osItem.rota?.waypoints?.length
@@ -1334,7 +1334,7 @@ export default function OSOperationalPage() {
                   </div>
                   <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
                     <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">Centro de custo</p>
-                    <p className="mt-2 text-sm font-bold text-slate-700">{viewingOS.centroCusto || 'Não informado'}</p>
+                    <p className="mt-2 text-sm font-bold text-slate-700">{clientes.find(c => c.id === viewingOS.clienteId)?.centrosCusto.find(cc => cc.id === viewingOS.centroCustoId)?.nome || 'Não informado'}</p>
                   </div>
                 </div>
               </div>
