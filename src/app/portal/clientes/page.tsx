@@ -1,56 +1,165 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useData, Cliente, Solicitante } from '@/context/DataContext';
+import { useData, Cliente, Solicitante, CentroCusto } from '@/context/DataContext';
 import StandardModal from '@/components/StandardModal';
-import { Plus, Search, Building, User, Trash2, ChevronRight, Mail, PlusCircle } from 'lucide-react';
+import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
+import { Plus, Search, Building, User, Trash2, ChevronRight, Edit2, Copy, Check, Hash, LayoutGrid } from 'lucide-react';
 
 export default function ClientesPage() {
-  const { clientes, solicitantes, addCliente, addSolicitante } = useData();
+  const { 
+    clientes, 
+    solicitantes, 
+    addCliente, 
+    updateCliente, 
+    deleteCliente, 
+    addSolicitante, 
+    updateSolicitante, 
+    deleteSolicitante,
+    addCentroCusto,
+    updateCentroCusto,
+    deleteCentroCusto
+  } = useData();
+
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Modal states
   const [isClienteModalOpen, setIsClienteModalOpen] = useState(false);
+  const [isCentroCustoModalOpen, setIsCentroCustoModalOpen] = useState(false);
   const [isSolicitanteModalOpen, setIsSolicitanteModalOpen] = useState(false);
+  
+  // Selection states
   const [selectedClienteId, setSelectedClienteId] = useState<string | null>(null);
+  const [selectedCentroCustoId, setSelectedCentroCustoId] = useState<string | null>(null);
+  
+  // Editing states
+  const [editingCliente, setEditingCliente] = useState<Cliente | null>(null);
+  const [editingCentroCusto, setEditingCentroCusto] = useState<CentroCusto | null>(null);
+  const [editingSolicitante, setEditingSolicitante] = useState<Solicitante | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Form states
   const [newCliente, setNewCliente] = useState({ nome: '', contato: '' });
-  const [newSolicitante, setNewSolicitante] = useState({ nome: '', clienteId: '' });
+  const [newCentroCusto, setNewCentroCusto] = useState({ nome: '', clienteId: '' });
+  const [newSolicitante, setNewSolicitante] = useState({ nome: '', clienteId: '', centroCustoId: '' });
 
   const filteredClientes = clientes.filter(c => 
     c.nome.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const selectedCliente = clientes.find(c => c.id === selectedClienteId);
+  const selectedCentroCusto = selectedCliente?.centrosCusto.find(cc => cc.id === selectedCentroCustoId);
+
+  // Handlers for Cliente
   const handleCreateCliente = (e: React.FormEvent) => {
     e.preventDefault();
     if (newCliente.nome) {
-      addCliente(newCliente.nome, newCliente.contato);
+      if (editingCliente) {
+        updateCliente(editingCliente.id, newCliente);
+        setEditingCliente(null);
+      } else {
+        addCliente(newCliente.nome, newCliente.contato);
+      }
       setNewCliente({ nome: '', contato: '' });
       setIsClienteModalOpen(false);
     }
   };
 
+  const handleEditCliente = (cliente: Cliente) => {
+    setEditingCliente(cliente);
+    setNewCliente({ nome: cliente.nome, contato: cliente.contato || '' });
+    setIsClienteModalOpen(true);
+  };
+
+  const handleDeleteCliente = (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este cliente?')) {
+      deleteCliente(id);
+      if (selectedClienteId === id) {
+        setSelectedClienteId(null);
+        setSelectedCentroCustoId(null);
+      }
+    }
+  };
+
+  // Handlers for Centro de Custo
+  const handleCreateCentroCusto = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newCentroCusto.nome && selectedClienteId) {
+      if (editingCentroCusto) {
+        updateCentroCusto(editingCentroCusto.id, { nome: newCentroCusto.nome, clienteId: selectedClienteId });
+        setEditingCentroCusto(null);
+      } else {
+        addCentroCusto(newCentroCusto.nome, selectedClienteId);
+      }
+      setNewCentroCusto({ nome: '', clienteId: '' });
+      setIsCentroCustoModalOpen(false);
+    }
+  };
+
+  const handleEditCentroCusto = (cc: CentroCusto) => {
+    setEditingCentroCusto(cc);
+    setNewCentroCusto({ nome: cc.nome, clienteId: cc.clienteId });
+    setIsCentroCustoModalOpen(true);
+  };
+
+  const handleDeleteCentroCusto = (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este Centro de Custo?')) {
+      deleteCentroCusto(id);
+      if (selectedCentroCustoId === id) setSelectedCentroCustoId(null);
+    }
+  };
+
+  // Handlers for Solicitante
   const handleCreateSolicitante = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newSolicitante.nome && newSolicitante.clienteId) {
-      addSolicitante(newSolicitante.nome, newSolicitante.clienteId);
-      setNewSolicitante({ nome: '', clienteId: '' });
+    if (newSolicitante.nome && selectedClienteId) {
+      const data = { 
+        nome: newSolicitante.nome, 
+        clienteId: selectedClienteId, 
+        centroCustoId: newSolicitante.centroCustoId || undefined 
+      };
+      if (editingSolicitante) {
+        updateSolicitante(editingSolicitante.id, { nome: data.nome, centroCustoId: data.centroCustoId });
+        setEditingSolicitante(null);
+      } else {
+        addSolicitante(data.nome, data.clienteId, data.centroCustoId);
+      }
+      setNewSolicitante({ nome: '', clienteId: '', centroCustoId: '' });
       setIsSolicitanteModalOpen(false);
     }
+  };
+
+  const handleEditSolicitante = (s: Solicitante) => {
+    setEditingSolicitante(s);
+    setNewSolicitante({ nome: s.nome, clienteId: s.clienteId, centroCustoId: s.centroCustoId || '' });
+    setIsSolicitanteModalOpen(true);
+  };
+
+  const handleDeleteSolicitante = (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este solicitante?')) {
+      deleteSolicitante(id);
+    }
+  };
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-[var(--color-geolog-blue)]">Clientes & Solicitantes</h1>
-          <p className="text-slate-500 font-medium text-sm">Gerencie sua base de clientes e os responsáveis por cada um.</p>
+          <h1 className="text-2xl font-black text-[var(--color-geolog-blue)] tracking-tight">Hierarquia Geolog</h1>
+          <p className="text-slate-500 font-medium text-base">Gerencie a estrutura completa: Empresa &gt; Centro de Custo &gt; Solicitantes.</p>
         </div>
         <button 
           onClick={() => setIsClienteModalOpen(true)}
-          className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-all text-sm"
+          className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer"
         >
           <Plus size={18} />
-          Novo Cliente
+          Nova Empresa
         </button>
       </div>
 
@@ -59,87 +168,190 @@ export default function ClientesPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
-            placeholder="Buscar por cliente..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+            placeholder="Buscar por empresa..."
+            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Clientes List */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* COL 1: Empresas */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[600px]">
           <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Base de Clientes</h3>
+            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Base de Clientes</h3>
           </div>
           <div className="flex-1 overflow-y-auto divide-y divide-slate-50">
             {filteredClientes.map((cliente) => (
-              <button
+              <div
                 key={cliente.id}
-                onClick={() => setSelectedClienteId(cliente.id)}
-                className={`w-full text-left p-5 transition-all flex items-center justify-between group ${
-                  selectedClienteId === cliente.id ? 'bg-blue-50 border-r-4 border-blue-600' : 'hover:bg-slate-50'
+                onClick={() => { setSelectedClienteId(cliente.id); setSelectedCentroCustoId(null); }}
+                className={`w-full text-left p-4 transition-all flex items-center justify-between group cursor-pointer ${
+                  selectedClienteId === cliente.id ? 'bg-blue-50/50' : 'hover:bg-slate-50'
                 }`}
               >
-                <div className="flex items-center gap-4">
-                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
-                     selectedClienteId === cliente.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'
+                <div className="flex items-center gap-3">
+                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                     selectedClienteId === cliente.id ? 'bg-blue-600 text-white scale-110 shadow-md' : 'bg-slate-100 text-slate-400'
                    }`}>
-                     <Building size={20} />
+                     <Building size={18} />
                    </div>
-                   <div>
-                     <p className="font-black text-slate-700">{cliente.nome}</p>
-                     <p className="text-xs text-slate-400 font-medium">{cliente.contato || 'Sem contato'}</p>
-                   </div>
+                    <div className="max-w-[340px]">
+                      <p className={`text-lg font-black truncate ${selectedClienteId === cliente.id ? 'text-blue-700' : 'text-slate-700'}`}>
+                        {cliente.nome}
+                      </p>
+                      <div 
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          if (cliente.contato) copyToClipboard(cliente.contato, cliente.id);
+                        }}
+                        className="flex items-center gap-1.5 text-base text-slate-400 font-medium hover:text-blue-600 transition-all cursor-pointer group/copy"
+                        title="Clique para copiar"
+                      >
+                         <span className="truncate">{cliente.contato || 'Sem contato'}</span>
+                         {cliente.contato && (
+                           copiedId === cliente.id 
+                             ? <Check size={14} className="text-green-500 shrink-0" />
+                             : <Copy size={14} className="opacity-0 group-hover/copy:opacity-100 transition-opacity shrink-0" />
+                         )}
+                      </div>
+                    </div>
                 </div>
-                <ChevronRight size={16} className={`text-slate-300 transition-transform ${selectedClienteId === cliente.id ? 'translate-x-1 text-blue-400' : ''}`} />
-              </button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleEditCliente(cliente); }}
+                      className="p-1.5 text-slate-400 hover:text-blue-600 transition-colors cursor-pointer"
+                    >
+                      <Edit2 size={18} />
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleDeleteCliente(cliente.id); }}
+                      className="p-1.5 text-slate-400 hover:text-red-500 transition-colors cursor-pointer"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                 </div>
+              </div>
             ))}
           </div>
         </div>
 
-        {/* Solicitantes List */}
+        {/* COL 2: Centros de Custo */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[600px]">
           <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">
-              Solicitantes {selectedClienteId ? ` - ${clientes.find(c => c.id === selectedClienteId)?.nome}` : ''}
-            </h3>
+            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Centros de Custo</h3>
             {selectedClienteId && (
               <button 
                 onClick={() => {
-                  setNewSolicitante({ ...newSolicitante, clienteId: selectedClienteId });
-                  setIsSolicitanteModalOpen(true);
+                  setNewCentroCusto({ ...newCentroCusto, clienteId: selectedClienteId });
+                  setIsCentroCustoModalOpen(true);
                 }}
-                className="text-[10px] font-black text-blue-600 hover:text-blue-700 flex items-center gap-1 uppercase tracking-wider"
+                className="p-1 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-all cursor-pointer"
               >
-                <Plus size={12} strokeWidth={3} /> Add Solicitante
+                <Plus size={14} strokeWidth={3} />
               </button>
             )}
           </div>
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 overflow-y-auto">
             {!selectedClienteId ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3 grayscale opacity-50">
-                <User size={48} strokeWidth={1} />
-                <p className="text-sm font-bold tracking-tight">Selecione um cliente para ver os solicitantes.</p>
+              <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-2 opacity-50">
+                <LayoutGrid size={40} />
+                <p className="text-[13px] font-black uppercase">Selecione uma empresa</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {solicitantes.filter(s => s.clienteId === selectedClienteId).map(s => (
-                  <div key={s.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 group">
+              <div className="divide-y divide-slate-50">
+                {selectedCliente?.centrosCusto.map(cc => (
+                  <div 
+                    key={cc.id}
+                    onClick={() => setSelectedCentroCustoId(cc.id)}
+                    className={`p-4 flex items-center justify-between group cursor-pointer transition-all ${
+                      selectedCentroCustoId === cc.id ? 'bg-emerald-50/50' : 'hover:bg-slate-50'
+                    }`}
+                  >
                     <div className="flex items-center gap-3">
-                       <div className="w-8 h-8 bg-white border border-slate-200 rounded-lg flex items-center justify-center text-blue-600">
-                         <User size={16} />
-                       </div>
-                       <span className="text-sm font-bold text-slate-700">{s.nome}</span>
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                        selectedCentroCustoId === cc.id ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400'
+                      }`}>
+                        <Hash size={14} />
+                      </div>
+                      <span className={`text-lg font-black ${selectedCentroCustoId === cc.id ? 'text-emerald-700' : 'text-slate-600'}`}>
+                        {cc.nome}
+                      </span>
                     </div>
-                    <button className="p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">
-                       <Trash2 size={16} />
-                    </button>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                      <button onClick={(e) => { e.stopPropagation(); handleEditCentroCusto(cc); }} className="p-1.5 text-slate-400 hover:text-emerald-600 cursor-pointer">
+                        <Edit2 size={18} />
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteCentroCusto(cc.id); }} className="p-1.5 text-slate-400 hover:text-red-500 cursor-pointer">
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
                   </div>
                 ))}
-                {solicitantes.filter(s => s.clienteId === selectedClienteId).length === 0 && (
-                  <p className="text-center py-8 text-slate-400 text-sm italic">Nenhum solicitante cadastrado para este cliente.</p>
+                {selectedCliente?.centrosCusto.length === 0 && (
+                  <p className="text-center py-8 text-slate-400 text-[13px] font-bold uppercase italic px-6">Sem centros de custo.</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* COL 3: Solicitantes */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[600px]">
+          <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Solicitantes</h3>
+            {selectedClienteId && (
+              <button 
+                onClick={() => {
+                  setNewSolicitante({ ...newSolicitante, clienteId: selectedClienteId, centroCustoId: selectedCentroCustoId || '' });
+                  setIsSolicitanteModalOpen(true);
+                }}
+                className="p-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-600 hover:text-white transition-all cursor-pointer"
+              >
+                <Plus size={14} strokeWidth={3} />
+              </button>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {!selectedClienteId ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-2 opacity-50">
+                <User size={40} />
+                <p className="text-[13px] font-black uppercase">Selecione uma empresa</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-50">
+                {solicitantes
+                  .filter(s => s.clienteId === selectedClienteId && (!selectedCentroCustoId || s.centroCustoId === selectedCentroCustoId))
+                  .map(s => (
+                    <div key={s.id} className="p-4 flex items-center justify-between group hover:bg-slate-50 transition-all">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-slate-100 border border-slate-200 rounded-lg flex items-center justify-center text-slate-400">
+                          <User size={14} />
+                        </div>
+                        <div>
+                          <p className="text-lg font-black text-slate-700">{s.nome}</p>
+                          {s.centroCustoId && (
+                            <p className="text-xs font-medium text-blue-400 uppercase tracking-wider flex items-center gap-1">
+                              <Hash size={8} /> {selectedCliente?.centrosCusto.find(cc => cc.id === s.centroCustoId)?.nome}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                        <button onClick={() => handleEditSolicitante(s)} className="p-1.5 text-slate-400 hover:text-blue-600 cursor-pointer">
+                          <Edit2 size={18} />
+                        </button>
+                        <button onClick={() => handleDeleteSolicitante(s.id)} className="p-1.5 text-slate-400 hover:text-red-500 cursor-pointer">
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                {solicitantes.filter(s => s.clienteId === selectedClienteId && (!selectedCentroCustoId || s.centroCustoId === selectedCentroCustoId)).length === 0 && (
+                  <p className="text-center py-8 text-slate-400 text-[13px] font-bold uppercase italic px-6">
+                    {selectedCentroCustoId ? 'Ninguém neste centro de custo.' : 'Sem solicitantes cadastrados.'}
+                  </p>
                 )}
               </div>
             )}
@@ -147,90 +359,80 @@ export default function ClientesPage() {
         </div>
       </div>
 
-      {/* Modal Novo Cliente */}
+      {/* Modals are unchanged except for field updates */}
       {isClienteModalOpen && (
         <StandardModal 
-          onClose={() => setIsClienteModalOpen(false)} 
-          title="Novo Cliente" 
-          subtitle="Cadastro de nova empresa parceira"
+          onClose={() => { setIsClienteModalOpen(false); setEditingCliente(null); setNewCliente({ nome: '', contato: '' }); }} 
+          title={editingCliente ? "Editar Empresa" : "Nova Empresa"} 
           icon={<Building size={24} />}
+          maxWidthClassName="max-w-2xl"
         >
-          <form onSubmit={handleCreateCliente} className="space-y-8">
-            <div className="space-y-6">
-              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                  <Building size={20} className="text-slate-500" /> Dados da Empresa
-                </h3>
+          <form onSubmit={handleCreateCliente} className="space-y-6">
+            <div className="grid grid-cols-1 gap-4">
+              <div className="space-y-1">
+                <label className="text-sm font-black text-slate-400 uppercase tracking-widest ml-1">Razão Social / Nome</label>
+                <input required className="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-blue-600" value={newCliente.nome} onChange={(e) => setNewCliente({ ...newCliente, nome: e.target.value })} />
               </div>
-
-              <div className="grid grid-cols-1 gap-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome da Empresa</label>
-                  <input 
-                    required
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                    placeholder="Ex: Oceanica"
-                    value={newCliente.nome}
-                    onChange={(e) => setNewCliente({ ...newCliente, nome: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail / Contato</label>
-                  <input 
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                    placeholder="Ex: financeiro@empresa.com"
-                    value={newCliente.contato}
-                    onChange={(e) => setNewCliente({ ...newCliente, contato: e.target.value })}
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="text-sm font-black text-slate-400 uppercase tracking-widest ml-1">Contato principal</label>
+                <input className="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-blue-600" value={newCliente.contato} onChange={(e) => setNewCliente({ ...newCliente, contato: e.target.value })} />
               </div>
             </div>
-
-            <button className="w-full py-4 bg-[var(--color-geolog-blue)] text-white font-black rounded-2xl shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest mt-4">
-              Salvar Cliente
-            </button>
+            <button className="w-full py-4.5 bg-blue-600 text-white font-black rounded-xl shadow-lg hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest cursor-pointer">Salvar Empresa</button>
           </form>
         </StandardModal>
       )}
 
-      {/* Modal Novo Solicitante */}
+      {isCentroCustoModalOpen && (
+        <StandardModal 
+          onClose={() => { setIsCentroCustoModalOpen(false); setEditingCentroCusto(null); setNewCentroCusto({ nome: '', clienteId: '' }); }} 
+          title={editingCentroCusto ? "Editar Centro" : "Novo Centro"} 
+          icon={<Hash size={24} />}
+          maxWidthClassName="max-w-2xl"
+        >
+          <form onSubmit={handleCreateCentroCusto} className="space-y-6">
+            <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl mb-4">
+              <span className="text-xs font-black text-emerald-600 uppercase">Vinculando à empresa:</span>
+              <p className="font-black text-lg text-slate-700">{selectedCliente?.nome}</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-black text-slate-400 uppercase tracking-widest ml-1">Nome do Centro de Custo</label>
+              <input required placeholder="Ex: Logística" className="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-emerald-600" value={newCentroCusto.nome} onChange={(e) => setNewCentroCusto({ ...newCentroCusto, nome: e.target.value })} />
+            </div>
+            <button className="w-full py-4.5 bg-emerald-600 text-white font-black rounded-xl shadow-lg hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest cursor-pointer">Salvar Centro de Custo</button>
+          </form>
+        </StandardModal>
+      )}
+
       {isSolicitanteModalOpen && (
         <StandardModal 
-          onClose={() => setIsSolicitanteModalOpen(false)} 
-          title="Novo Solicitante" 
-          subtitle="Responsável técnico ou operacional"
+          onClose={() => { setIsSolicitanteModalOpen(false); setEditingSolicitante(null); setNewSolicitante({ nome: '', clienteId: '', centroCustoId: '' }); }} 
+          title={editingSolicitante ? "Editar Solicitante" : "Novo Solicitante"} 
           icon={<User size={24} />}
+          maxWidthClassName="max-w-2xl"
         >
-          <form onSubmit={handleCreateSolicitante} className="space-y-8">
-            <div className="space-y-6">
-              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                  <User size={20} className="text-slate-500" /> Informações Pessoais
-                </h3>
-              </div>
-
-              <div className="space-y-6">
-                 <div className="space-y-1.5 px-6 py-4 bg-blue-50 border-2 border-blue-100 rounded-xl">
-                   <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Vinculado a:</span>
-                   <p className="font-black text-slate-700 text-lg">{clientes.find(c => c.id === selectedClienteId)?.nome}</p>
-                 </div>
-                
-                <div className="space-y-2">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome do Solicitante</label>
-                  <input 
-                    required
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                    placeholder="Ex: Niedja Oliveira"
-                    value={newSolicitante.nome}
-                    onChange={(e) => setNewSolicitante({ ...newSolicitante, nome: e.target.value })}
-                  />
-                </div>
-              </div>
+          <form onSubmit={handleCreateSolicitante} className="space-y-6">
+            <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl mb-4">
+              <span className="text-xs font-black text-slate-400 uppercase">Vinculando à empresa:</span>
+              <p className="font-black text-lg text-slate-700">{selectedCliente?.nome}</p>
             </div>
-
-            <button className="w-full py-4 bg-blue-600 text-white font-black rounded-2xl shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest mt-4">
-              Salvar Solicitante
-            </button>
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-sm font-black text-slate-400 uppercase tracking-widest ml-1">Nome Completo</label>
+                <input required className="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-blue-500" value={newSolicitante.nome} onChange={(e) => setNewSolicitante({ ...newSolicitante, nome: e.target.value })} />
+              </div>
+              <GeologSearchableSelect 
+                label="Vincular a um Centro de Custo"
+                value={newSolicitante.centroCustoId}
+                onChange={(id) => setNewSolicitante({ ...newSolicitante, centroCustoId: id })}
+                placeholder="Pesquisar centro de custo..."
+                options={[
+                  { id: '', nome: 'Sem centro de custo específico' },
+                  ...(selectedCliente?.centrosCusto.map(cc => ({ id: cc.id, nome: cc.nome })) || [])
+                ]}
+              />
+            </div>
+            <button className="w-full py-4.5 bg-slate-800 text-white font-black rounded-xl shadow-lg hover:bg-blue-600 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest cursor-pointer">Salvar Solicitante</button>
           </form>
         </StandardModal>
       )}

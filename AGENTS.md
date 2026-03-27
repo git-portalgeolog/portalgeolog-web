@@ -67,6 +67,7 @@ Ao buscar por funcionalidades centrais, priorize:
 1. **Auth/Login:** `src/pages/login/`, `src/components/auth/`, `src/hooks/useAuth.ts`.
 2. **Traduções:** `public/locales/` ou `src/messages/`.
 3. **Serviços de API:** `src/services/` ou `src/api/`.
+4. **Envio de E-mails:** `src/app/api/users/route.ts` (exemplo de integração com Resend).
 
 ---
 
@@ -79,11 +80,40 @@ Ao buscar por funcionalidades centrais, priorize:
 
 ---
 
-## 🧠 6. Integração com IDE (Cursor/Windsurf)
+## 🧠 6. Integração com IDE
 
-- **Precedência:** Arquivos `.cursorrules` ou instruções específicas do `Windsurf` têm prioridade sobre este documento em caso de conflito técnico.
 - **Preservação:** Não apague comentários de lógica complexa ou anotações de outros desenvolvedores sem justificativa clara no chat.
 - **Documentação de Exceção:** Se encontrar um padrão que viole este guia mas seja necessário para o projeto, comente no topo do arquivo e sugira a atualização deste `AGENTS.md`.
+
+---
+
+## 🔔 7. Sistema de Notificações & RBAC (Real-time)
+
+O sistema utiliza uma arquitetura baseada em banco de dados para notificações, garantindo segurança e separação entre usuários **Internos** e **Gestores**.
+
+### Arquitetura de Notificações
+- **Tabela Mestre:** `public.app_notifications`. Nunca dispare `toast()` no frontend baseado em listeners de tabelas de negócio (ex: `clientes`, `os`).
+- **Geração de Mensagens:** Exclusivamente via **PostgreSQL Triggers**. Toda lógica de *o que* e *para quem* notificar deve residir no banco de dados.
+- **Segurança (RLS):** A filtragem de público (`target_audience`) é feita via **Row-Level Security**. Internos nunca recebem pacotes de Gestores e vice-versa.
+- **Frontend (Listener):** O `DataContext.tsx` possui um único listener dedicado a `app_notifications`. Ele apenas renderiza o que o banco envia.
+
+### Controle de Acesso (RBAC)
+- **Tabela de Perfis:** `public.user_roles`.
+- **Sincronização:** O `AuthContext.tsx` monitora mudanças na categoria do usuário logado em tempo real. Se um acesso for revogado, o sistema deve deslogar o usuário imediatamente.
+- **Caminho da Gestão:** `/portal/config` é a página central para administração desses perfis.
+
+---
+
+## 🛡 8. Segurança e Operações de Admin (Supabase & Resend)
+
+### Supabase Admin
+- **Escalação de Privilégios:** Operações de criação/modificação de usuários `auth` devem ser feitas exclusivamente via Server Actions ou API Routes usando a `SUPABASE_SERVICE_ROLE_KEY`.
+- **Bypass de RLS:** A Service Role ignora todas as políticas de RLS. Use com extrema cautela e valide permissões de admin no código antes de executar.
+
+### Comunicação (Resend)
+- **Key Management:** A `RESEND_API_KEY` deve residir apenas no `.env.local`. Nunca exponha essa chave no cliente.
+- **E-mails Transacionais:** Use templates HTML profissionais para boas-vindas, redefinição de senha e alertas críticos.
+- **Atomicidade:** Sempre que criar um usuário no Auth, registre-o simultaneamente na tabela `user_roles` e dispare o e-mail de boas-vindas com as credenciais.
 
 ---
 
@@ -120,6 +150,7 @@ Certifique-se de que o `user.name` e `user.email` no repositório local (`git co
 
 ### Vercel CLI
 - **Autenticação:** Agentes devem usar o flag `--token` com o **Vercel Access Token** do usuário para operações de deploy, link e configuração de variáveis.
+- **Controle de Deploy:** Agentes NUNCA devem realizar deploys (seja para `test` ou `main`) sem a solicitação explícita do usuário no chat.
 - **Comandos Principais:**
   - `vercel link --yes --token $VERCEL_TOKEN` (conecta a pasta ao projeto).
   - `vercel env add <KEY> <ENV> --token $VERCEL_TOKEN` (adiciona variáveis ao dashboard).

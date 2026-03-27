@@ -4,6 +4,7 @@ import "./globals.css";
 
 import { AuthProvider } from "@/context/AuthContext";
 import { DataProvider } from "@/context/DataContext";
+import { Toaster } from 'sonner';
 
 const sora = Sora({
   variable: "--font-sora",
@@ -42,6 +43,7 @@ export default function RootLayout({
         <AuthProvider>
           <DataProvider>
             {children}
+            <Toaster position="top-right" richColors />
           </DataProvider>
         </AuthProvider>
       </body>

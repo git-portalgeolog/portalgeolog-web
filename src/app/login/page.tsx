@@ -134,18 +134,7 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-2">
-              <label className="flex items-center cursor-pointer group">
-                <input
-                  type="checkbox"
-                  className="hidden peer"
-                />
-                <div className="h-5 w-5 border-2 border-white/10 rounded-md peer-checked:bg-cyan-500 peer-checked:border-cyan-500 transition-all mr-3 flex items-center justify-center">
-                   <div className="h-2 w-2 bg-white rounded-full opacity-0 peer-checked:opacity-100 transition-opacity"></div>
-                </div>
-                <span className="text-sm font-bold text-blue-200/40 group-hover:text-blue-200 transition-colors">Lembrar acesso</span>
-              </label>
-
+            <div className="flex items-center justify-end pt-2">
               <a href="#" className="text-sm font-black text-cyan-400/60 hover:text-cyan-400 uppercase tracking-widest transition-colors">
                 Redefinir Senha
               </a>

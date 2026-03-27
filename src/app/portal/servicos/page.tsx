@@ -1,20 +1,47 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useData } from '@/context/DataContext';
-import { Plus, Package, DollarSign, Trash2 } from 'lucide-react';
+import { useData, TipoServico } from '@/context/DataContext';
+import { Plus, Package, DollarSign, Trash2, Edit2, X } from 'lucide-react';
 import StandardModal from '@/components/StandardModal';
+import { toast } from 'sonner';
 
 export default function ServicosPage() {
-  const { servicos, addServico } = useData();
+  const { servicos, addServico, updateServico, deleteServico } = useData();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingServico, setEditingServico] = useState<TipoServico | null>(null);
   const [formData, setFormData] = useState({ nome: '', precoBase: 0 });
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleOpenModal = (servico?: TipoServico) => {
+    if (servico) {
+      setEditingServico(servico);
+      setFormData({ nome: servico.nome, precoBase: servico.precoBase });
+    } else {
+      setEditingServico(null);
+      setFormData({ nome: '', precoBase: 0 });
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    addServico(formData.nome, formData.precoBase);
-    setFormData({ nome: '', precoBase: 0 });
+    if (!formData.nome) return;
+
+    if (editingServico) {
+      updateServico(editingServico.id, formData);
+    } else {
+      addServico(formData.nome, formData.precoBase);
+    }
+    
     setIsModalOpen(false);
+    setEditingServico(null);
+    setFormData({ nome: '', precoBase: 0 });
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este tipo de serviço?')) {
+      deleteServico(id);
+    }
   };
 
   const formatCurrency = (value: number) => {
@@ -29,64 +56,83 @@ export default function ServicosPage() {
           <p className="text-slate-500 font-medium text-sm">Defina os serviços oferecidos e seus preços base.</p>
         </div>
         <button 
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-2.5 rounded-xl font-bold hover:scale-105 active:scale-95 transition-all text-sm"
+          onClick={() => handleOpenModal()}
+          className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-2.5 rounded-xl font-bold hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer shadow-lg shadow-blue-900/20"
         >
           <Plus size={18} />
           Novo Serviço
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-[2rem] border border-slate-200 shadow-xl shadow-slate-200/40 overflow-hidden">
         <table className="w-full text-left">
           <thead>
-            <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Serviço</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Preço Base</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Ações</th>
+            <tr className="bg-slate-50/80 border-b border-slate-200">
+              <th className="px-8 py-5 text-[11px] font-black uppercase tracking-widest text-slate-400">Serviço</th>
+              <th className="px-8 py-5 text-[11px] font-black uppercase tracking-widest text-slate-400">Preço Base</th>
+              <th className="px-8 py-5 text-[11px] font-black uppercase tracking-widest text-slate-400 text-center">Ações de Gestão</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {servicos.map((s) => (
-              <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
-                      <Package size={18} />
+            {servicos.length === 0 ? (
+               <tr>
+                 <td colSpan={3} className="text-center py-20 text-slate-400 font-bold italic">Nenhum serviço cadastrado.</td>
+               </tr>
+            ) : (
+              servicos.map((s) => (
+                <tr key={s.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <td className="px-8 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shadow-sm">
+                        <Package size={18} />
+                      </div>
+                      <span className="font-bold text-slate-800 text-sm">{s.nome}</span>
                     </div>
-                    <span className="font-bold text-slate-700">{s.nome}</span>
-                  </div>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-2 text-emerald-600">
-                    <DollarSign size={14} strokeWidth={3} />
-                    <span className="text-sm font-black">{formatCurrency(s.precoBase)}</span>
-                  </div>
-                </td>
-                <td className="px-6 py-4 text-center">
-                  <button className="p-2 text-slate-300 hover:text-red-500 transition-all">
-                    <Trash2 size={16} />
-                  </button>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-8 py-4">
+                    <div className="flex items-center gap-2 text-emerald-600 font-bold text-sm">
+                      <DollarSign size={14} strokeWidth={3} />
+                      <span>{formatCurrency(s.precoBase)}</span>
+                    </div>
+                  </td>
+                  <td className="px-8 py-4">
+                    <div className="flex items-center justify-center gap-2">
+                      <button 
+                        onClick={() => handleOpenModal(s)}
+                        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
+                        title="Editar Serviço"
+                      >
+                        <Edit2 size={18} />
+                      </button>
+                      <button 
+                        onClick={() => handleDelete(s.id)}
+                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
+                        title="Excluir Serviço"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
 
-      {/* Modal Novo Serviço */}
+      {/* Modal Criar/Editar Serviço */}
       {isModalOpen && (
         <StandardModal 
           onClose={() => setIsModalOpen(false)} 
-          title="Novo Tipo de Serviço" 
-          subtitle="Definição de novo item no catálogo de serviços"
+          title={editingServico ? "Editar Tipo de Serviço" : "Novo Tipo de Serviço"} 
+          subtitle={editingServico ? "Atualize as definições do serviço no catálogo" : "Definição de novo item no catálogo de serviços"}
           icon={<Package size={24} />}
           maxWidthClassName="max-w-2xl"
         >
-          <form onSubmit={handleCreate} className="space-y-8">
+          <form onSubmit={handleSubmit} className="space-y-8">
             <div className="space-y-6">
-              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+              <div className="flex items-center border-b-2 border-slate-100 pb-4">
+                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3">
                   <Package size={20} className="text-slate-500" /> Detalhes do Serviço
                 </h3>
               </div>
@@ -97,7 +143,7 @@ export default function ServicosPage() {
                   <input 
                     required 
                     placeholder="Ex: Ônibus Sleep In" 
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
+                    className="w-full px-5 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-sm text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
                     value={formData.nome} 
                     onChange={e => setFormData({...formData, nome: e.target.value})} 
                   />
@@ -106,11 +152,11 @@ export default function ServicosPage() {
                 <div className="space-y-2">
                   <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Preço Base Sugerido (R$)</label>
                   <div className="relative">
-                    <div className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 font-bold">R$</div>
+                    <div className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">R$</div>
                     <input 
                       type="number" 
                       step="0.01" 
-                      className="w-full pl-14 pr-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
+                      className="w-full pl-12 pr-5 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-sm text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
                       value={formData.precoBase || ''} 
                       onChange={e => setFormData({...formData, precoBase: parseFloat(e.target.value) || 0})} 
                     />
@@ -119,9 +165,18 @@ export default function ServicosPage() {
               </div>
             </div>
 
-            <button className="w-full py-4 bg-emerald-600 text-white font-black rounded-2xl shadow-lg shadow-emerald-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest mt-4">
-              Criar Serviço
-            </button>
+            <div className="flex gap-4">
+              <button 
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="flex-1 py-4 bg-slate-100 text-slate-500 font-black rounded-2xl hover:bg-slate-200 transition-all text-sm uppercase tracking-widest cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button className="flex-[2] py-4 bg-emerald-600 text-white font-black rounded-2xl shadow-lg shadow-emerald-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest cursor-pointer">
+                {editingServico ? 'Salvar Alterações' : 'Criar Serviço'}
+              </button>
+            </div>
           </form>
         </StandardModal>
       )}

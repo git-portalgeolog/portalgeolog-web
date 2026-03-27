@@ -53,7 +53,7 @@ type OSFormData = {
 };
 
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, servicos, passageiros, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente } = useData();
+  const { osList, clientes, solicitantes, servicos, passageiros, drivers, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente } = useData();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQuickPassengerModalOpen, setIsQuickPassengerModalOpen] = useState(false);
   const [quickPassengerTarget, setQuickPassengerTarget] = useState<{ waypointIndex: number; passengerId: string } | null>(null);
@@ -192,14 +192,12 @@ export default function OSOperationalPage() {
   };
   const [quickPassengerForm, setQuickPassengerForm] = useState(initialQuickPassengerForm);
   const [quickPassengerErrors, setQuickPassengerErrors] = useState<{ celular?: string }>({});
-  const driverOptions = useMemo(() => (
-    [
-      { id: 'João Silva', nome: 'João Silva' },
-      { id: 'Carlos Santos', nome: 'Carlos Santos' },
-      { id: 'Pedro Oliveira', nome: 'Pedro Oliveira' },
-      { id: 'Maria Costa', nome: 'Maria Costa' }
-    ]
-  ), []);
+  const driverOptions = useMemo(() => {
+    return drivers.filter(d => d.status !== 'inactive').map(d => ({
+      id: d.name,
+      nome: d.name
+    }));
+  }, [drivers]);
 
   const formatCPF = (value: string) => {
     const digits = value.replace(/\D/g, '').slice(0, 11);

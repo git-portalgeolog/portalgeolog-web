@@ -35,12 +35,17 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // protected routes can be handled here
-  // if (!user && request.nextUrl.pathname.startsWith('/protected')) {
-  //   const url = request.nextUrl.clone()
-  //   url.pathname = '/login'
-  //   return NextResponse.redirect(url)
-  // }
+  if (!user && request.nextUrl.pathname.startsWith('/portal')) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
+  }
+
+  if (user && request.nextUrl.pathname === '/login') {
+    const url = request.nextUrl.clone()
+    url.pathname = '/portal/dashboard'
+    return NextResponse.redirect(url)
+  }
 
   return supabaseResponse
 }

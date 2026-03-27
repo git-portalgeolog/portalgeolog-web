@@ -1,6 +1,36 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { fetchClientes, 
+  fetchSolicitantes, 
+  fetchFornecedores, 
+  fetchServicos, 
+  fetchPassageiros,
+  fetchOSList,
+  fetchDrivers,
+  insertCliente,
+  updateClienteInDB,
+  deleteClienteFromDB,
+  insertSolicitante,
+  updateSolicitanteInDB,
+  deleteSolicitanteFromDB,
+  insertCentroCusto,
+  updateCentroCustoInDB,
+  deleteCentroCustoFromDB,
+  insertFornecedor,
+  insertServico,
+  updateServicoInDB,
+  deleteServicoFromDB,
+  insertPassageiro,
+  insertOS,
+  updateOSInDB,
+  updateOSStatusInDB
+} from '@/lib/supabase/queries';
+import { toast } from 'sonner';
+import { useAuth } from './AuthContext';
+
+// ── Interfaces ──────────────────────────────────────────
 
 export interface Cliente {
   id: string;
@@ -12,12 +42,14 @@ export interface Cliente {
 export interface CentroCusto {
   id: string;
   nome: string;
+  clienteId: string;
 }
 
 export interface Solicitante {
   id: string;
   nome: string;
   clienteId: string;
+  centroCustoId?: string;
 }
 
 export interface Fornecedor {
@@ -27,11 +59,49 @@ export interface Fornecedor {
   telefone?: string;
 }
 
-export interface PassageiroEndereco {
+export interface TipoServico {
   id: string;
-  rotulo: string;
-  enderecoCompleto: string;
-  referencia?: string;
+  nome: string;
+  precoBase: number;
+}
+
+export interface Waypoint {
+  label: string;
+  lat: number | null;
+  lng: number | null;
+  passengers: {
+    id: string;
+    solicitanteId: string;
+    nome: string;
+  }[];
+}
+
+export interface OrderService {
+  id: string;
+  protocolo: string;
+  os: string;
+  data: string;
+  hora: string;
+  horaExtra?: string;
+  clienteId: string;
+  solicitante: string;
+  centroCustoId?: string;
+  motorista: string;
+  tipoServico: string;
+  valorBruto: number;
+  custo: number;
+  imposto: number;
+  lucro: number;
+  status: OSStatus;
+  trecho: string;
+  rota: {
+    waypoints: Waypoint[];
+  };
+}
+
+export interface OSStatus {
+  operacional: 'Pendente' | 'Aguardando' | 'Em Rota' | 'Finalizado' | 'Cancelado';
+  financeiro: 'Pendente' | 'Pago' | 'Faturado';
 }
 
 export interface Passageiro {
@@ -43,73 +113,77 @@ export interface Passageiro {
   enderecos: PassageiroEndereco[];
 }
 
-export type NovoPassageiroInput = Omit<Passageiro, 'id' | 'enderecos'> & {
-  enderecos: Omit<PassageiroEndereco, 'id'>[];
-};
-
-export interface TipoServico {
+export interface PassageiroEndereco {
   id: string;
-  nome: string;
-  precoBase: number;
+  rotulo: string;
+  enderecoCompleto: string;
+  referencia?: string;
 }
 
-export interface OSStatus {
-  operacional: 'Pendente' | 'Aguardando' | 'Em Rota' | 'Finalizado' | 'Cancelado';
-  financeiro: 'Pendente' | 'Faturado';
+export interface NovoPassageiroInput {
+  nomeCompleto: string;
+  email: string;
+  celular: string;
+  cpf: string;
+  enderecos: {
+    rotulo?: string;
+    enderecoCompleto: string;
+    referencia?: string;
+  }[];
 }
 
-export interface Waypoint {
-  label: string;
-  lat?: number | null;
-  lng?: number | null;
-  passengers?: { id: string; solicitanteId: string; nome: string; }[];
-}
-
-export interface Rota {
-  waypoints: Waypoint[];
-}
-
-export interface OrderService {
+export interface Driver {
   id: string;
-  protocolo: string;
-  data: string;
-  hora?: string;
-  horaExtra?: string;
-  os: string;
-  clienteId: string;
-  solicitante: string;
-  centroCusto?: string;
-  tipoServico: string;
-  trecho: string;
-  motorista: string;
-  valorBruto: number;
-  imposto: number;
-  custo: number;
-  lucro: number;
-  status: OSStatus;
-  distancia?: string;
-  rota?: Rota;
+  name: string;
+  status: 'active' | 'inactive';
+  phone?: string;
+  docs?: DriverDoc[];
 }
+
+export interface DriverDoc {
+  id: string;
+  type: string;
+  status: 'valid' | 'expired' | 'pending';
+  expiryDate?: string;
+}
+
+// ── Contexto ─────────────────────────────────────────────
 
 interface DataContextType {
   clientes: Cliente[];
   solicitantes: Solicitante[];
   fornecedores: Fornecedor[];
   servicos: TipoServico[];
-  osList: OrderService[];
   passageiros: Passageiro[];
+  osList: OrderService[];
+  drivers: Driver[];
+  loading: boolean;
   
-  // Actions
   addCliente: (nome: string, contato?: string) => void;
-  addSolicitante: (nome: string, clienteId: string) => void;
+  updateCliente: (id: string, updates: Partial<Cliente>) => void;
+  deleteCliente: (id: string) => void;
+  
+  addSolicitante: (nome: string, clienteId: string, centroCustoId?: string) => void;
+  updateSolicitante: (id: string, updates: Partial<Solicitante>) => void;
+  deleteSolicitante: (id: string) => void;
+  
   addPassageiro: (passageiro: NovoPassageiroInput) => Passageiro;
   addFornecedor: (nome: string, tipo: string, telefone?: string) => void;
+  
+  // Centros de Custo
+  addCentroCusto: (nome: string, clienteId: string) => void;
+  updateCentroCusto: (id: string, updates: Partial<CentroCusto>) => void;
+  deleteCentroCusto: (id: string) => void;
+  
   addServico: (nome: string, precoBase: number) => void;
+  updateServico: (id: string, updates: Partial<TipoServico>) => void;
+  deleteServico: (id: string) => void;
+  
   addOS: (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => OrderService;
   updateOS: (id: string, osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => void;
   updateOSStatus: (id: string, updates: Partial<OSStatus>) => void;
   
-  // Helpers
+  refreshData: () => Promise<void>;
   getSolicitantesByCliente: (clienteId: string) => Solicitante[];
   getCentrosCustoByCliente: (clienteId: string) => CentroCusto[];
 }
@@ -117,253 +191,294 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [clientes, setClientes] = useState<Cliente[]>([
-    { id: 'c1', nome: 'Petrobras', contato: 'operacoes@petrobras.com.br', centrosCusto: [
-      { id: 'c1-op', nome: 'Operações Offshore' },
-      { id: 'c1-log', nome: 'Logística Macaé' },
-      { id: 'c1-suporte', nome: 'Suporte Base Galeão' },
-    ] },
-    { id: 'c2', nome: 'Equinor', contato: 'logistics@equinor.com', centrosCusto: [
-      { id: 'c2-op', nome: 'Operações Peregrino' },
-      { id: 'c2-manut', nome: 'Manutenção Campos Basin' },
-    ] },
-    { id: 'c3', nome: 'SBM Offshore', contato: 'chartering@sbmoffshore.com', centrosCusto: [
-      { id: 'c3-frota', nome: 'Frota FPSO' },
-      { id: 'c3-log', nome: 'Logística Niterói' },
-    ] },
-    { id: 'c4', nome: 'Subsea7', contato: 'vessel.support@subsea7.com', centrosCusto: [
-      { id: 'c4-proj', nome: 'Projetos Submarinos' },
-      { id: 'c4-oper', nome: 'Operações Macaé' },
-    ] },
-    { id: 'c5', nome: 'OceanPact', contato: 'operativo@oceanpact.com', centrosCusto: [
-      { id: 'c5-emerg', nome: 'Resposta a Emergências' },
-      { id: 'c5-supr', nome: 'Suprimentos Offshore' },
-    ] },
-  ]);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [solicitantes, setSolicitantes] = useState<Solicitante[]>([]);
+  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [servicos, setServicos] = useState<TipoServico[]>([]);
+  const [passageiros, setPassageiros] = useState<Passageiro[]>([]);
+  const [osList, setOsList] = useState<OrderService[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { user, loading: authLoading } = useAuth();
+  const supabase = createClient();
 
-  const [solicitantes, setSolicitantes] = useState<Solicitante[]>([
-    { id: 's1', nome: 'Marcelo Santos', clienteId: 'c1' },
-    { id: 's2', nome: 'Fernanda Lima', clienteId: 'c1' },
-    { id: 's3', nome: 'Breno Carvalho', clienteId: 'c2' },
-    { id: 's4', nome: 'Juliana Torres', clienteId: 'c3' },
-    { id: 's5', nome: 'Rodrigo Mello', clienteId: 'c4' },
-    { id: 's6', nome: 'Amanda Veras', clienteId: 'c5' },
-  ]);
+  // Fetch functions wrapped for stability
+  const dbFetchClientes = useCallback(async () => fetchClientes(), []);
+  const dbFetchSolicitantes = useCallback(async () => fetchSolicitantes(), []);
+  const dbFetchFornecedores = useCallback(async () => fetchFornecedores(), []);
+  const dbFetchServicos = useCallback(async () => fetchServicos(), []);
+  const dbFetchPassageiros = useCallback(async () => fetchPassageiros(), []);
+  const dbFetchOSList = useCallback(async () => fetchOSList(), []);
+  const dbFetchDrivers = useCallback(async () => fetchDrivers(), []);
 
-  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([
-    { id: 'f1', nome: 'TransRapid Logística', tipo: 'Transportadora' },
-    { id: 'f2', nome: 'Viação Águia Branca', tipo: 'Fretamento' },
-  ]);
+  const refreshData = useCallback(async () => {
+    try {
+      // Executa cada query individualmente para identificar qual está falhando
+      const fetchAll = async () => {
+        const results = await Promise.allSettled([
+          dbFetchClientes(),
+          dbFetchSolicitantes(),
+          dbFetchFornecedores(),
+          dbFetchServicos(),
+          dbFetchPassageiros(),
+          dbFetchOSList(),
+          dbFetchDrivers(),
+        ]);
 
-  const [passageiros, setPassageiros] = useState<Passageiro[]>([
-    {
-      id: 'p1',
-      nomeCompleto: 'Gabriel Almeida',
-      email: 'gabriel.almeida@email.com',
-      celular: '(22) 99877-1122',
-      cpf: '123.456.789-00',
-      enderecos: [
-        {
-          id: 'pe1',
-          rotulo: 'Residencial',
-          enderecoCompleto: 'Rua das Palmeiras, 120 - Parque Aeroporto, Macaé - RJ',
-          referencia: 'Próximo à praça principal'
+        const [c, s, f, sv, p, os, d] = results;
+
+        if (c.status === 'fulfilled') setClientes(c.value); else console.error('❌ Error fetching Clientes');
+        if (s.status === 'fulfilled') setSolicitantes(s.value); else console.error('❌ Error fetching Solicitantes');
+        if (f.status === 'fulfilled') setFornecedores(f.value); else console.error('❌ Error fetching Fornecedores');
+        if (sv.status === 'fulfilled') setServicos(sv.value); else console.error('❌ Error fetching Servicos');
+        if (p.status === 'fulfilled') setPassageiros(p.value); else console.error('❌ Error fetching Passageiros');
+        if (os.status === 'fulfilled') setOsList(os.value); else console.error('❌ Error fetching OS List');
+        if (d.status === 'fulfilled') setDrivers(d.value); else console.error('❌ Error fetching Drivers');
+
+        // Se pelo menos uma falhou criticamente (ex: erro de rede), Promise.allSettled lida bem,
+        // mas se quisermos lançar erro para o catch principal:
+        const failed = results.filter(r => r.status === 'rejected');
+        if (failed.length > 0) {
+          console.warn(`⚠️ ${failed.length} tabelas falharam ao carregar. Verifique o console.`);
         }
-      ]
-    },
-    {
-      id: 'p2',
-      nomeCompleto: 'Larissa Monteiro',
-      email: 'larissa.monteiro@exemplo.com',
-      celular: '(21) 99700-4455',
-      cpf: '987.654.321-00',
-      enderecos: [
-        {
-          id: 'pe2',
-          rotulo: 'Base Offshore',
-          enderecoCompleto: 'Terminal Barra do Furado, lote 08, Campos - RJ'
-        },
-        {
-          id: 'pe3',
-          rotulo: 'Residência Temporária',
-          enderecoCompleto: 'Av. Atlântica, 450 - Copacabana, Rio de Janeiro - RJ'
-        }
-      ]
+      };
+
+      await fetchAll();
+    } catch (err) {
+      console.error('🔥 CRITICAL: Error refreshing global data:', err);
+      toast.error('Erro ao sincronizar dados. Tente atualizar a página.');
     }
-  ]);
+  }, [dbFetchClientes, dbFetchSolicitantes, dbFetchFornecedores, dbFetchServicos, dbFetchPassageiros, dbFetchOSList, dbFetchDrivers]);
 
-  const [servicos, setServicos] = useState<TipoServico[]>([
-    { id: 'v1', nome: 'Translado de Tripulação - Van (24h)', precoBase: 450.00 },
-    { id: 'v2', nome: 'Transporte Executivo Sedan', precoBase: 180.00 },
-    { id: 'v3', nome: 'Fretamento Ônibus (Docagem)', precoBase: 1200.00 },
-    { id: 'v4', nome: 'Caminhão Baú (Suprimentos)', precoBase: 850.00 },
-    { id: 'v5', nome: 'Escolta Armada', precoBase: 1500.00 },
-  ]);
-
-  const [osList, setOsList] = useState<OrderService[]>([
-    {
-      id: 'os1',
-      protocolo: '2024030001',
-      data: '2024-03-10',
-      os: 'OS-8820',
-      clienteId: 'c1',
-      solicitante: 'Marcelo Santos',
-      tipoServico: 'Translado de Tripulação - Van (24h)',
-      trecho: 'Aeroporto Galeão x Porto do Açu',
-      motorista: 'Claudio Ferreira',
-      valorBruto: 3200.00,
-      imposto: 384.00,
-      custo: 2400.00,
-      lucro: 416.00,
-      status: { operacional: 'Finalizado', financeiro: 'Faturado' },
-      rota: {
-        waypoints: [
-          { lat: -22.8123, lng: -43.2505, label: 'Aeroporto Internacional do Galeão' },
-          { lat: -21.8344, lng: -41.0089, label: 'Porto do Açu, São João da Barra' }
-        ]
-      }
-    },
-    {
-      id: 'os2',
-      protocolo: '2024030002',
-      data: '2024-03-12',
-      os: 'OS-9015',
-      clienteId: 'c2',
-      solicitante: 'Breno Carvalho',
-      tipoServico: 'Transporte Executivo Sedan',
-      trecho: 'Centro, Rio de Janeiro x Macaé',
-      motorista: 'Paulo Souza',
-      valorBruto: 850.00,
-      imposto: 102.00,
-      custo: 550.00,
-      lucro: 198.00,
-      status: { operacional: 'Em Rota', financeiro: 'Pendente' },
-      rota: {
-        waypoints: [
-          { lat: -22.9068, lng: -43.1729, label: 'Avenida Rio Branco, RJ' },
-          { lat: -22.3708, lng: -41.7749, label: 'Imbetiba, Macaé' }
-        ]
+  useEffect(() => {
+    if (!authLoading) {
+      if (user) {
+        refreshData().finally(() => setLoading(false));
+      } else {
+        setLoading(false);
       }
     }
-  ]);
+  }, [refreshData, user, authLoading]);
 
+  // Real-time Subscriptions with Silenced Fallback
+  useEffect(() => {
+    if (authLoading || !user) return;
+
+    // Debounce para evitar múltiplas conexões em re-renderizações rápidas
+    const timer = setTimeout(() => {
+      console.log('🔌 Supabase Real-time: Conectando canal central...');
+      
+      const channel = supabase
+        .channel('geolog-realtime-global')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_servico' }, (payload: any) => {
+          console.log('📦 OS Change detected');
+          dbFetchOSList().then(setOsList).catch(() => {});
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
+          dbFetchClientes().then(setClientes).catch(() => {});
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'solicitantes' }, () => {
+          dbFetchSolicitantes().then(setSolicitantes).catch(() => {});
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tipos_servico' }, () => {
+          dbFetchServicos().then(setServicos).catch(() => {});
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'centros_custo' }, () => {
+          dbFetchClientes().then(setClientes).catch(() => {}); // Centros de custo estao dentro de clientes no estado
+        })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'app_notifications' }, (payload: any) => {
+          const notif = payload.new;
+          if (notif.type === 'success') toast.success(notif.title, { description: notif.message });
+          else if (notif.type === 'error') toast.error(notif.title, { description: notif.message });
+          else if (notif.type === 'warning') toast.warning(notif.title, { description: notif.message });
+          else toast.info(notif.title, { description: notif.message });
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'passageiros' }, () => {
+          dbFetchPassageiros().then(setPassageiros).catch(() => {});
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, () => {
+          dbFetchDrivers().then(setDrivers).catch(() => {});
+        })
+        .subscribe((status: string) => {
+          if (status === 'SUBSCRIBED') {
+             console.log('✅ Real-time ativado.');
+          }
+          // Ignoramos erros ruidosos de canal, o Supabase gerencia reconexão internamente
+        });
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [user, authLoading]);
+
+  // Actions
   const addCliente = (nome: string, contato?: string) => {
-    setClientes([...clientes, { id: Math.random().toString(36).substr(2, 9), nome, contato, centrosCusto: [] }]);
+    insertCliente(nome, contato).catch(err => console.error('Error insertCliente:', err));
   };
 
-  const addSolicitante = (nome: string, clienteId: string) => {
-    setSolicitantes([...solicitantes, { id: Math.random().toString(36).substr(2, 9), nome, clienteId }]);
+  const updateCliente = (id: string, updates: Partial<Cliente>) => {
+    updateClienteInDB(id, updates).catch(err => console.error('Error updateClienteInDB:', err));
   };
 
-  const addPassageiro = (passageiro: NovoPassageiroInput) => {
-    const newPassageiro: Passageiro = {
-      id: Math.random().toString(36).substr(2, 9),
+  const deleteCliente = (id: string) => {
+    deleteClienteFromDB(id).catch(err => console.error('Error deleteClienteFromDB:', err));
+  };
+
+  const addSolicitante = (nome: string, clienteId: string, centroCustoId?: string) => {
+    insertSolicitante(nome, clienteId, centroCustoId).catch(err => console.error('Error insertSolicitante:', err));
+  };
+
+  const addCentroCusto = (nome: string, clienteId: string) => {
+    insertCentroCusto(nome, clienteId).catch(err => console.error('Error insertCentroCusto:', err));
+  };
+
+  const updateCentroCusto = (id: string, updates: Partial<CentroCusto>) => {
+    updateCentroCustoInDB(id, updates).catch(err => console.error('Error updateCentroCustoInDB:', err));
+  };
+
+  const deleteCentroCusto = (id: string) => {
+    deleteCentroCustoFromDB(id).catch(err => console.error('Error deleteCentroCustoFromDB:', err));
+  };
+
+  const updateSolicitante = (id: string, updates: Partial<Solicitante>) => {
+    updateSolicitanteInDB(id, updates).catch(err => console.error('Error updateSolicitanteInDB:', err));
+  };
+
+  const deleteSolicitante = (id: string) => {
+    deleteSolicitanteFromDB(id).catch(err => console.error('Error deleteSolicitanteFromDB:', err));
+  };
+
+  const addPassageiro = (passageiro: NovoPassageiroInput): Passageiro => {
+    const tempId = `temp-${Date.now()}`;
+    const optimistic: Passageiro = {
+      id: tempId,
       ...passageiro,
-      enderecos: passageiro.enderecos.map((endereco, index) => ({
-        id: Math.random().toString(36).substr(2, 9),
-        rotulo: endereco.rotulo?.trim() || `Endereço ${index + 1}`,
-        enderecoCompleto: endereco.enderecoCompleto,
-        referencia: endereco.referencia?.trim() ? endereco.referencia : undefined
-      }))
+      enderecos: passageiro.enderecos.map((e, i) => ({
+        id: `temp-end-${i}`,
+        rotulo: e.rotulo?.trim() || `Endereço ${i + 1}`,
+        enderecoCompleto: e.enderecoCompleto,
+        referencia: e.referencia?.trim() ? e.referencia : undefined,
+      })),
     };
 
-    setPassageiros([...passageiros, newPassageiro]);
-    return newPassageiro;
+    setPassageiros((prev) => [...prev, optimistic]);
+
+    insertPassageiro(passageiro)
+      .then((real) => {
+        setPassageiros((prev) => prev.map((p) => (p.id === tempId ? real : p)));
+      })
+      .catch((err) => {
+        console.error('Error adding passageiro:', err);
+        setPassageiros((prev) => prev.filter((p) => p.id !== tempId));
+      });
+
+    return optimistic;
   };
 
   const addFornecedor = (nome: string, tipo: string, telefone?: string) => {
-    setFornecedores([...fornecedores, { id: Math.random().toString(36).substr(2, 9), nome, tipo, telefone }]);
+    insertFornecedor(nome, tipo, telefone).catch(err => console.error('Error insertFornecedor:', err));
   };
 
   const addServico = (nome: string, precoBase: number) => {
-    setServicos([...servicos, { id: Math.random().toString(36).substr(2, 9), nome, precoBase }]);
+    insertServico(nome, precoBase).catch(err => console.error('Error insertServico:', err));
   };
 
-  const generateProtocolo = () => {
-    const now = new Date();
-    const year = now.getFullYear().toString();
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-    return `${year}${month}${code}`;
+  const updateServico = (id: string, updates: Partial<TipoServico>) => {
+    updateServicoInDB(id, updates).catch(err => console.error('Error updateServicoInDB:', err));
   };
 
-  const addOS = (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => {
+  const deleteServico = (id: string) => {
+    deleteServicoFromDB(id).catch(err => console.error('Error deleteServicoFromDB:', err));
+  };
+
+  const addOS = (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>): OrderService => {
     const imposto = osData.valorBruto * 0.12;
     const lucro = osData.valorBruto - imposto - osData.custo;
-    const newOS: OrderService = {
-      id: Math.random().toString(36).substr(2, 9),
-      protocolo: generateProtocolo(),
+    const tempId = `temp-${Date.now()}`;
+
+    const optimistic: OrderService = {
+      id: tempId,
+      protocolo: '...',
       ...osData,
       imposto,
       lucro,
-      status: { operacional: 'Pendente', financeiro: 'Pendente' }
+      status: { operacional: 'Pendente', financeiro: 'Pendente' },
     };
-    setOsList([newOS, ...osList]);
-    return newOS;
+
+    setOsList((prev) => [optimistic, ...prev]);
+
+    insertOS(osData)
+      .then((real) => {
+        setOsList((prev) => prev.map((o) => (o.id === tempId ? real : o)));
+      })
+      .catch((err) => {
+        console.error('Error adding OS:', err);
+        setOsList((prev) => prev.filter((o) => o.id !== tempId));
+      });
+
+    return optimistic;
   };
 
   const updateOS = (id: string, osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => {
-    const imposto = osData.valorBruto * 0.12;
-    const lucro = osData.valorBruto - imposto - osData.custo;
-
-    setOsList(osList.map(os =>
-      os.id === id
-        ? {
-            ...os,
-            ...osData,
-            imposto,
-            lucro
-          }
-        : os
-    ));
+    updateOSInDB(id, osData).catch(err => console.error('Error updateOSInDB:', err));
   };
 
   const updateOSStatus = (id: string, updates: Partial<OSStatus>) => {
-    setOsList(osList.map(os => 
-      os.id === id 
-        ? { ...os, status: { ...os.status, ...updates } } 
-        : os
-    ));
+    updateOSStatusInDB(id, updates).catch(err => console.error('Error updateOSStatusInDB:', err));
   };
 
-  const getSolicitantesByCliente = (clienteId: string) => {
-    return solicitantes.filter(s => s.clienteId === clienteId);
-  };
+  const getSolicitantesByCliente = useCallback((clienteId: string) => {
+    return solicitantes.filter((s) => s.clienteId === clienteId);
+  }, [solicitantes]);
 
-  const getCentrosCustoByCliente = (clienteId: string) => {
-    const cliente = clientes.find(c => c.id === clienteId);
+  const getCentrosCustoByCliente = useCallback((clienteId: string) => {
+    const cliente = clientes.find((c) => c.id === clienteId);
     return cliente?.centrosCusto || [];
-  };
+  }, [clientes]);
 
   return (
-    <DataContext.Provider value={{
-      clientes,
-      solicitantes,
-      fornecedores,
-      servicos,
-      osList,
-      passageiros,
-      addCliente,
-      addSolicitante,
-      addPassageiro,
-      addFornecedor,
-      addServico,
-      addOS,
-      updateOS,
-      updateOSStatus,
-      getSolicitantesByCliente,
-      getCentrosCustoByCliente
-    }}>
+    <DataContext.Provider
+      value={{
+        clientes,
+        solicitantes,
+        fornecedores,
+        servicos,
+        passageiros,
+        osList,
+        drivers,
+        loading,
+        addCliente,
+        updateCliente,
+        deleteCliente,
+        addSolicitante,
+        updateSolicitante,
+        deleteSolicitante,
+        addCentroCusto,
+        updateCentroCusto,
+        deleteCentroCusto,
+        addPassageiro,
+        addFornecedor,
+        addServico,
+        updateServico,
+        deleteServico,
+        addOS,
+        updateOS,
+        updateOSStatus,
+        refreshData,
+        getSolicitantesByCliente,
+        getCentrosCustoByCliente,
+      }}
+    >
       {children}
     </DataContext.Provider>
   );
 }
 
-
-export function useData() {
+export const useData = () => {
   const context = useContext(DataContext);
-  if (context === undefined) {
-    throw new Error('useData must be used within a DataProvider');
-  }
+  if (!context) throw new Error('useData must be used within a DataProvider');
   return context;
-}
+};

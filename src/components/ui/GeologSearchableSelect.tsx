@@ -29,7 +29,7 @@ export default function GeologSearchableSelect({
 }: GeologSearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0, bottom: 0, openUpwards: false });
   const [mounted, setMounted] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -56,10 +56,22 @@ export default function GeologSearchableSelect({
     const updateCoords = () => {
       if (triggerRef.current && isOpen) {
         const rect = triggerRef.current.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceAbove = rect.top;
+        
+        // Abre para cima apenas se o espaço abaixo for crítico (< 250px)
+        // e se estivermos em uma resolução vertical reduzida (< 880px)
+        // ou se houver significativamente mais espaço acima.
+        const needsUpwards = (window.innerHeight < 880 || spaceBelow < 150) && 
+                             spaceBelow < 250 && 
+                             spaceAbove > spaceBelow;
+        
         setCoords({
           top: rect.bottom,
+          bottom: window.innerHeight - rect.top,
           left: rect.left,
-          width: rect.width
+          width: rect.width,
+          openUpwards: needsUpwards
         });
       }
     };
@@ -83,9 +95,12 @@ export default function GeologSearchableSelect({
 
   const dropdownContent = (
     <div 
-      className="geolog-select-portal fixed z-[9999] bg-white border-2 border-slate-100 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] rounded-3xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200"
+      className={`geolog-select-portal fixed z-[9999] bg-white border-2 border-slate-100 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] rounded-3xl overflow-hidden animate-in fade-in duration-200 ${
+        coords.openUpwards ? 'slide-in-from-bottom-2' : 'slide-in-from-top-2'
+      }`}
       style={{
-        top: `${coords.top + 8}px`,
+        top: coords.openUpwards ? 'auto' : `${coords.top + 8}px`,
+        bottom: coords.openUpwards ? `${coords.bottom + 8}px` : 'auto',
         left: `${coords.left}px`,
         width: `${coords.width}px`,
       }}
