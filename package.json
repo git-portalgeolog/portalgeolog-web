@@ -6,12 +6,14 @@
     "dev": "npx kill-port 3000 3001 2>/dev/null || true && next dev",
     "build": "next build",
     "build:cf": "npx @cloudflare/next-on-pages@1 && node scripts/prepare-cloudflare-output.mjs",
+    "build:c": "npm run build:cf",
     "start": "next start",
     "lint": "eslint",
     "kill-port": "npx kill-port 3000 3001",
     "deploy:cf": "npm run build:cf && wrangler pages deploy cloudflare-output --project-name=portalgeolog-web"
   },
   "dependencies": {
+    "@react-email/render": "^2.0.5",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.100.0",
     "@types/leaflet": "^1.9.21",
