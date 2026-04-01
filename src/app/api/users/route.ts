@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 
@@ -6,9 +6,15 @@ import { Resend } from 'resend';
 export const runtime = 'edge';
 
 // Inicializa o cliente com a Service Role Key para ignorar RLS e poder listar auth.users
-const supabaseAdmin = createClient(
+const supabaseAdmin = createServerClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    cookies: {
+      getAll() { return [] },
+      setAll() { /* No-op para API routes */ }
+    }
+  }
 );
 
 const resend = new Resend(process.env.RESEND_API_KEY);
