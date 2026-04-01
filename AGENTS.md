@@ -146,15 +146,21 @@ Certifique-se de que o `user.name` e `user.email` no repositório local (`git co
 - **Como corrigir:** Execute `echo "SEU_TOKEN" | GH_CONFIG_DIR=~/.gh-config1 gh auth login --with-token` para re-vincular o perfil ao token correto.
 - **Verificação:** Sempre valide com `GH_CONFIG_DIR=~/.gh-config1 gh api user --jq .login` antes de realizar operações de escrita (push/create repo).
 
-## 🚀 5. Deploy & Infraestrutura (Vercel)
+## 🚀 5. Deploy & Infraestrutura (Cloudflare Pages)
 
-### Vercel CLI
-- **Autenticação:** Agentes devem usar o flag `--token` com o **Vercel Access Token** do usuário para operações de deploy, link e configuração de variáveis.
+### Cloudflare CLI (Wrangler)
+- **Autenticação:** Configure via `wrangler login` ou use `CLOUDFLARE_API_TOKEN`.
 - **Controle de Deploy:** Agentes NUNCA devem realizar deploys (seja para `test` ou `main`) sem a solicitação explícita do usuário no chat.
 - **Comandos Principais:**
-  - `vercel link --yes --token $VERCEL_TOKEN` (conecta a pasta ao projeto).
-  - `vercel env add <KEY> <ENV> --token $VERCEL_TOKEN` (adiciona variáveis ao dashboard).
-  - `vercel deploy --prod --yes --token $VERCEL_TOKEN` (deploy final em produção).
+  - `wrangler pages project create portalgeolog-web` (cria projeto no Cloudflare).
+  - `wrangler pages deploy .vercel/output/static` (deploy manual).
+  - `wrangler pages project env add portalgeolog-web production <KEY> <VALUE>` (adiciona variáveis).
+  - `wrangler secret put <KEY>` (configura secrets).
+
+### Build para Cloudflare
+- **Comando:** `npx @cloudflare/next-on-pages@1`
+- **Output:** `.vercel/output/static`
+- **Runtime:** Edge Runtime (Cloudflare Workers)
 
 ### Links de Referência
 - **GitHub:** [https://github.com/git-portalgeolog/portalgeolog-web](https://github.com/git-portalgeolog/portalgeolog-web)
