@@ -1,5 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 
+// Configurar Edge Runtime para Cloudflare Workers
+export const runtime = 'edge'
+
 export default async function Page() {
   const supabase = await createClient()
 

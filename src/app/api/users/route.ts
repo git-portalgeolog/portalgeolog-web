@@ -2,6 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 
+// Configurar Edge Runtime para Cloudflare Workers
+export const runtime = 'edge';
+
 // Inicializa o cliente com a Service Role Key para ignorar RLS e poder listar auth.users
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,

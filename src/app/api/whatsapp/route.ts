@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+// Configurar Edge Runtime para Cloudflare Workers
+export const runtime = 'edge';
+
 // Configurações WASenderAPI
 const WA_SENDER_API_URL = "https://www.wasenderapi.com/api/send-message";
 const WA_SENDER_API_KEY = "1929b24cf117d20488a0520302ca5e00ab36b8025836dad2ac61c5143c383a84";
