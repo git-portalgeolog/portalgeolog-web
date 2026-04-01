@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "npx kill-port 3000 3001 2>/dev/null || true && next dev",
     "build": "next build",
+    "build:cf": "npx @cloudflare/next-on-pages@1",
     "start": "next start",
     "lint": "eslint",
-    "kill-port": "npx kill-port 3000 3001"
+    "kill-port": "npx kill-port 3000 3001",
+    "deploy:cf": "npm run build:cf && wrangler pages deploy .vercel/output/static"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",
@@ -26,6 +28,7 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@cloudflare/next-on-pages": "^1.13.12",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -34,6 +37,7 @@
     "eslint-config-next": "16.1.6",
     "pg": "^8.20.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.0.0"
   }
 }
