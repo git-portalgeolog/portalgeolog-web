@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "kill-port": "npx kill-port 3000 3001",
-    "deploy:cf": "npm run build:cf && wrangler pages deploy .vercel/output/static"
+    "deploy:cf": "npm run build:cf && wrangler pages deploy .vercel/output/static --project-name=portalgeolog-web"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",
