@@ -8,6 +8,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CI: true
 
 jobs:
   deploy:
@@ -32,9 +33,14 @@ jobs:
       - name: Build with next-on-pages
         run: npx @cloudflare/next-on-pages@1
 
+      - name: Verify build output
+        run: |
+          echo "PWD: $(pwd)"
+          echo "Build output:"
+          ls -la .vercel/output/static | sed -n '1,40p'
+
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .vercel/output/static --project-name=portalgeolog-web --branch=main
+        run: npx wrangler pages deploy .vercel/output/static --project-name=portalgeolog-web --branch=main --verbose
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -3,15 +3,12 @@
 name = "portalgeolog-web"
 compatibility_date = "2025-03-31"
 compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".vercel/output/static"
 
 # Build configuration using next-on-pages
 [build]
 command = "npx @cloudflare/next-on-pages@1"
 cwd = "."
-
-# Pages build output directory (next-on-pages outputs to .vercel/output/static)
-[site]
-bucket = ".vercel/output/static"
 
 # Environment variables (set these via Cloudflare dashboard or wrangler)
 # wrangler pages project env add portalgeolog-web production NEXT_PUBLIC_SUPABASE_URL "your-url"
