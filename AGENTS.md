@@ -153,13 +153,13 @@ Certifique-se de que o `user.name` e `user.email` no repositório local (`git co
 - **Controle de Deploy:** Agentes NUNCA devem realizar deploys (seja para `test` ou `main`) sem a solicitação explícita do usuário no chat.
 - **Comandos Principais:**
   - `wrangler pages project create portalgeolog-web` (cria projeto no Cloudflare).
-  - `wrangler pages deploy .vercel/output/static` (deploy manual).
+  - `wrangler pages deploy cloudflare-output` (deploy manual).
   - `wrangler pages project env add portalgeolog-web production <KEY> <VALUE>` (adiciona variáveis).
   - `wrangler secret put <KEY>` (configura secrets).
 
 ### Build para Cloudflare
 - **Comando:** `npx @cloudflare/next-on-pages@1`
-- **Output:** `.vercel/output/static`
+- **Output:** `cloudflare-output`
 - **Runtime:** Edge Runtime (Cloudflare Workers)
 
 ### Links de Referência

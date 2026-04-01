@@ -22,20 +22,20 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 ## Learn More
 
-To learn more about Next.js, take a look at the following resources:
+To learn more about Next.js, take a look at the official documentation:
 
 - [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
 - [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
 ## Deploy on Cloudflare Pages
 
 This project is configured for deployment on [Cloudflare Pages](https://pages.cloudflare.com/) using the Edge Runtime.
 
 ### Build Configuration
-- **Build command:** `npx @cloudflare/next-on-pages@1`
-- **Output directory:** `.vercel/output/static`
+- **Build command:** `npm run build:cf`
+- **Output directory:** `cloudflare-output`
+
+The build command generates the Cloudflare Pages artifact and copies it into `cloudflare-output` automatically.
 
 ### Environment Variables
 Set these in the Cloudflare Dashboard:

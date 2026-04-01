@@ -1,26 +1,46 @@
-import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 
 // Configurar Edge Runtime para Cloudflare Workers
 export const runtime = 'edge';
 
-// Inicializa o cliente com a Service Role Key para ignorar RLS e poder listar auth.users
-const supabaseAdmin = createServerClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    cookies: {
-      getAll() { return [] },
-      setAll() { /* No-op para API routes */ }
-    }
-  }
-);
+type UserRoleRow = {
+  id: string;
+  nome: string | null;
+  tipo_usuario: string | null;
+  categoria: string | null;
+  empresa_id: string | null;
+};
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+function getRequiredEnv(name: string): string {
+  const value = process.env[name];
+
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
+
+  return value;
+}
+
+function createSupabaseAdminClient() {
+  return createClient(
+    getRequiredEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY')
+  );
+}
+
+function createResendClient() {
+  const apiKey = process.env.RESEND_API_KEY;
+
+  return apiKey ? new Resend(apiKey) : null;
+}
 
 export async function GET() {
   try {
+    const supabaseAdmin = createSupabaseAdminClient();
+
     // 1. Busca os perfis (roles)
     const { data: profiles, error: profileError } = await supabaseAdmin
       .from('user_roles')
@@ -40,8 +60,8 @@ export async function GET() {
     }
 
     // 3. Mescla os dados
-    const users = authData.users.map(user => {
-      const profile = profiles?.find(p => p.id === user.id);
+    const users = authData.users.map((user: SupabaseUser) => {
+      const profile = profiles?.find((p: UserRoleRow) => p.id === user.id);
       return {
         id: user.id,
         email: user.email,
@@ -61,6 +81,8 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
+    const supabaseAdmin = createSupabaseAdminClient();
+
     const { id, updates } = await request.json();
     
     const { data, error } = await supabaseAdmin
@@ -83,6 +105,9 @@ export async function PATCH(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const supabaseAdmin = createSupabaseAdminClient();
+    const resend = createResendClient();
+
     const { email, password, nome, tipo_usuario, categoria } = await request.json();
 
     // 1. Criar o usuário no Auth (Admin)
@@ -118,11 +143,12 @@ export async function POST(request: Request) {
 
     // 3. Enviar E-mail de Boas-vindas profissional
     try {
-      await resend.emails.send({
-        from: 'Portal Geolog <suporte@portalgeolog.com.br>',
-        to: email,
-        subject: 'Bem-vindo ao Portal Geolog - Suas Credenciais de Acesso',
-        html: `
+      if (resend) {
+        await resend.emails.send({
+          from: 'Portal Geolog <suporte@portalgeolog.com.br>',
+          to: email,
+          subject: 'Bem-vindo ao Portal Geolog - Suas Credenciais de Acesso',
+          html: `
           <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 12px; overflow: hidden;">
             <div style="background-color: #001C3A; padding: 40px; text-align: center;">
               <h1 style="color: #fff; margin: 0; font-size: 24px;">Portal Geolog</h1>
@@ -155,7 +181,8 @@ export async function POST(request: Request) {
             </div>
           </div>
         `
-      });
+        });
+      }
     } catch (emailErr) {
       console.error('Failed to send welcome email:', emailErr);
     }
@@ -168,6 +195,8 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const supabaseAdmin = createSupabaseAdminClient();
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
 
