@@ -58,6 +58,14 @@ const nextConfig: NextConfig = {
       };
     }
     
+    // Define self for both client and server
+    config.plugins = [
+      ...config.plugins,
+      new config.webpack.DefinePlugin({
+        self: isServer ? 'this' : 'window',
+      }),
+    ];
+    
     // Otimizar bundle
     config.optimization = {
       ...config.optimization,
