@@ -62,9 +62,20 @@ const nextConfig: NextConfig = {
     if (webpack) {
       config.plugins.push(
         new webpack.DefinePlugin({
-          self: isServer ? 'this' : 'window',
+          self: 'globalThis',
         })
       );
+
+      // Prepend global.self = global to server bundles to fix libraries that access 'self'
+      if (isServer) {
+        config.plugins.push(
+          new webpack.BannerPlugin({
+            banner: 'global.self = global;',
+            raw: true,
+            entryOnly: true,
+          })
+        );
+      }
     }
     
     // Otimizar bundle
