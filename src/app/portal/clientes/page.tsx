@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import { useData, Cliente, Solicitante, CentroCusto } from '@/context/DataContext';
 import StandardModal from '@/components/StandardModal';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useConfirm } from '@/hooks/useConfirm';
 import { Plus, Search, Building, User, Trash2, ChevronRight, Edit2, Copy, Check, Hash, LayoutGrid } from 'lucide-react';
 
 export default function ClientesPage() {
@@ -18,9 +20,13 @@ export default function ClientesPage() {
     deleteSolicitante,
     addCentroCusto,
     updateCentroCusto,
-    deleteCentroCusto
+    deleteCentroCusto,
+    getSolicitantesByCliente,
+    getCentrosCustoByCliente
   } = useData();
-
+  
+  const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
+  
   const [searchTerm, setSearchTerm] = useState('');
   
   // Modal states
@@ -71,12 +77,22 @@ export default function ClientesPage() {
     setIsClienteModalOpen(true);
   };
 
-  const handleDeleteCliente = (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este cliente?')) {
+  const handleDeleteCliente = async (id: string) => {
+    const cliente = clientes.find(c => c.id === id);
+    if (!cliente) return;
+    
+    const confirmed = await confirm({
+      title: 'Excluir Cliente',
+      message: `Tem certeza que deseja excluir o cliente "${cliente.nome}"? Esta ação não pode ser desfeita.`,
+      confirmText: 'Sim, excluir',
+      cancelText: 'Cancelar',
+      type: 'danger'
+    });
+    
+    if (confirmed) {
       deleteCliente(id);
       if (selectedClienteId === id) {
         setSelectedClienteId(null);
-        setSelectedCentroCustoId(null);
       }
     }
   };
@@ -102,8 +118,20 @@ export default function ClientesPage() {
     setIsCentroCustoModalOpen(true);
   };
 
-  const handleDeleteCentroCusto = (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este Centro de Custo?')) {
+  const handleDeleteCentroCusto = async (id: string) => {
+    if (!selectedClienteId) return;
+    const centroCusto = getCentrosCustoByCliente(selectedClienteId).find(cc => cc.id === id);
+    if (!centroCusto) return;
+    
+    const confirmed = await confirm({
+      title: 'Excluir Centro de Custo',
+      message: `Tem certeza que deseja excluir o centro de custo "${centroCusto.nome}"? Esta ação não pode ser desfeita.`,
+      confirmText: 'Sim, excluir',
+      cancelText: 'Cancelar',
+      type: 'danger'
+    });
+    
+    if (confirmed) {
       deleteCentroCusto(id);
       if (selectedCentroCustoId === id) setSelectedCentroCustoId(null);
     }
@@ -135,8 +163,19 @@ export default function ClientesPage() {
     setIsSolicitanteModalOpen(true);
   };
 
-  const handleDeleteSolicitante = (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este solicitante?')) {
+  const handleDeleteSolicitante = async (id: string) => {
+    const solicitante = solicitantes.find(s => s.id === id);
+    if (!solicitante) return;
+    
+    const confirmed = await confirm({
+      title: 'Excluir Solicitante',
+      message: `Tem certeza que deseja excluir o solicitante "${solicitante.nome}"? Esta ação não pode ser desfeita.`,
+      confirmText: 'Sim, excluir',
+      cancelText: 'Cancelar',
+      type: 'danger'
+    });
+    
+    if (confirmed) {
       deleteSolicitante(id);
     }
   };
@@ -436,6 +475,17 @@ export default function ClientesPage() {
           </form>
         </StandardModal>
       )}
+      
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        onClose={closeConfirm}
+        onConfirm={handleConfirm}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        cancelText={confirmState.cancelText}
+        type={confirmState.type}
+      />
     </div>
   );
 }

@@ -2,6 +2,8 @@
 
 import React, { useRef, useState } from 'react';
 import { Camera, Trash2, Loader2 } from 'lucide-react';
+import ConfirmDialog from './ConfirmDialog';
+import { useConfirm } from '@/hooks/useConfirm';
 import { toast } from 'sonner';
 
 interface AvatarUploaderProps {
@@ -21,8 +23,9 @@ export function AvatarUploader({
   avatarUrl, 
   nome, 
   onAvatarChange,
-  size = 'lg' 
+  size = 'md' 
 }: AvatarUploaderProps) {
+  const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const sizes = sizeClasses[size];
@@ -75,7 +78,15 @@ export function AvatarUploader({
   const handleDelete = async () => {
     if (!avatarUrl) return;
 
-    if (!confirm('Tem certeza que deseja remover sua foto de perfil?')) return;
+    const confirmed = await confirm({
+      title: 'Remover Foto de Perfil',
+      message: 'Tem certeza que deseja remover sua foto de perfil?',
+      confirmText: 'Sim, remover',
+      cancelText: 'Cancelar',
+      type: 'danger'
+    });
+    
+    if (!confirmed) return;
 
     setUploading(true);
 
@@ -181,5 +192,16 @@ export function AvatarUploader({
         className="hidden"
       />
     </div>
+    
+    <ConfirmDialog
+      isOpen={confirmState.isOpen}
+      onClose={closeConfirm}
+      onConfirm={handleConfirm}
+      title={confirmState.title}
+      message={confirmState.message}
+      confirmText={confirmState.confirmText}
+      cancelText={confirmState.cancelText}
+      type={confirmState.type}
+    />
   );
 }

@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { useAuth, UserProfile } from "@/context/AuthContext";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { useConfirm } from "@/hooks/useConfirm";
 import { toast } from "sonner";
 import {
   Shield,
@@ -34,10 +36,10 @@ import { AvatarUploader } from "@/components/ui/AvatarUploader";
 type TabType = "acesso" | "perfil" | "historico";
 
 export default function ConfigPage() {
-  const { user, profile, logout } = useAuth();
+  const { user, profile, logout, loading } = useAuth();
+  const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [activeTab, setActiveTab] = useState<TabType>("acesso");
   const [users, setUsers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -61,15 +63,12 @@ export default function ConfigPage() {
 
   const fetchUsers = async () => {
     try {
-      setLoading(true);
       const res = await fetch("/api/users");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao buscar usuários");
-      setUsers(data || []);
+      setUsers(data);
     } catch (err: any) {
       toast.error("Erro ao carregar usuários: " + err.message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -144,9 +143,13 @@ export default function ConfigPage() {
     }
 
     if (
-      !confirm(
-        "Tem certeza que deseja excluir permanentemente este acesso? Esta ação não pode ser desfeita.",
-      )
+      !(await confirm({
+        title: 'Excluir Acesso',
+        message: 'Tem certeza que deseja excluir permanentemente este acesso? Esta ação não pode ser desfeita.',
+        confirmText: 'Sim, excluir',
+        cancelText: 'Cancelar',
+        type: 'danger'
+      }))
     )
       return;
 
@@ -877,6 +880,17 @@ export default function ConfigPage() {
           </form>
         </StandardModal>
       )}
+      
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        onClose={closeConfirm}
+        onConfirm={handleConfirm}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        cancelText={confirmState.cancelText}
+        type={confirmState.type}
+      />
     </div>
   );
 }

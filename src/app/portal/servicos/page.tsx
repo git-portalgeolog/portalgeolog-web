@@ -2,12 +2,15 @@
 
 import React, { useState } from 'react';
 import { useData, TipoServico } from '@/context/DataContext';
-import { Plus, Package, Trash2, Edit2, X } from 'lucide-react';
+import { Plus, Bus, Trash2, Edit2, X } from 'lucide-react';
 import StandardModal from '@/components/StandardModal';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useConfirm } from '@/hooks/useConfirm';
 import { toast } from 'sonner';
 
 export default function ServicosPage() {
   const { servicos, addServico, updateServico, deleteServico } = useData();
+  const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingServico, setEditingServico] = useState<TipoServico | null>(null);
   const [formData, setFormData] = useState({ nome: '' });
@@ -38,8 +41,19 @@ export default function ServicosPage() {
     setFormData({ nome: '' });
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este tipo de serviço?')) {
+  const handleDelete = async (id: string) => {
+    const servico = servicos.find(s => s.id === id);
+    if (!servico) return;
+    
+    const confirmed = await confirm({
+      title: 'Excluir Tipo de Serviço',
+      message: `Tem certeza que deseja excluir o serviço "${servico.nome}"? Esta ação não pode ser desfeita.`,
+      confirmText: 'Sim, excluir',
+      cancelText: 'Cancelar',
+      type: 'danger'
+    });
+    
+    if (confirmed) {
       deleteServico(id);
     }
   };
@@ -49,8 +63,12 @@ export default function ServicosPage() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-[var(--color-geolog-blue)]">Tipos de Serviço</h1>
-          <p className="text-slate-500 font-medium text-sm">Defina os serviços oferecidos.</p>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shadow-sm">
+              <Bus size={20} />
+            </div>
+            <h1 className="text-2xl font-black text-[var(--color-geolog-blue)]">Tipos de Serviço</h1>
+          </div>
         </div>
         <button 
           onClick={() => handleOpenModal()}
@@ -65,8 +83,8 @@ export default function ServicosPage() {
         <table className="w-full text-left">
           <thead>
             <tr className="bg-slate-50/80 border-b border-slate-200">
-              <th className="px-8 py-5 text-[11px] font-black uppercase tracking-widest text-slate-400">Serviço</th>
-              <th className="px-8 py-5 text-[11px] font-black uppercase tracking-widest text-slate-400 text-center">Ações</th>
+              <th className="px-8 py-5 text-[12px] font-black uppercase tracking-widest text-slate-600">Serviço</th>
+              <th className="px-8 py-5 text-[12px] font-black uppercase tracking-widest text-slate-600 text-right">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -78,15 +96,10 @@ export default function ServicosPage() {
               servicos.map((s) => (
                 <tr key={s.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-8 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shadow-sm">
-                        <Package size={18} />
-                      </div>
-                      <span className="font-bold text-slate-800 text-sm">{s.nome}</span>
-                    </div>
+                    <span className="font-bold text-slate-800 text-base ml-3">{s.nome}</span>
                   </td>
                   <td className="px-8 py-4">
-                    <div className="flex items-center justify-center gap-2">
+                    <div className="flex items-center justify-end gap-2">
                       <button 
                         onClick={() => handleOpenModal(s)}
                         className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
@@ -115,25 +128,25 @@ export default function ServicosPage() {
         <StandardModal 
           onClose={() => setIsModalOpen(false)} 
           title={editingServico ? "Editar Tipo de Serviço" : "Novo Tipo de Serviço"} 
-          subtitle={editingServico ? "Atualize as definições do serviço no catálogo" : "Definição de novo item no catálogo de serviços"}
-          icon={<Package size={24} />}
+          subtitle="Catálogo de serviços"
+          icon={<Bus size={24} />}
           maxWidthClassName="max-w-2xl"
         >
           <form onSubmit={handleSubmit} className="space-y-8">
             <div className="space-y-6">
               <div className="flex items-center border-b-2 border-slate-100 pb-4">
                 <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3">
-                  <Package size={20} className="text-slate-500" /> Detalhes do Serviço
+                  <Bus size={20} className="text-slate-500" /> Detalhes do Serviço
                 </h3>
               </div>
 
               <div className="grid grid-cols-1 gap-6">
                 <div className="space-y-2">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome do Serviço</label>
+                  <label className="text-base font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome do Serviço</label>
                   <input 
                     required 
                     placeholder="Ex: Ônibus Sleep In" 
-                    className="w-full px-5 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-sm text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
+                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
                     value={formData.nome} 
                     onChange={e => setFormData({...formData, nome: e.target.value})} 
                   />
@@ -156,6 +169,17 @@ export default function ServicosPage() {
           </form>
         </StandardModal>
       )}
+      
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        onClose={closeConfirm}
+        onConfirm={handleConfirm}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        cancelText={confirmState.cancelText}
+        type={confirmState.type}
+      />
     </div>
   );
 }

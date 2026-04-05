@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import StandardModal from '@/components/StandardModal';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useConfirm } from '@/hooks/useConfirm';
 import { motion } from 'framer-motion';
 import { 
   UploadCloud, 
@@ -25,13 +27,14 @@ interface DriverDoc {
 }
 
 interface DriverDocsModalProps {
-  driverId: string;
-  driverName: string;
+  driver: any;
+  isOpen: boolean;
   onClose: () => void;
 }
 
-export default function DriverDocsModal({ driverId, driverName, onClose }: DriverDocsModalProps) {
-  const [docs, setDocs] = useState<DriverDoc[]>([]);
+export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsModalProps) {
+  const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
+  const [documents, setDocuments] = useState<DriverDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -140,7 +143,15 @@ export default function DriverDocsModal({ driverId, driverName, onClose }: Drive
   };
 
   const handleDeleteDoc = async (docObj: DriverDoc) => {
-    if (!confirm(`Tem certeza que deseja excluir o documento "${docObj.name}"?`)) return;
+    const confirmed = await confirm({
+      title: 'Excluir Documento',
+      message: `Tem certeza que deseja excluir o documento "${docObj.type}"?`,
+      confirmText: 'Sim, excluir',
+      cancelText: 'Cancelar',
+      type: 'danger'
+    });
+    
+    if (!confirmed) return;
 
     try {
       // Delete from Storage
@@ -312,5 +323,16 @@ export default function DriverDocsModal({ driverId, driverName, onClose }: Drive
             )}
           </div>
     </StandardModal>
+    
+    <ConfirmDialog
+      isOpen={confirmState.isOpen}
+      onClose={closeConfirm}
+      onConfirm={handleConfirm}
+      title={confirmState.title}
+      message={confirmState.message}
+      confirmText={confirmState.confirmText}
+      cancelText={confirmState.cancelText}
+      type={confirmState.type}
+    />
   );
 }
