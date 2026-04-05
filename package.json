@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "npx kill-port 3000 3001 2>/dev/null || true && next dev",
+    "dev:fast": "./scripts/dev-optimized.sh",
     "build": "next build",
     "build:cf": "npx @cloudflare/next-on-pages@1 && node scripts/prepare-cloudflare-output.mjs",
     "build:c": "npm run build:cf",
