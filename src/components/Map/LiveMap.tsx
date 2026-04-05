@@ -5,25 +5,6 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect } from 'react';
 
-// Icons
-const originIcon = L.icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/3082/3082383.png', // Origin
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-});
-
-const destIcon = L.icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png', // Destination
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-});
-
-const truckIcon = L.icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/3082/3082383.png',
-  iconSize: [40, 40],
-  iconAnchor: [20, 40],
-});
-
 interface LiveTrackingMapProps {
   lat?: number;
   lng?: number;
@@ -47,6 +28,25 @@ function RecenterMap({ lat, lng, bounds }: { lat?: number, lng?: number, bounds?
 }
 
 export default function LiveMap({ lat, lng, motorista, rota }: LiveTrackingMapProps) {
+  // Icons defined inside component to avoid SSR issues
+  const originIcon = L.icon({
+    iconUrl: 'https://cdn-icons-png.flaticon.com/512/3082/3082383.png', // Origin
+    iconSize: [32, 32],
+    iconAnchor: [16, 32],
+  });
+
+  const destIcon = L.icon({
+    iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png', // Destination
+    iconSize: [32, 32],
+    iconAnchor: [16, 32],
+  });
+
+  const truckIcon = L.icon({
+    iconUrl: 'https://cdn-icons-png.flaticon.com/512/3082/3082383.png',
+    iconSize: [40, 40],
+    iconAnchor: [20, 40],
+  });
+
   const points: [number, number][] = [];
   if (rota) {
     points.push([rota.origem.lat, rota.origem.lng]);
