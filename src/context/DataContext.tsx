@@ -269,6 +269,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const timer = setTimeout(() => {
       console.log('🔌 Supabase Real-time: Conectando canal central...');
       
+      // Remove canal existente antes de criar novo para evitar erro de callbacks após subscribe
+      supabase.removeChannel(supabase.channel('geolog-realtime-global'));
+      
       const channel = supabase
         .channel('geolog-realtime-global')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_servico' }, (payload: any) => {

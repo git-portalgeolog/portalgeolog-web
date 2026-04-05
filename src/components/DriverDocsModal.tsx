@@ -47,7 +47,7 @@ export default function DriverDocsModal({ driverId, driverName, onClose }: Drive
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error("Erro ao buscar documentos:", error);
+      console.error("Erro ao buscar documentos:", JSON.stringify(error, null, 2));
       setError("Erro ao carregar documentos.");
     } else {
       setDocs(data as DriverDoc[]);

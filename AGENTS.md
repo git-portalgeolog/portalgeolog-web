@@ -169,3 +169,29 @@ Certifique-se de que o `user.name` e `user.email` no repositório local (`git co
 ---
 
 *Assinado: Certify Web Core Team (2026)*
+
+---
+
+## 🔌 9. MCP Servers Disponíveis
+
+O agente possui acesso aos seguintes MCP servers para operações diretas:
+
+### Supabase MCP
+- **Usar para:** Operações de banco de dados, deploy de Edge Functions, gerenciamento de projetos/branches.
+- **Ferramentas principais:**
+  - `mcp1_execute_sql` - Executar queries SQL
+  - `mcp1_list_tables` - Listar tabelas
+  - `mcp1_get_advisors` - Verificar segurança/performance
+  - `mcp1_deploy_edge_function` - Deploy de Edge Functions
+  - `mcp1_list_projects` - Listar projetos do usuário
+- **Quando usar:** SEMPRE que for necessário verificar schema, executar migrations ou debugar problemas de dados.
+
+### Cloudflare Docs MCP
+- **Usar para:** Buscar documentação oficial do Cloudflare.
+- **Ferramentas principais:**
+  - `mcp0_search_cloudflare_documentation` - Buscar na documentação
+  - `mcp0_migrate_pages_to_workers_guide` - Guia de migração Pages → Workers
+- **Quando usar:** SEMPRE que houver dúvidas sobre deploy, configuração ou features do Cloudflare.
+
+### Regra Obrigatória
+**Antes de sugerir qualquer solução envolvendo Supabase ou Cloudflare, o agente DEVE primeiro consultar os MCPs disponíveis.** Não faça suposições sobre schema ou configuração.

@@ -27,6 +27,20 @@ html {
   font-size: 15px; /* Slightly smaller base for better distribution */
 }
 
+/* Resoluções 1360x768 e 1366x768 - escala reduzida */
+@media (min-width: 1360px) and (max-width: 1366px) and (max-height: 768px) {
+  html {
+    font-size: 13px;
+  }
+}
+
+/* Fallback para larguras próximas */
+@media (max-width: 1400px) and (max-height: 800px) {
+  html {
+    font-size: 13px;
+  }
+}
+
 /* Global font smoothing */
 * {
   -webkit-font-smoothing: antialiased;

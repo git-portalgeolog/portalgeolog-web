@@ -12,6 +12,7 @@ export interface UserProfile {
   tipo_usuario: 'interno' | 'gestor';
   categoria: 'administrador' | 'gestor' | 'financeiro' | 'operador' | 'jovem aprendiz';
   empresa_id?: string;
+  avatar_url?: string | null;
 }
 
 interface AuthContextType {
@@ -53,7 +54,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (data) setProfile(data as UserProfile);
     } catch (err) {
-      console.error('Erro ao buscar perfil:', err);
+      console.error('Erro ao buscar perfil:', err instanceof Error ? err.message : JSON.stringify(err));
     } finally {
       setLoading(false);
     }

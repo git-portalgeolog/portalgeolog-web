@@ -3,6 +3,7 @@
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState, ReactNode, cloneElement, ReactElement } from 'react';
+import { useNotifications } from '@/hooks/useNotifications';
 import { 
   Truck, 
   LogOut, 
@@ -26,7 +27,9 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, loading, logout } = useAuth();
+  const { user, profile, loading, logout } = useAuth();
+  const { unreadCount, notifications, markAsRead, markAllAsRead, realtimeConnected } = useNotifications();
+  const [showNotifications, setShowNotifications] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(true);
@@ -36,6 +39,17 @@ export default function DashboardLayout({
       router.push('/login');
     }
   }, [user, loading, router]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showNotifications) {
+        setShowNotifications(false);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [showNotifications]);
 
   if (loading || !user) {
     return (
@@ -162,19 +176,19 @@ export default function DashboardLayout({
                <Menu size={20} />
             </button>
             <div className="flex flex-col">
-              <span className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em] leading-none mb-1.5">
+              <span className="text-[10px] font-black text-blue-600 uppercase tracking-[0.25em] leading-none mb-1.5 antialiased" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif' }}>
                 {pathname === '/portal/dashboard' ? 'Portal Geolog' : 
                  pathname.includes('/financeiro') ? 'Gestão Financeira' : 
                  'Gestão Operacional'}
               </span>
               <div className="flex items-baseline gap-4">
-                <h1 className="text-2xl font-black text-slate-800 tracking-tight leading-none uppercase">
+                <h1 className="text-xl font-black text-slate-800 tracking-[-0.02em] leading-none uppercase antialiased" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif' }}>
                   {pathname === '/portal/dashboard' ? 'Visão Geral' : 
                    pathname.includes('/os') ? 'Status Operacional' : 
                    pathname.includes('/financeiro') ? 'Medição de Faturamento' :
                    pathname.split('/').pop()?.replace('-', ' ')}
                 </h1>
-                <span className="hidden xl:block text-slate-400 text-sm font-bold border-l border-slate-200 pl-4">
+                <span className="hidden xl:block text-slate-400 text-sm font-bold border-l border-slate-200 pl-4 antialiased" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif' }}>
                   {pathname.includes('/os') ? 'Acompanhamento de rotas' : 
                    pathname.includes('/financeiro') ? 'Fechamento de faturamento' :
                    'Gestão administrativa'}
@@ -184,18 +198,98 @@ export default function DashboardLayout({
           </div>
           
           <div className="flex items-center gap-6">
-             <button className="p-3 text-slate-400 hover:bg-slate-100 hover:text-[var(--color-geolog-blue)] rounded-xl relative transition-all border border-slate-100">
-               <Bell size={20} />
-               <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-blue-600 rounded-full border-2 border-white"></span>
-             </button>
+             <div className="relative">
+               <button 
+                 onClick={() => setShowNotifications(!showNotifications)}
+                 className="p-3 text-slate-400 hover:bg-slate-100 hover:text-[var(--color-geolog-blue)] rounded-xl relative transition-all border border-slate-100 cursor-pointer"
+                 title={`Notificações ${realtimeConnected ? '✅' : '⏳'}`}
+               >
+                 <Bell size={20} />
+                 {unreadCount > 0 && (
+                   <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-black rounded-full flex items-center justify-center border-2 border-white">
+                     {unreadCount > 9 ? '9+' : unreadCount}
+                   </span>
+                 )}
+                 {/* Indicador de status da conexão */}
+                 <div className={`absolute bottom-1 right-1 w-2 h-2 rounded-full border border-white ${
+                   realtimeConnected ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'
+                 }`}></div>
+               </button>
+               
+               {showNotifications && (
+                 <div className="absolute right-0 mt-2 w-96 bg-white border border-slate-200 rounded-2xl shadow-2xl z-[9999] overflow-hidden">
+                   <div className="p-4 border-b border-slate-200">
+                     <div className="flex items-center justify-between">
+                       <div className="flex items-center gap-2">
+                         <h3 className="font-black text-slate-800">Notificações</h3>
+                         <div className={`w-2 h-2 rounded-full ${
+                           realtimeConnected ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'
+                         }`}></div>
+                       </div>
+                       <div className="flex items-center gap-2">
+                         <span className="text-xs text-slate-500">
+                           {realtimeConnected ? 'Tempo real' : 'Conectando...'}
+                         </span>
+                         {unreadCount > 0 && (
+                           <button 
+                             onClick={markAllAsRead}
+                             className="text-xs text-blue-600 hover:text-blue-700 font-black"
+                           >
+                             Marcar todas como lidas
+                           </button>
+                         )}
+                       </div>
+                     </div>
+                   </div>
+                   <div className="max-h-96 overflow-y-auto">
+                     {notifications.length === 0 ? (
+                       <div className="p-8 text-center text-slate-400">
+                         <Bell size={32} className="mx-auto mb-2 opacity-50" />
+                         <p className="text-sm">Nenhuma notificação</p>
+                       </div>
+                     ) : (
+                       notifications.map((notification) => (
+                         <div 
+                           key={notification.id}
+                           className="p-4 border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                           onClick={() => markAsRead(notification.id)}
+                         >
+                           <div className="flex items-start gap-3">
+                             <div className="w-2 h-2 bg-blue-600 rounded-full mt-2 flex-shrink-0"></div>
+                             <div className="flex-1">
+                               <p className="font-black text-sm text-slate-800">{notification.title}</p>
+                               <p className="text-xs text-slate-600 mt-1">{notification.message}</p>
+                               <p className="text-xs text-slate-400 mt-2">
+                                 {new Date(notification.created_at).toLocaleString('pt-BR')}
+                               </p>
+                             </div>
+                           </div>
+                         </div>
+                       ))
+                     )}
+                   </div>
+                 </div>
+               )}
+             </div>
              
              <div className="flex items-center gap-5 pl-8 border-l border-slate-200">
                 <div className="text-right hidden sm:block">
-                   <p className="text-base font-black text-[var(--color-geolog-blue)] leading-tight">{user.email?.split('@')[0]}</p>
-                   <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Administrativo</p>
+                   <p className="text-base font-black text-[var(--color-geolog-blue)] leading-tight antialiased" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif' }}>{profile?.nome || user.email?.split('@')[0]}</p>
+                   <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1 antialiased" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif' }}>{profile?.categoria || 'Administrativo'}</p>
                 </div>
-                <div className="h-12 w-12 bg-[var(--color-geolog-blue)] border-2 border-white rounded-full flex items-center justify-center text-white font-black text-sm shadow-md">
-                   {user.email?.[0].toUpperCase()}
+                <div className="relative h-12 w-12 rounded-full border-2 border-white shadow-md overflow-hidden bg-[var(--color-geolog-blue)] flex items-center justify-center">
+                  {profile?.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img 
+                      src={profile.avatar_url} 
+                      alt={profile.nome || 'Avatar'} 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-white font-black text-sm">
+                      {profile?.nome?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase()}
+                    </span>
+                  )}
                 </div>
              </div>
           </div>

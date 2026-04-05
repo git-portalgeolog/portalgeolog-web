@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { ChevronDown, Search } from 'lucide-react';
+import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { ChevronDown, Search } from "lucide-react";
 
 interface Option {
   id: string;
@@ -17,38 +17,48 @@ interface GeologSearchableSelectProps {
   onChange: (id: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  compact?: boolean;
 }
 
-export default function GeologSearchableSelect({ 
-  label, 
-  options, 
-  value, 
-  onChange, 
-  disabled = false, 
-  placeholder = 'Pesquisar...'
+export default function GeologSearchableSelect({
+  label,
+  options,
+  value,
+  onChange,
+  disabled = false,
+  placeholder = "Pesquisar...",
+  compact = false,
 }: GeologSearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0, bottom: 0, openUpwards: false });
+  const [searchTerm, setSearchTerm] = useState("");
+  const [coords, setCoords] = useState({
+    top: 0,
+    left: 0,
+    width: 0,
+    bottom: 0,
+    openUpwards: false,
+  });
   const [mounted, setMounted] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
 
-  const selectedOption = options.find(opt => opt.id === value);
+  const selectedOption = options.find((opt) => opt.id === value);
 
   useEffect(() => {
     setMounted(true);
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as Node;
       const isInsideWrapper = wrapperRef.current?.contains(target);
-      const isInsidePortal = (target as HTMLElement).closest?.('.geolog-select-portal');
-      
+      const isInsidePortal = (target as HTMLElement).closest?.(
+        ".geolog-select-portal",
+      );
+
       if (!isInsideWrapper && !isInsidePortal) {
         setIsOpen(false);
       }
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Atualiza a posição quando abre ou quando há redimensionamento/scroll
@@ -58,56 +68,62 @@ export default function GeologSearchableSelect({
         const rect = triggerRef.current.getBoundingClientRect();
         const spaceBelow = window.innerHeight - rect.bottom;
         const spaceAbove = rect.top;
-        
+
         // Abre para cima apenas se o espaço abaixo for crítico (< 250px)
         // e se estivermos em uma resolução vertical reduzida (< 880px)
         // ou se houver significativamente mais espaço acima.
-        const needsUpwards = (window.innerHeight < 880 || spaceBelow < 150) && 
-                             spaceBelow < 250 && 
-                             spaceAbove > spaceBelow;
-        
+        const needsUpwards =
+          (window.innerHeight < 880 || spaceBelow < 150) &&
+          spaceBelow < 250 &&
+          spaceAbove > spaceBelow;
+
         setCoords({
           top: rect.bottom,
           bottom: window.innerHeight - rect.top,
           left: rect.left,
           width: rect.width,
-          openUpwards: needsUpwards
+          openUpwards: needsUpwards,
         });
       }
     };
 
     if (isOpen) {
       updateCoords();
-      window.addEventListener('scroll', updateCoords, true);
-      window.addEventListener('resize', updateCoords);
+      window.addEventListener("scroll", updateCoords, true);
+      window.addEventListener("resize", updateCoords);
     }
 
     return () => {
-      window.removeEventListener('scroll', updateCoords, true);
-      window.removeEventListener('resize', updateCoords);
+      window.removeEventListener("scroll", updateCoords, true);
+      window.removeEventListener("resize", updateCoords);
     };
   }, [isOpen]);
 
-  const filteredOptions = options.filter(opt => 
-    opt.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (opt.sublabel && opt.sublabel.toLowerCase().includes(searchTerm.toLowerCase()))
+  const filteredOptions = options.filter(
+    (opt) =>
+      opt.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (opt.sublabel &&
+        opt.sublabel.toLowerCase().includes(searchTerm.toLowerCase())),
   );
 
   const dropdownContent = (
-    <div 
+    <div
       className={`geolog-select-portal fixed z-[9999] bg-white border-2 border-slate-100 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] rounded-3xl overflow-hidden animate-in fade-in duration-200 ${
-        coords.openUpwards ? 'slide-in-from-bottom-2' : 'slide-in-from-top-2'
+        coords.openUpwards ? "slide-in-from-bottom-2" : "slide-in-from-top-2"
       }`}
       style={{
-        top: coords.openUpwards ? 'auto' : `${coords.top + 8}px`,
-        bottom: coords.openUpwards ? `${coords.bottom + 8}px` : 'auto',
+        top: coords.openUpwards ? "auto" : `${coords.top + 8}px`,
+        bottom: coords.openUpwards ? `${coords.bottom + 8}px` : "auto",
         left: `${coords.left}px`,
         width: `${coords.width}px`,
       }}
     >
       <div className="p-4 border-b-2 border-slate-50 relative bg-slate-50/50">
-        <Search size={18} className="absolute left-8 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input 
+        <Search
+          size={18}
+          className="absolute left-8 top-1/2 -translate-y-1/2 text-slate-400"
+        />
+        <input
           autoFocus
           type="text"
           placeholder="Digite para filtrar..."
@@ -116,22 +132,26 @@ export default function GeologSearchableSelect({
           className="w-full pl-12 pr-4 py-3 bg-white rounded-xl text-sm font-bold text-slate-900 outline-none border-2 border-transparent focus:border-blue-500 shadow-sm"
         />
       </div>
-      
+
       <div className="max-h-60 overflow-y-auto custom-scrollbar">
         {filteredOptions.length > 0 ? (
           filteredOptions.map((opt) => (
-            <div 
+            <div
               key={opt.id}
               onClick={() => {
                 onChange(opt.id);
                 setIsOpen(false);
-                setSearchTerm('');
+                setSearchTerm("");
               }}
-              className={`px-6 py-4 hover:bg-blue-50 cursor-pointer flex flex-col gap-0.5 transition-colors border-l-4 border-transparent ${value === opt.id ? 'bg-blue-50/50 border-blue-600' : ''}`}
+              className={`px-6 py-4 hover:bg-blue-50 cursor-pointer flex flex-col gap-0.5 transition-colors border-l-4 border-transparent ${value === opt.id ? "bg-blue-50/50 border-blue-600" : ""}`}
             >
-              <span className="font-bold text-slate-900 text-base">{opt.nome}</span>
+              <span className="font-bold text-slate-900 text-base">
+                {opt.nome}
+              </span>
               {opt.sublabel && (
-                <span className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest">{opt.sublabel}</span>
+                <span className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest">
+                  {opt.sublabel}
+                </span>
               )}
             </div>
           ))
@@ -146,23 +166,32 @@ export default function GeologSearchableSelect({
 
   return (
     <div className="space-y-2 group relative" ref={wrapperRef}>
-      <label className="text-sm font-black uppercase text-slate-500 tracking-wider ml-1">
+      <label
+        className={`font-black uppercase text-slate-500 tracking-wider ml-1 ${compact ? "text-[10px]" : "text-sm"}`}
+      >
         {label}
       </label>
-      
-      <div 
+
+      <div
         ref={triggerRef}
         onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`geolog-searchable-trigger w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl flex items-center justify-between cursor-pointer transition-all hover:bg-white hover:border-blue-300 ${isOpen ? 'ring-4 ring-blue-500/10 border-blue-500 bg-white' : ''} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} shadow-sm`}
+        className={`geolog-searchable-trigger w-full bg-slate-50 border-2 border-slate-200 rounded-xl flex items-center justify-between cursor-pointer transition-all hover:bg-white hover:border-blue-300 ${isOpen ? "ring-4 ring-blue-500/10 border-blue-500 bg-white" : ""} ${disabled ? "opacity-50 cursor-not-allowed" : ""} shadow-sm ${compact ? "px-4 py-3" : "px-5 py-4"}`}
       >
-        <span className={`font-bold text-base ${selectedOption ? 'text-slate-900' : 'text-slate-400'}`}>
+        <span
+          className={`font-bold ${selectedOption ? "text-slate-900" : "text-slate-400"} ${compact ? "text-base" : "text-lg"}`}
+        >
           {selectedOption ? selectedOption.nome : placeholder}
         </span>
-        <ChevronDown size={18} className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180 text-blue-500' : ''}`} />
+        <ChevronDown
+          size={compact ? 18 : 20}
+          className={`text-slate-400 transition-transform ${isOpen ? "rotate-180 text-blue-500" : ""}`}
+        />
       </div>
 
-      {isOpen && !disabled && mounted && createPortal(dropdownContent, document.body)}
+      {isOpen &&
+        !disabled &&
+        mounted &&
+        createPortal(dropdownContent, document.body)}
     </div>
   );
 }
-

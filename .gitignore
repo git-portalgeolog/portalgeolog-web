@@ -31,3 +31,12 @@ cloudflare-output
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# IDE and cache files
+.cache/
+.config/
+.claude.json
+.openclaude-profile.json
+.inputrc
+.windsurf/
+.npm/

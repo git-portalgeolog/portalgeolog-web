@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import StandardModal from '@/components/StandardModal';
@@ -26,6 +26,7 @@ export default function MotoristasPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [selectedDriverForDocs, setSelectedDriverForDocs] = useState<Driver | null>(null);
+  const actionMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const supabase = createClient();
 
   // Form state
@@ -138,105 +139,104 @@ export default function MotoristasPage() {
       </div>
 
       {/* Drivers List */}
-      <div className="bg-white dark:bg-[var(--color-geolog-secondary)] rounded-3xl shadow-sm border border-gray-100 dark:border-white/5">
-        {loading ? (
-          <div className="p-20 flex flex-col items-center justify-center gap-4">
-             <Loader2 className="w-10 h-10 text-cyan-400 animate-spin" />
-             <p className="text-[var(--color-geolog-accent)]">Buscando motoristas no banco...</p>
-          </div>
-        ) : filteredDrivers.length === 0 ? (
-          <div className="p-20 text-center">
-             <div className="bg-gray-50 dark:bg-[var(--color-geolog-blue)] w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Truck className="text-[var(--color-geolog-accent)]" size={30} />
-             </div>
-             <h3 className="text-lg font-bold text-gray-800 dark:text-white">Nenhum motorista encontrado</h3>
-             <p className="text-gray-500 max-w-xs mx-auto mt-1">Comece cadastrando seu primeiro condutor clicando no botão acima.</p>
-          </div>
-        ) : (
-          <div className="">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b dark:border-white/5 bg-gray-50 dark:bg-[var(--color-geolog-blue)]">
-                  <th className="px-6 py-4 text-sm font-bold text-gray-500 dark:text-[var(--color-geolog-accent)]">NOME</th>
-                  <th className="px-6 py-4 text-sm font-bold text-gray-500 dark:text-[var(--color-geolog-accent)]">DOCUMENTOS</th>
-                  <th className="px-6 py-4 text-sm font-bold text-gray-500 dark:text-[var(--color-geolog-accent)]">CONTATO</th>
-                  <th className="px-6 py-4 text-sm font-bold text-gray-500 dark:text-[var(--color-geolog-accent)]">STATUS</th>
-                  <th className="px-6 py-4 text-sm font-bold text-gray-500 dark:text-[var(--color-geolog-accent)]"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y dark:divide-white/5">
-                {filteredDrivers.map((driver) => (
-                  <tr key={driver.id} className="hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-cyan-100 dark:bg-[var(--color-geolog-blue)] border dark:border-white/10 rounded-full flex items-center justify-center text-cyan-600 dark:text-cyan-400 font-bold">
-                          {driver.name[0]}
-                        </div>
-                        <div>
-                          <p className="font-bold text-gray-900 dark:text-white">{driver.name}</p>
-                          <p className="text-xs text-gray-500">ID: {driver.id.substring(0, 8)}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5">
-                       <div className="text-sm">
-                          <p className="text-gray-600 dark:text-[var(--color-geolog-accent)]"><span className="font-semibold text-gray-900 dark:text-white">CPF:</span> {driver.cpf}</p>
-                          <p className="text-gray-600 dark:text-[var(--color-geolog-accent)]"><span className="font-semibold text-gray-900 dark:text-white">CNH:</span> {driver.cnh}</p>
-                       </div>
-                    </td>
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-2 text-gray-600 dark:text-[var(--color-geolog-accent)]">
-                        <Phone size={14} className="text-cyan-500" />
-                        <span className="text-sm font-medium">{driver.phone}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5">
-                      <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-bold rounded-full">
-                        ATIVO
-                      </span>
-                    </td>
-                     <td className="px-6 py-5 text-right relative">
-                       <button 
-                         onClick={() => setActiveMenuId(activeMenuId === driver.id ? null : driver.id)}
-                         className="p-2 hover:bg-gray-100 dark:hover:bg-blue-800 rounded-full text-gray-400"
-                       >
-                         <MoreVertical size={20} />
-                       </button>
-
-                       <AnimatePresence>
-                         {activeMenuId === driver.id && (
-                           <>
-                             <div 
-                               className="fixed inset-0 z-[55]" 
-                               onClick={() => setActiveMenuId(null)}
-                             />
-                             <motion.div
-                               initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                               animate={{ opacity: 1, scale: 1, y: 0 }}
-                               exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                               className="absolute right-4 mt-2 w-48 bg-white dark:bg-[var(--color-geolog-secondary)] rounded-xl shadow-2xl border dark:border-white/10 z-[60] overflow-hidden"
-                             >
-                               <button
-                                 onClick={() => {
-                                   setSelectedDriverForDocs(driver);
-                                   setActiveMenuId(null);
-                                 }}
-                                 className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-white/5 flex items-center gap-2 dark:text-white transition-colors"
-                               >
-                                 <FileText size={16} className="text-cyan-500" />
-                                 Documentações
-                               </button>
-                             </motion.div>
-                           </>
-                         )}
-                       </AnimatePresence>
-                     </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm relative overflow-visible">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">Motorista</th>
+              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">Documentos</th>
+              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">Contato</th>
+              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600 text-center">Status</th>
+              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600 text-center">Ações</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filteredDrivers.map((driver) => (
+              <tr key={driver.id} className="hover:bg-slate-50/50 transition-colors align-top">
+                <td className="px-6 py-5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-cyan-50 text-cyan-600 rounded-lg flex items-center justify-center font-black">
+                      {driver.name[0]}
+                    </div>
+                    <div className="space-y-1">
+                      <p className="font-black text-base text-slate-800 tracking-tight uppercase">{driver.name}</p>
+                      <p className="text-sm font-semibold text-slate-400">ID: {driver.id.substring(0, 8)}</p>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-6 py-5">
+                  <div className="space-y-1">
+                    <p className="text-base font-semibold text-slate-700"><span className="font-black text-slate-900">CPF:</span> {driver.cpf}</p>
+                    <p className="text-base font-semibold text-slate-700"><span className="font-black text-slate-900">CNH:</span> {driver.cnh}</p>
+                  </div>
+                </td>
+                <td className="px-6 py-5">
+                  <div className="flex items-center gap-2 text-slate-700">
+                    <Phone size={14} className="text-cyan-500" />
+                    <span className="text-base font-bold">{driver.phone}</span>
+                  </div>
+                </td>
+                <td className="px-6 py-5 text-center">
+                  <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs md:text-sm font-bold uppercase tracking-wide border bg-green-100 text-green-700 border-green-200">
+                    ATIVO
+                  </span>
+                </td>
+                <td className="px-6 py-5 text-center">
+                  <div
+                    className="relative inline-block"
+                    ref={(el) => {
+                      if (el) {
+                        actionMenuRefs.current[driver.id] = el;
+                      } else {
+                        delete actionMenuRefs.current[driver.id];
+                      }
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setActiveMenuId((prev) => (prev === driver.id ? null : driver.id));
+                      }}
+                      className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-cyan-600 hover:border-cyan-200 transition-all shadow-sm"
+                      aria-haspopup="true"
+                      aria-expanded={activeMenuId === driver.id}
+                    >
+                      <MoreVertical size={18} />
+                    </button>
+                    <AnimatePresence>
+                      {activeMenuId === driver.id && (
+                        <>
+                          <div 
+                            className="fixed inset-0 z-[55]" 
+                            onClick={() => setActiveMenuId(null)}
+                          />
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                            className="absolute right-0 mt-2 min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-50"
+                          >
+                            <button
+                              onClick={() => {
+                                setSelectedDriverForDocs(driver);
+                                setActiveMenuId(null);
+                              }}
+                              className="w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-3"
+                            >
+                              <FileText size={16} className="text-cyan-500" />
+                              Documentações
+                            </button>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {/* Modal de Cadastro */}
