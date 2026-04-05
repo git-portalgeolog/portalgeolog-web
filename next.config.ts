@@ -10,7 +10,6 @@ const nextConfig: NextConfig = {
   },
   
   // Otimizações para desenvolvimento
-  swcMinify: true,
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production',
   },
@@ -37,6 +36,25 @@ const nextConfig: NextConfig = {
         poll: false,
         aggregateTimeout: 300,
         ignored: ['**/node_modules/**', '**/.git/**', '**/.next/**']
+      };
+    }
+    
+    // Fix for "self is not defined" error
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+        crypto: false,
+        stream: false,
+        url: false,
+        zlib: false,
+        http: false,
+        https: false,
+        assert: false,
+        os: false,
+        path: false,
       };
     }
     
