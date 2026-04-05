@@ -479,7 +479,7 @@ export default function OSOperationalPage() {
     setFormData(prev => ({
       ...prev,
       tipoServico: servico?.nome || '',
-      valorBruto: servico?.precoBase || 0
+      valorBruto: 0
     }));
   };
 
@@ -917,7 +917,7 @@ export default function OSOperationalPage() {
                         />
                         <GeologSearchableSelect 
                            label="Tipo de Serviço" 
-                           options={servicos.map(s => ({ id: s.id, nome: s.nome, sublabel: formatCurrency(s.precoBase) }))} 
+                           options={servicos.map(s => ({ id: s.id, nome: s.nome }))} 
                            value={servicos.find(s => s.nome === formData.tipoServico)?.id || ''} 
                            onChange={handleServicoChange} 
                         />

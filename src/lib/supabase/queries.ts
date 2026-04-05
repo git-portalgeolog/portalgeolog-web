@@ -170,19 +170,18 @@ export async function insertFornecedor(nome: string, tipo: string, telefone?: st
 export async function fetchServicos(): Promise<TipoServico[]> {
   const { data, error } = await supabase
     .from('tipos_servico')
-    .select('id, nome, preco_base')
+    .select('id, nome')
     .order('nome');
 
   if (error) throw error;
   return (data || []).map((s: any) => ({
     id: s.id,
     nome: s.nome,
-    precoBase: s.preco_base,
   }));
 }
 
-export async function insertServico(nome: string, precoBase: number): Promise<void> {
-  const { error } = await supabase.from('tipos_servico').insert({ nome, preco_base: precoBase });
+export async function insertServico(nome: string): Promise<void> {
+  const { error } = await supabase.from('tipos_servico').insert({ nome });
   if (error) throw error;
 }
 
@@ -190,8 +189,7 @@ export async function updateServicoInDB(id: string, updates: Partial<TipoServico
   const { error } = await supabase
     .from('tipos_servico')
     .update({ 
-      nome: updates.nome, 
-      preco_base: updates.precoBase 
+      nome: updates.nome
     })
     .eq('id', id);
 

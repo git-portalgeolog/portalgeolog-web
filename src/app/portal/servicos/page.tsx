@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useData, TipoServico } from '@/context/DataContext';
-import { Plus, Package, DollarSign, Trash2, Edit2, X } from 'lucide-react';
+import { Plus, Package, Trash2, Edit2, X } from 'lucide-react';
 import StandardModal from '@/components/StandardModal';
 import { toast } from 'sonner';
 
@@ -10,15 +10,15 @@ export default function ServicosPage() {
   const { servicos, addServico, updateServico, deleteServico } = useData();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingServico, setEditingServico] = useState<TipoServico | null>(null);
-  const [formData, setFormData] = useState({ nome: '', precoBase: 0 });
+  const [formData, setFormData] = useState({ nome: '' });
 
   const handleOpenModal = (servico?: TipoServico) => {
     if (servico) {
       setEditingServico(servico);
-      setFormData({ nome: servico.nome, precoBase: servico.precoBase });
+      setFormData({ nome: servico.nome });
     } else {
       setEditingServico(null);
-      setFormData({ nome: '', precoBase: 0 });
+      setFormData({ nome: '' });
     }
     setIsModalOpen(true);
   };
@@ -30,12 +30,12 @@ export default function ServicosPage() {
     if (editingServico) {
       updateServico(editingServico.id, formData);
     } else {
-      addServico(formData.nome, formData.precoBase);
+      addServico(formData.nome);
     }
     
     setIsModalOpen(false);
     setEditingServico(null);
-    setFormData({ nome: '', precoBase: 0 });
+    setFormData({ nome: '' });
   };
 
   const handleDelete = (id: string) => {
@@ -44,16 +44,13 @@ export default function ServicosPage() {
     }
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-  };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-[var(--color-geolog-blue)]">Tipos de Serviço</h1>
-          <p className="text-slate-500 font-medium text-sm">Defina os serviços oferecidos e seus preços base.</p>
+          <p className="text-slate-500 font-medium text-sm">Defina os serviços oferecidos.</p>
         </div>
         <button 
           onClick={() => handleOpenModal()}
@@ -69,14 +66,13 @@ export default function ServicosPage() {
           <thead>
             <tr className="bg-slate-50/80 border-b border-slate-200">
               <th className="px-8 py-5 text-[11px] font-black uppercase tracking-widest text-slate-400">Serviço</th>
-              <th className="px-8 py-5 text-[11px] font-black uppercase tracking-widest text-slate-400">Preço Base</th>
-              <th className="px-8 py-5 text-[11px] font-black uppercase tracking-widest text-slate-400 text-center">Ações de Gestão</th>
+              <th className="px-8 py-5 text-[11px] font-black uppercase tracking-widest text-slate-400 text-center">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {servicos.length === 0 ? (
                <tr>
-                 <td colSpan={3} className="text-center py-20 text-slate-400 font-bold italic">Nenhum serviço cadastrado.</td>
+                <td colSpan={2} className="text-center py-20 text-slate-400 font-bold italic">Nenhum serviço cadastrado.</td>
                </tr>
             ) : (
               servicos.map((s) => (
@@ -87,12 +83,6 @@ export default function ServicosPage() {
                         <Package size={18} />
                       </div>
                       <span className="font-bold text-slate-800 text-sm">{s.nome}</span>
-                    </div>
-                  </td>
-                  <td className="px-8 py-4">
-                    <div className="flex items-center gap-2 text-emerald-600 font-bold text-sm">
-                      <DollarSign size={14} strokeWidth={3} />
-                      <span>{formatCurrency(s.precoBase)}</span>
                     </div>
                   </td>
                   <td className="px-8 py-4">
@@ -147,20 +137,6 @@ export default function ServicosPage() {
                     value={formData.nome} 
                     onChange={e => setFormData({...formData, nome: e.target.value})} 
                   />
-                </div>
-                
-                <div className="space-y-2">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Preço Base Sugerido (R$)</label>
-                  <div className="relative">
-                    <div className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">R$</div>
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      className="w-full pl-12 pr-5 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-sm text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
-                      value={formData.precoBase || ''} 
-                      onChange={e => setFormData({...formData, precoBase: parseFloat(e.target.value) || 0})} 
-                    />
-                  </div>
                 </div>
               </div>
             </div>

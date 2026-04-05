@@ -62,7 +62,6 @@ export interface Fornecedor {
 export interface TipoServico {
   id: string;
   nome: string;
-  precoBase: number;
 }
 
 export interface Waypoint {
@@ -176,7 +175,7 @@ interface DataContextType {
   updateCentroCusto: (id: string, updates: Partial<CentroCusto>) => void;
   deleteCentroCusto: (id: string) => void;
   
-  addServico: (nome: string, precoBase: number) => void;
+  addServico: (nome: string) => void;
   updateServico: (id: string, updates: Partial<TipoServico>) => void;
   deleteServico: (id: string) => void;
   
@@ -386,8 +385,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     insertFornecedor(nome, tipo, telefone).catch(err => console.error('Error insertFornecedor:', err));
   };
 
-  const addServico = (nome: string, precoBase: number) => {
-    insertServico(nome, precoBase).catch(err => console.error('Error insertServico:', err));
+  const addServico = (nome: string) => {
+    insertServico(nome).catch(err => console.error('Error insertServico:', err));
   };
 
   const updateServico = (id: string, updates: Partial<TipoServico>) => {

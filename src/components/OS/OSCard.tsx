@@ -31,11 +31,11 @@ export default function OSCard({ os, onClick }: OSCardProps) {
           </div>
           <div>
             <h3 className="font-bold text-slate-800">OS-{os.os}</h3>
-            <p className="text-sm text-slate-500">{os.cliente}</p>
+            <p className="text-sm text-slate-500">{os.clienteId}</p>
           </div>
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(os.status)}`}>
-          {os.status}
+        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(os.status.operacional)}`}>
+          {os.status.operacional}
         </span>
       </div>
       
@@ -54,7 +54,7 @@ export default function OSCard({ os, onClick }: OSCardProps) {
         </div>
         <div className="flex items-center gap-2 text-slate-600">
           <Building size={16} />
-          <span>{os.centroCusto}</span>
+          <span>{os.centroCustoId || 'N/A'}</span>
         </div>
       </div>
     </div>
