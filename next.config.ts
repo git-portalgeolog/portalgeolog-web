@@ -16,7 +16,6 @@ const nextConfig: NextConfig = {
   
   // Otimizar recompilação
   experimental: {
-    optimizeCss: true,
     optimizePackageImports: ['lucide-react', 'framer-motion'],
   },
   
