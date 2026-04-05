@@ -30,7 +30,7 @@ const nextConfig: NextConfig = {
   },
   
   // Reduzir uso de memória
-  webpack: (config, { dev, isServer }) => {
+  webpack: (config, { dev, isServer, webpack }) => {
     if (dev) {
       config.watchOptions = {
         poll: false,
@@ -59,12 +59,13 @@ const nextConfig: NextConfig = {
     }
     
     // Define self for both client and server
-    config.plugins = [
-      ...config.plugins,
-      new config.webpack.DefinePlugin({
-        self: isServer ? 'this' : 'window',
-      }),
-    ];
+    if (webpack) {
+      config.plugins.push(
+        new webpack.DefinePlugin({
+          self: isServer ? 'this' : 'window',
+        })
+      );
+    }
     
     // Otimizar bundle
     config.optimization = {
