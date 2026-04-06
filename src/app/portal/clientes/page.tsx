@@ -6,7 +6,9 @@ import StandardModal from '@/components/StandardModal';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useConfirm } from '@/hooks/useConfirm';
-import { Plus, Search, Building, User, Trash2, ChevronRight, Edit2, Copy, Check, Hash, LayoutGrid } from 'lucide-react';
+import { Plus, Search, Building, User, Trash2, Edit2, Copy, Check, Hash, LayoutGrid } from 'lucide-react';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { toast } from 'sonner';
 
 export default function ClientesPage() {
   const { 
@@ -21,7 +23,6 @@ export default function ClientesPage() {
     addCentroCusto,
     updateCentroCusto,
     deleteCentroCusto,
-    getSolicitantesByCliente,
     getCentrosCustoByCliente
   } = useData();
   
@@ -54,20 +55,25 @@ export default function ClientesPage() {
   );
 
   const selectedCliente = clientes.find(c => c.id === selectedClienteId);
-  const selectedCentroCusto = selectedCliente?.centrosCusto.find(cc => cc.id === selectedCentroCustoId);
 
   // Handlers for Cliente
-  const handleCreateCliente = (e: React.FormEvent) => {
+  const handleCreateCliente = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (newCliente.nome) {
-      if (editingCliente) {
-        updateCliente(editingCliente.id, newCliente);
-        setEditingCliente(null);
-      } else {
-        addCliente(newCliente.nome, newCliente.contato);
+      try {
+        if (editingCliente) {
+          await updateCliente(editingCliente.id, newCliente);
+          setEditingCliente(null);
+        } else {
+          await addCliente(newCliente.nome, newCliente.contato);
+        }
+
+        setNewCliente({ nome: '', contato: '' });
+        setIsClienteModalOpen(false);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Não foi possível salvar a empresa.');
       }
-      setNewCliente({ nome: '', contato: '' });
-      setIsClienteModalOpen(false);
     }
   };
 
@@ -188,19 +194,12 @@ export default function ClientesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-black text-[var(--color-geolog-blue)] tracking-tight">Hierarquia Geolog</h1>
-          <p className="text-slate-500 font-medium text-base">Gerencie a estrutura completa: Empresa &gt; Centro de Custo &gt; Solicitantes.</p>
-        </div>
-        <button 
-          onClick={() => setIsClienteModalOpen(true)}
-          className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer"
-        >
-          <Plus size={18} />
-          Nova Empresa
-        </button>
-      </div>
+      <PageHeader
+        title="Hierarquia Geolog"
+        icon={<Building size={20} />}
+        buttonText="Nova Empresa"
+        onButtonClick={() => setIsClienteModalOpen(true)}
+      />
 
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
         <div className="flex-1 relative">
@@ -237,7 +236,7 @@ export default function ClientesPage() {
                      <Building size={18} />
                    </div>
                     <div className="max-w-[340px]">
-                      <p className={`text-lg font-black truncate ${selectedClienteId === cliente.id ? 'text-blue-700' : 'text-slate-700'}`}>
+                      <p className={`text-base font-black truncate ${selectedClienteId === cliente.id ? 'text-blue-700' : 'text-slate-700'}`}>
                         {cliente.nome}
                       </p>
                       <div 
@@ -314,7 +313,7 @@ export default function ClientesPage() {
                       }`}>
                         <Hash size={14} />
                       </div>
-                      <span className={`text-lg font-black ${selectedCentroCustoId === cc.id ? 'text-emerald-700' : 'text-slate-600'}`}>
+                      <span className={`text-base font-black ${selectedCentroCustoId === cc.id ? 'text-emerald-700' : 'text-slate-600'}`}>
                         {cc.nome}
                       </span>
                     </div>
@@ -369,7 +368,7 @@ export default function ClientesPage() {
                           <User size={14} />
                         </div>
                         <div>
-                          <p className="text-lg font-black text-slate-700">{s.nome}</p>
+                          <p className="text-base font-black text-slate-700">{s.nome}</p>
                           {s.centroCustoId && (
                             <p className="text-xs font-medium text-blue-400 uppercase tracking-wider flex items-center gap-1">
                               <Hash size={8} /> {selectedCliente?.centrosCusto.find(cc => cc.id === s.centroCustoId)?.nome}

@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '@/context/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import StandardModal from '@/components/StandardModal';
-import { UserPlus, Search, Phone, IdCard, MoreVertical, Loader2, Truck, FileText } from 'lucide-react';
+import { UserPlus, Phone, IdCard, MoreVertical, Loader2, Truck, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import DriverDocsModal from '@/components/DriverDocsModal';
+import { DataTable } from '@/components/ui/DataTable';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { toast } from 'sonner';
 
 interface Driver {
   id: string;
@@ -19,7 +21,6 @@ interface Driver {
 }
 
 export default function MotoristasPage() {
-  const { user } = useAuth();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -37,6 +38,39 @@ export default function MotoristasPage() {
     phone: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const normalizeTextValue = (value: string): string => value.trim().toLowerCase();
+  const normalizeDigitsValue = (value: string): string => value.replace(/\D/g, '');
+
+  const hasDuplicateDriver = (field: 'name' | 'cpf' | 'cnh', value: string): boolean => {
+    const normalizedValue = field === 'name' ? normalizeTextValue(value) : normalizeDigitsValue(value);
+
+    if (!normalizedValue) {
+      return false;
+    }
+
+    return drivers.some((driver) => {
+      const driverValue = driver[field] ?? '';
+      const normalizedDriverValue = field === 'name' ? normalizeTextValue(driverValue) : normalizeDigitsValue(driverValue);
+      return normalizedDriverValue === normalizedValue;
+    });
+  };
+
+  const getDuplicateDriverMessage = (driverData: typeof formData): string | null => {
+    if (hasDuplicateDriver('name', driverData.name)) {
+      return 'Já existe um motorista com este nome.';
+    }
+
+    if (hasDuplicateDriver('cpf', driverData.cpf)) {
+      return 'Já existe um motorista com este CPF.';
+    }
+
+    if (hasDuplicateDriver('cnh', driverData.cnh)) {
+      return 'Já existe um motorista com esta CNH.';
+    }
+
+    return null;
+  };
 
   useEffect(() => {
     const fetchDrivers = async () => {
@@ -77,11 +111,20 @@ export default function MotoristasPage() {
     setIsSubmitting(true);
 
     try {
+      const duplicateMessage = getDuplicateDriverMessage(formData);
+
+      if (duplicateMessage) {
+        throw new Error(duplicateMessage);
+      }
+
       const { error } = await supabase
         .from('drivers')
         .insert([
           {
-            ...formData,
+            name: formData.name.trim(),
+            cpf: formData.cpf.trim(),
+            cnh: formData.cnh.trim(),
+            phone: formData.phone.trim(),
             status: 'active',
           }
         ]);
@@ -91,8 +134,16 @@ export default function MotoristasPage() {
       setIsModalOpen(false);
       setFormData({ name: '', cpf: '', cnh: '', phone: '' });
     } catch (error) {
-      console.error("Erro ao salvar motorista:", error);
-      alert("Erro ao salvar no Supabase. Verifique as políticas de RLS.");
+      const duplicateMessage = getDuplicateDriverMessage(formData);
+
+      if (duplicateMessage) {
+        toast.error(duplicateMessage);
+      } else if (error instanceof Error && error.message.toLowerCase().includes('duplicate key value violates unique constraint')) {
+        toast.error('Já existe um motorista com esses dados.');
+      } else {
+        console.error('Erro ao salvar motorista:', error);
+        toast.error('Erro ao salvar no Supabase. Verifique as políticas de RLS.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -104,140 +155,137 @@ export default function MotoristasPage() {
   );
 
   return (
-    <div>
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-            <IdCard className="text-cyan-400" />
-            Gerenciamento de Motoristas
-          </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">Cadastre e gerencie a frota de condutores da Geolog.</p>
-        </div>
-        
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="bg-cyan-500 hover:bg-cyan-400 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-cyan-500/20 active:scale-95"
-        >
-          <UserPlus size={20} />
-          Novo Motorista
-        </button>
-      </div>
-
-      {/* Filters & Search */}
-      <div className="bg-white dark:bg-[var(--color-geolog-secondary)] p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-white/5 mb-6 flex items-center gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-3 text-[var(--color-geolog-accent)]" size={20} />
-          <input 
-            type="text" 
-            placeholder="Buscar por nome ou CPF..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-gray-50 dark:bg-[var(--color-geolog-blue)] border border-gray-200 dark:border-white/5 rounded-xl focus:ring-2 focus:ring-cyan-500 outline-none transition-all dark:text-white"
-          />
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Gerenciamento de Motoristas"
+        icon={<IdCard size={20} />}
+        buttonText="Novo Motorista"
+        onButtonClick={() => setIsModalOpen(true)}
+        buttonIcon={<UserPlus size={18} />}
+      />
 
       {/* Drivers List */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm relative overflow-visible">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">Motorista</th>
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">Documentos</th>
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">Contato</th>
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600 text-center">Status</th>
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600 text-center">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredDrivers.map((driver) => (
-              <tr key={driver.id} className="hover:bg-slate-50/50 transition-colors align-top">
-                <td className="px-6 py-5">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-cyan-50 text-cyan-600 rounded-lg flex items-center justify-center font-black">
-                      {driver.name[0]}
-                    </div>
-                    <div className="space-y-1">
-                      <p className="font-black text-base text-slate-800 tracking-tight uppercase">{driver.name}</p>
-                      <p className="text-sm font-semibold text-slate-400">ID: {driver.id.substring(0, 8)}</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-6 py-5">
-                  <div className="space-y-1">
-                    <p className="text-base font-semibold text-slate-700"><span className="font-black text-slate-900">CPF:</span> {driver.cpf}</p>
-                    <p className="text-base font-semibold text-slate-700"><span className="font-black text-slate-900">CNH:</span> {driver.cnh}</p>
-                  </div>
-                </td>
-                <td className="px-6 py-5">
-                  <div className="flex items-center gap-2 text-slate-700">
-                    <Phone size={14} className="text-cyan-500" />
-                    <span className="text-base font-bold">{driver.phone}</span>
-                  </div>
-                </td>
-                <td className="px-6 py-5 text-center">
-                  <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs md:text-sm font-bold uppercase tracking-wide border bg-green-100 text-green-700 border-green-200">
-                    ATIVO
-                  </span>
-                </td>
-                <td className="px-6 py-5 text-center">
-                  <div
-                    className="relative inline-block"
-                    ref={(el) => {
-                      if (el) {
-                        actionMenuRefs.current[driver.id] = el;
-                      } else {
-                        delete actionMenuRefs.current[driver.id];
-                      }
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setActiveMenuId((prev) => (prev === driver.id ? null : driver.id));
-                      }}
-                      className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-cyan-600 hover:border-cyan-200 transition-all shadow-sm"
-                      aria-haspopup="true"
-                      aria-expanded={activeMenuId === driver.id}
-                    >
-                      <MoreVertical size={18} />
-                    </button>
-                    <AnimatePresence>
-                      {activeMenuId === driver.id && (
-                        <>
-                          <div 
-                            className="fixed inset-0 z-[55]" 
-                            onClick={() => setActiveMenuId(null)}
-                          />
-                          <motion.div
-                            initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                            className="absolute right-0 mt-2 min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-50"
-                          >
-                            <button
-                              onClick={() => {
-                                setSelectedDriverForDocs(driver);
-                                setActiveMenuId(null);
-                              }}
-                              className="w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-3"
-                            >
-                              <FileText size={16} className="text-cyan-500" />
-                              Documentações
-                            </button>
-                          </motion.div>
-                        </>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={filteredDrivers}
+        loading={loading}
+        columns={[
+          {
+            key: 'name',
+            title: 'Motorista',
+            render: (value: unknown, item: Driver) => (
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-cyan-50 text-cyan-600 rounded-lg flex items-center justify-center font-black">
+                  {String(value)[0]}
+                </div>
+                <div className="space-y-1">
+                  <p className="font-black text-base text-slate-800 tracking-tight uppercase">{String(value)}</p>
+                  <p className="text-sm font-semibold text-slate-400">ID: {item.id.substring(0, 8)}</p>
+                </div>
+              </div>
+            )
+          },
+          {
+            key: 'documentos',
+            title: 'Documentos',
+            render: (value: unknown, item: Driver) => {
+              void value;
+
+              return (
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-slate-700"><span className="font-black text-slate-900">CPF:</span> {item.cpf}</p>
+                <p className="text-base font-semibold text-slate-700"><span className="font-black text-slate-900">CNH:</span> {item.cnh}</p>
+              </div>
+              );
+            }
+          },
+          {
+            key: 'phone',
+            title: 'Contato',
+            render: (value: unknown) => (
+              <div className="flex items-center gap-2 text-slate-700">
+                <Phone size={14} className="text-cyan-500" />
+                <span className="text-base font-bold">{String(value)}</span>
+              </div>
+            )
+          },
+          {
+            key: 'status',
+            title: 'Status',
+            align: 'center',
+            render: () => (
+              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs md:text-sm font-bold uppercase tracking-wide border bg-green-100 text-green-700 border-green-200">
+                ATIVO
+              </span>
+            )
+          },
+          {
+            key: 'acoes',
+            title: 'Ações',
+            align: 'center',
+            render: (value: unknown, item: Driver) => {
+              void value;
+
+              return (
+              <div
+                className="relative inline-block"
+                ref={(el) => {
+                  if (el) {
+                    actionMenuRefs.current[item.id] = el;
+                  } else {
+                    delete actionMenuRefs.current[item.id];
+                  }
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setActiveMenuId((prev) => (prev === item.id ? null : item.id));
+                  }}
+                  className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-cyan-600 hover:border-cyan-200 transition-all shadow-sm"
+                  aria-haspopup="true"
+                  aria-expanded={activeMenuId === item.id}
+                >
+                  <MoreVertical size={18} />
+                </button>
+                <AnimatePresence>
+                  {activeMenuId === item.id && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-[55]" 
+                        onClick={() => setActiveMenuId(null)}
+                      />
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                        className="absolute right-0 mt-2 min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-50"
+                      >
+                        <button
+                          onClick={() => {
+                            setSelectedDriverForDocs(item);
+                            setActiveMenuId(null);
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-3"
+                        >
+                          <FileText size={16} className="text-cyan-500" />
+                          Documentações
+                        </button>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+              );
+            }
+          }
+        ]}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Buscar por nome ou CPF..."
+        emptyMessage="Nenhum motorista encontrado."
+        emptyIcon={<Truck size={48} />}
+      />
 
       {/* Modal de Cadastro */}
       {isModalOpen && (
@@ -325,8 +373,8 @@ export default function MotoristasPage() {
 
        {selectedDriverForDocs && (
          <DriverDocsModal 
-           driverId={selectedDriverForDocs.id}
-           driverName={selectedDriverForDocs.name}
+           driver={selectedDriverForDocs}
+           isOpen={true}
            onClose={() => setSelectedDriverForDocs(null)}
          />
        )}

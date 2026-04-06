@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useData, PassageiroEndereco, NovoPassageiroInput } from '@/context/DataContext';
+import { useData, Passageiro, PassageiroEndereco, NovoPassageiroInput } from '@/context/DataContext';
 import StandardModal from '@/components/StandardModal';
 import {
   Plus,
@@ -16,6 +16,9 @@ import {
   Layers,
   ChevronRight
 } from 'lucide-react';
+import { DataTable, Column } from '@/components/ui/DataTable';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { toast } from 'sonner';
 
 interface NewPassengerForm extends Omit<NovoPassageiroInput, 'enderecos'> {
   enderecos: Array<Omit<PassageiroEndereco, 'id'>>;
@@ -87,7 +90,7 @@ export default function PassageirosPage() {
     return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').trim();
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
     const cleanedEnderecos = formData.enderecos.filter((endereco) => endereco.enderecoCompleto.trim());
@@ -96,20 +99,24 @@ export default function PassageirosPage() {
       return;
     }
 
-    addPassageiro({
-      nomeCompleto: formData.nomeCompleto.trim(),
-      email: formData.email.trim(),
-      celular: formData.celular.trim(),
-      cpf: formData.cpf.trim(),
-      enderecos: cleanedEnderecos.map((endereco) => ({
-        rotulo: endereco.rotulo.trim() || 'Endereço',
-        enderecoCompleto: endereco.enderecoCompleto.trim(),
-        referencia: endereco.referencia?.trim() || ''
-      }))
-    });
+    try {
+      await addPassageiro({
+        nomeCompleto: formData.nomeCompleto.trim(),
+        email: formData.email.trim(),
+        celular: formData.celular.trim(),
+        cpf: formData.cpf.trim(),
+        enderecos: cleanedEnderecos.map((endereco) => ({
+          rotulo: endereco.rotulo.trim() || 'Endereço',
+          enderecoCompleto: endereco.enderecoCompleto.trim(),
+          referencia: endereco.referencia?.trim() || ''
+        }))
+      });
 
-    setFormData(initialForm);
-    setIsModalOpen(false);
+      setFormData(initialForm);
+      setIsModalOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o passageiro.');
+    }
   };
 
   const handleInputChange = (field: keyof Omit<NewPassengerForm, 'enderecos'>, value: string) => {
@@ -131,110 +138,90 @@ export default function PassageirosPage() {
 
   return (
     <div className="space-y-8">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-500 mb-2">Base VIP</p>
-          <h1 className="text-3xl font-black text-[var(--color-geolog-blue)] leading-tight">Passageiros Cadastrados</h1>
-          <p className="text-slate-500 font-medium text-sm">
-            Organize contatos críticos e mantenha um histórico dos destinos mais frequentes.
-          </p>
-        </div>
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center justify-center gap-2 bg-[var(--color-geolog-blue)] text-white px-8 py-3 rounded-2xl font-black shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest"
-        >
-          <Plus size={18} />
-          Novo Passageiro
-        </button>
-      </header>
+      <PageHeader
+        title="Passageiros Cadastrados"
+        icon={<UserSquare2 size={20} />}
+        buttonText="Novo Passageiro"
+        onButtonClick={() => setIsModalOpen(true)}
+        buttonIcon={<Plus size={18} />}
+      />
 
-      <section className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-4 md:flex-row md:items-center">
-        <div className="flex-1 relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input
-            type="text"
-            placeholder="Buscar por nome, CPF ou e-mail"
-            className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-          />
-        </div>
-        <div className="flex gap-3 text-xs font-black uppercase tracking-[0.3em] text-slate-400">
-          <span>Total: {filteredPassageiros.length}</span>
-          <span className="text-slate-300">|</span>
-          <span>Endereços monitorados</span>
-        </div>
-      </section>
+      <DataTable
+        data={filteredPassageiros}
+        columns={[
+          {
+            key: 'nomeCompleto',
+            title: 'Passageiro',
+            render: (value: unknown) => (
+              <div className="flex items-center gap-3">
+                <div>
+                  <p className="font-bold text-slate-800">{String(value)}</p>
+                  <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Passageiro cadastrado</p>
+                </div>
+              </div>
+            )
+          },
+          {
+            key: 'contato',
+            title: 'Contato',
+            render: (value: unknown, item: Passageiro) => {
+              void value;
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        {filteredPassageiros.length === 0 ? (
-          <div className="py-16 flex flex-col items-center justify-center text-slate-400 gap-4">
-            <UserSquare2 size={48} />
-            <p className="font-bold">Nenhum passageiro encontrado.</p>
-            <p className="text-sm">Cadastre passageiro clicando em "Novo Passageiro".</p>
-          </div>
-        ) : (
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Passageiro</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Contato</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">CPF</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Endereços</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredPassageiros.map((passageiro) => (
-                <tr key={passageiro.id} className="hover:bg-slate-50/50 transition-colors align-top">
-                  <td className="px-6 py-5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-black">
-                        {passageiro.nomeCompleto[0]}
-                      </div>
-                      <div>
-                        <p className="font-bold text-slate-800">{passageiro.nomeCompleto}</p>
-                        <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Passageiro cadastrado</p>
-                      </div>
+              return (
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2 text-slate-600">
+                  <Mail size={14} className="text-blue-500" />
+                  <span className="font-medium">{item.email}</span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-600">
+                  <Phone size={14} className="text-blue-500" />
+                  <span className="font-medium">{item.celular}</span>
+                </div>
+              </div>
+              );
+            }
+          },
+          {
+            key: 'cpf',
+            title: 'CPF',
+            render: (value: unknown) => (
+              <span className="text-sm font-bold text-slate-600">{String(value)}</span>
+            )
+          },
+          {
+            key: 'enderecos',
+            title: 'Endereços',
+            render: (value: unknown, item: Passageiro) => {
+              void value;
+
+              return (
+              <div className="space-y-2">
+                {item.enderecos.slice(0, 2).map((endereco) => (
+                  <div key={endereco.id} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+                      <MapPin size={12} className="text-blue-500" />
+                      {endereco.rotulo}
                     </div>
-                  </td>
-                  <td className="px-6 py-5">
-                    <div className="space-y-2 text-sm">
-                      <div className="flex items-center gap-2 text-slate-600">
-                        <Mail size={14} className="text-blue-500" />
-                        <span className="font-medium">{passageiro.email}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-slate-600">
-                        <Phone size={14} className="text-blue-500" />
-                        <span className="font-medium">{passageiro.celular}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-5 text-sm font-bold text-slate-600">{passageiro.cpf}</td>
-                  <td className="px-6 py-5">
-                    <div className="space-y-2">
-                      {passageiro.enderecos.slice(0, 2).map((endereco) => (
-                        <div key={endereco.id} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-                          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
-                            <MapPin size={12} className="text-blue-500" />
-                            {endereco.rotulo}
-                          </div>
-                          <p className="mt-1 text-sm font-bold text-slate-700 leading-snug">{endereco.enderecoCompleto}</p>
-                        </div>
-                      ))}
-                      {passageiro.enderecos.length > 2 && (
-                        <div className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] text-blue-600">
-                          <Layers size={12} />
-                          +{passageiro.enderecos.length - 2} endereços
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+                    <p className="mt-1 text-sm font-bold text-slate-700 leading-snug">{endereco.enderecoCompleto}</p>
+                  </div>
+                ))}
+                {item.enderecos.length > 2 && (
+                  <div className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] text-blue-600">
+                    <Layers size={12} />
+                    +{item.enderecos.length - 2} endereços
+                  </div>
+                )}
+              </div>
+              );
+            }
+          }
+        ]}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Buscar por nome, CPF ou e-mail"
+        emptyMessage="Nenhum passageiro encontrado."
+        emptyIcon={<UserSquare2 size={48} />}
+      />
 
       {isModalOpen && (
         <StandardModal

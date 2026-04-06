@@ -41,6 +41,9 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
+  
+  const driverId = driver?.id;
+  const driverName = driver?.name || 'Motorista';
 
   const fetchDocs = async () => {
     const { data, error } = await supabase
@@ -53,7 +56,7 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
       console.error("Erro ao buscar documentos:", JSON.stringify(error, null, 2));
       setError("Erro ao carregar documentos.");
     } else {
-      setDocs(data as DriverDoc[]);
+      setDocuments(data as DriverDoc[]);
     }
     setLoading(false);
   };
@@ -191,7 +194,8 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
   };
 
   return (
-    <StandardModal
+    <>
+      <StandardModal
       onClose={onClose}
       title="Documentações"
       subtitle={`Motorista: ${driverName}`}
@@ -271,7 +275,7 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
                 <Loader2 className="animate-spin text-blue-500" size={32} />
                 <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Carregando arquivos...</p>
               </div>
-            ) : docs.length === 0 ? (
+            ) : documents.length === 0 ? (
               <div className="py-20 text-center bg-slate-50/50 rounded-[2rem] border-2 border-dashed border-slate-100 flex flex-col items-center justify-center gap-4">
                 <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center text-slate-300">
                   <File size={32} />
@@ -280,7 +284,7 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4">
-                {docs.map((docObj) => (
+                {documents.map((docObj) => (
                   <div 
                     key={docObj.id}
                     className="bg-white border-2 border-slate-100 p-5 rounded-2xl flex items-center justify-between group hover:border-blue-200 hover:shadow-xl hover:shadow-blue-900/5 transition-all duration-300"
@@ -334,5 +338,6 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
       cancelText={confirmState.cancelText}
       type={confirmState.type}
     />
+    </>
   );
 }

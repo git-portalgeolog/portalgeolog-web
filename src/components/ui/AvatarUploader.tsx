@@ -116,7 +116,8 @@ export function AvatarUploader({
   };
 
   return (
-    <div className="relative inline-block">
+    <>
+      <div className="relative inline-block">
       {/* Avatar Container */}
       <div 
         className={`
@@ -203,5 +204,6 @@ export function AvatarUploader({
       cancelText={confirmState.cancelText}
       type={confirmState.type}
     />
+    </>
   );
 }

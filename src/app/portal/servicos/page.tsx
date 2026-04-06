@@ -2,17 +2,20 @@
 
 import React, { useState } from 'react';
 import { useData, TipoServico } from '@/context/DataContext';
-import { Plus, Bus, Trash2, Edit2, X } from 'lucide-react';
+import { Bus, Trash2, Edit2 } from 'lucide-react';
 import StandardModal from '@/components/StandardModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useConfirm } from '@/hooks/useConfirm';
 import { toast } from 'sonner';
+import { DataTable } from '@/components/ui/DataTable';
+import { PageHeader } from '@/components/ui/PageHeader';
 
 export default function ServicosPage() {
   const { servicos, addServico, updateServico, deleteServico } = useData();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingServico, setEditingServico] = useState<TipoServico | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({ nome: '' });
 
   const handleOpenModal = (servico?: TipoServico) => {
@@ -26,19 +29,23 @@ export default function ServicosPage() {
     setIsModalOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.nome) return;
 
-    if (editingServico) {
-      updateServico(editingServico.id, formData);
-    } else {
-      addServico(formData.nome);
+    try {
+      if (editingServico) {
+        await updateServico(editingServico.id, formData);
+      } else {
+        await addServico(formData.nome);
+      }
+      
+      setIsModalOpen(false);
+      setEditingServico(null);
+      setFormData({ nome: '' });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o serviço.');
     }
-    
-    setIsModalOpen(false);
-    setEditingServico(null);
-    setFormData({ nome: '' });
   };
 
   const handleDelete = async (id: string) => {
@@ -61,67 +68,57 @@ export default function ServicosPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shadow-sm">
-              <Bus size={20} />
-            </div>
-            <h1 className="text-2xl font-black text-[var(--color-geolog-blue)]">Tipos de Serviço</h1>
-          </div>
-        </div>
-        <button 
-          onClick={() => handleOpenModal()}
-          className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-2.5 rounded-xl font-bold hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer shadow-lg shadow-blue-900/20"
-        >
-          <Plus size={18} />
-          Novo Serviço
-        </button>
-      </div>
+      <PageHeader
+        title="Tipos de Serviço"
+        icon={<Bus size={20} />}
+        buttonText="Novo Serviço"
+        onButtonClick={() => handleOpenModal()}
+      />
 
-      <div className="bg-white rounded-[2rem] border border-slate-200 shadow-xl shadow-slate-200/40 overflow-hidden">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-slate-50/80 border-b border-slate-200">
-              <th className="px-8 py-5 text-[12px] font-black uppercase tracking-widest text-slate-600">Serviço</th>
-              <th className="px-8 py-5 text-[12px] font-black uppercase tracking-widest text-slate-600 text-right">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {servicos.length === 0 ? (
-               <tr>
-                <td colSpan={2} className="text-center py-20 text-slate-400 font-bold italic">Nenhum serviço cadastrado.</td>
-               </tr>
-            ) : (
-              servicos.map((s) => (
-                <tr key={s.id} className="hover:bg-slate-50/50 transition-colors group">
-                  <td className="px-8 py-4">
-                    <span className="font-bold text-slate-800 text-base ml-3">{s.nome}</span>
-                  </td>
-                  <td className="px-8 py-4">
-                    <div className="flex items-center justify-end gap-2">
-                      <button 
-                        onClick={() => handleOpenModal(s)}
-                        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
-                        title="Editar Serviço"
-                      >
-                        <Edit2 size={18} />
-                      </button>
-                      <button 
-                        onClick={() => handleDelete(s.id)}
-                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
-                        title="Excluir Serviço"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={servicos}
+        columns={[
+          {
+            key: 'nome',
+            title: 'Serviço',
+            render: (value: unknown) => (
+              <span className="font-bold text-slate-800 text-base ml-3">{String(value)}</span>
+            )
+          },
+          {
+            key: 'acoes',
+            title: 'Ações',
+            align: 'right',
+            render: (value: unknown, item: TipoServico) => {
+              void value;
+
+              return (
+              <div className="flex items-center justify-end gap-2">
+                <button 
+                  onClick={() => handleOpenModal(item)}
+                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
+                  title="Editar Serviço"
+                >
+                  <Edit2 size={18} />
+                </button>
+                <button 
+                  onClick={() => handleDelete(item.id)}
+                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
+                  title="Excluir Serviço"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+              );
+            }
+          }
+        ]}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Buscar por serviço..."
+        emptyMessage="Nenhum serviço cadastrado."
+        emptyIcon={<Bus size={48} />}
+      />
 
       {/* Modal Criar/Editar Serviço */}
       {isModalOpen && (

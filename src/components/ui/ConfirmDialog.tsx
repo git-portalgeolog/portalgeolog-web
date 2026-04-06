@@ -75,13 +75,13 @@ export default function ConfirmDialog({
         <div className="flex gap-3 mt-6">
           <button
             onClick={onClose}
-            className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+            className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors cursor-pointer"
           >
             {cancelText}
           </button>
           <button
             onClick={handleConfirm}
-            className={`flex-1 py-3 font-bold rounded-xl transition-colors ${getConfirmButtonStyle()}`}
+            className={`flex-1 py-3 font-bold rounded-xl transition-colors cursor-pointer ${getConfirmButtonStyle()}`}
           >
             {confirmText}
           </button>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { fetchClientes, 
   fetchSolicitantes, 
@@ -19,10 +19,12 @@ import { fetchClientes,
   updateCentroCustoInDB,
   deleteCentroCustoFromDB,
   insertFornecedor,
+  deleteFornecedor as deleteFornecedorFromDB,
   insertServico,
   updateServicoInDB,
   deleteServicoFromDB,
   insertPassageiro,
+  insertDriver,
   insertOS,
   updateOSInDB,
   updateOSStatusInDB
@@ -107,9 +109,9 @@ export interface OSStatus {
 export interface Passageiro {
   id: string;
   nomeCompleto: string;
-  email: string;
+  email?: string;
   celular: string;
-  cpf: string;
+  cpf?: string;
   enderecos: PassageiroEndereco[];
 }
 
@@ -122,9 +124,9 @@ export interface PassageiroEndereco {
 
 export interface NovoPassageiroInput {
   nomeCompleto: string;
-  email: string;
+  email?: string;
   celular: string;
-  cpf: string;
+  cpf?: string;
   enderecos: {
     rotulo?: string;
     enderecoCompleto: string;
@@ -136,7 +138,10 @@ export interface Driver {
   id: string;
   name: string;
   status: 'active' | 'inactive';
+  cpf?: string;
+  cnh?: string;
   phone?: string;
+  created_at?: string;
   docs?: DriverDoc[];
 }
 
@@ -146,6 +151,44 @@ export interface DriverDoc {
   status: 'valid' | 'expired' | 'pending';
   expiryDate?: string;
 }
+
+interface AppNotificationRecord {
+  type: 'success' | 'info' | 'warning' | 'error';
+  title: string;
+  message: string;
+}
+
+const normalizeTextValue = (value: string): string => value.trim().toLowerCase();
+
+const normalizeDigitsValue = (value: string): string => value.replace(/\D/g, '');
+
+const isUniqueConstraintError = (error: unknown): boolean => {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const maybeError = error as { code?: string; message?: string };
+  return (
+    maybeError.code === '23505' ||
+    Boolean(maybeError.message?.toLowerCase().includes('duplicate key value violates unique constraint'))
+  );
+};
+
+const hasDuplicateRecord = <T extends { id: string }>(
+  records: T[],
+  candidateValue: string,
+  getValue: (record: T) => string,
+  normalize: (value: string) => string,
+  excludeId?: string
+): boolean => {
+  const normalizedCandidate = normalize(candidateValue);
+
+  if (!normalizedCandidate) {
+    return false;
+  }
+
+  return records.some((record) => record.id !== excludeId && normalize(getValue(record)) === normalizedCandidate);
+};
 
 // ── Contexto ─────────────────────────────────────────────
 
@@ -159,24 +202,26 @@ interface DataContextType {
   drivers: Driver[];
   loading: boolean;
   
-  addCliente: (nome: string, contato?: string) => void;
-  updateCliente: (id: string, updates: Partial<Cliente>) => void;
+  addCliente: (nome: string, contato?: string) => Promise<Cliente>;
+  updateCliente: (id: string, updates: Partial<Cliente>) => Promise<void>;
   deleteCliente: (id: string) => void;
   
-  addSolicitante: (nome: string, clienteId: string, centroCustoId?: string) => void;
+  addSolicitante: (nome: string, clienteId: string, centroCustoId?: string) => Promise<Solicitante>;
   updateSolicitante: (id: string, updates: Partial<Solicitante>) => void;
   deleteSolicitante: (id: string) => void;
   
-  addPassageiro: (passageiro: NovoPassageiroInput) => Passageiro;
-  addFornecedor: (nome: string, tipo: string, telefone?: string) => void;
+  addPassageiro: (passageiro: NovoPassageiroInput) => Promise<Passageiro>;
+  addFornecedor: (nome: string, tipo: string, telefone?: string) => Promise<void>;
+  deleteFornecedor: (id: string) => void;
+  addDriver: (name: string) => Promise<Driver>;
   
   // Centros de Custo
-  addCentroCusto: (nome: string, clienteId: string) => void;
+  addCentroCusto: (nome: string, clienteId: string) => Promise<CentroCusto>;
   updateCentroCusto: (id: string, updates: Partial<CentroCusto>) => void;
   deleteCentroCusto: (id: string) => void;
   
-  addServico: (nome: string) => void;
-  updateServico: (id: string, updates: Partial<TipoServico>) => void;
+  addServico: (nome: string) => Promise<TipoServico>;
+  updateServico: (id: string, updates: Partial<TipoServico>) => Promise<void>;
   deleteServico: (id: string) => void;
   
   addOS: (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => OrderService;
@@ -200,7 +245,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   // Fetch functions wrapped for stability
   const dbFetchClientes = useCallback(async () => fetchClientes(), []);
@@ -254,8 +299,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (!authLoading) {
       if (user) {
         refreshData().finally(() => setLoading(false));
-      } else {
-        setLoading(false);
       }
     }
   }, [refreshData, user, authLoading]);
@@ -273,7 +316,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       
       const channel = supabase
         .channel('geolog-realtime-global')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_servico' }, (payload: any) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_servico' }, () => {
           console.log('📦 OS Change detected');
           dbFetchOSList().then(setOsList).catch(() => {});
         })
@@ -289,7 +332,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'centros_custo' }, () => {
           dbFetchClientes().then(setClientes).catch(() => {}); // Centros de custo estao dentro de clientes no estado
         })
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'app_notifications' }, (payload: any) => {
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'app_notifications' }, (payload: { new: AppNotificationRecord }) => {
           const notif = payload.new;
           if (notif.type === 'success') toast.success(notif.title, { description: notif.message });
           else if (notif.type === 'error') toast.error(notif.title, { description: notif.message });
@@ -315,27 +358,75 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }, 1500);
 
     return () => clearTimeout(timer);
-  }, [user, authLoading]);
+  }, [
+    authLoading,
+    dbFetchClientes,
+    dbFetchDrivers,
+    dbFetchOSList,
+    dbFetchPassageiros,
+    dbFetchServicos,
+    dbFetchSolicitantes,
+    supabase,
+    user,
+  ]);
 
   // Actions
-  const addCliente = (nome: string, contato?: string) => {
-    insertCliente(nome, contato).catch(err => console.error('Error insertCliente:', err));
+  const addCliente = async (nome: string, contato?: string): Promise<Cliente> => {
+    const cleanNome = nome.trim();
+
+    if (!cleanNome) {
+      throw new Error('Informe o nome da empresa.');
+    }
+
+    if (hasDuplicateRecord(clientes, cleanNome, (cliente) => cliente.nome, normalizeTextValue)) {
+      throw new Error('Já existe uma empresa com este nome.');
+    }
+
+    try {
+      return await insertCliente(cleanNome, contato);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new Error('Já existe uma empresa com este nome.');
+      }
+
+      throw error instanceof Error ? error : new Error('Não foi possível salvar a empresa.');
+    }
   };
 
-  const updateCliente = (id: string, updates: Partial<Cliente>) => {
-    updateClienteInDB(id, updates).catch(err => console.error('Error updateClienteInDB:', err));
+  const updateCliente = async (id: string, updates: Partial<Cliente>): Promise<void> => {
+    if (updates.nome !== undefined) {
+      const cleanNome = updates.nome.trim();
+
+      if (!cleanNome) {
+        throw new Error('Informe o nome da empresa.');
+      }
+
+      if (hasDuplicateRecord(clientes, cleanNome, (cliente) => cliente.nome, normalizeTextValue, id)) {
+        throw new Error('Já existe uma empresa com este nome.');
+      }
+    }
+
+    try {
+      await updateClienteInDB(id, updates);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new Error('Já existe uma empresa com este nome.');
+      }
+
+      throw error instanceof Error ? error : new Error('Não foi possível atualizar a empresa.');
+    }
   };
 
   const deleteCliente = (id: string) => {
     deleteClienteFromDB(id).catch(err => console.error('Error deleteClienteFromDB:', err));
   };
 
-  const addSolicitante = (nome: string, clienteId: string, centroCustoId?: string) => {
-    insertSolicitante(nome, clienteId, centroCustoId).catch(err => console.error('Error insertSolicitante:', err));
+  const addSolicitante = async (nome: string, clienteId: string, centroCustoId?: string): Promise<Solicitante> => {
+    return await insertSolicitante(nome, clienteId, centroCustoId);
   };
 
-  const addCentroCusto = (nome: string, clienteId: string) => {
-    insertCentroCusto(nome, clienteId).catch(err => console.error('Error insertCentroCusto:', err));
+  const addCentroCusto = async (nome: string, clienteId: string): Promise<CentroCusto> => {
+    return await insertCentroCusto(nome, clienteId);
   };
 
   const updateCentroCusto = (id: string, updates: Partial<CentroCusto>) => {
@@ -354,43 +445,173 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     deleteSolicitanteFromDB(id).catch(err => console.error('Error deleteSolicitanteFromDB:', err));
   };
 
-  const addPassageiro = (passageiro: NovoPassageiroInput): Passageiro => {
+  const addPassageiro = async (passageiro: NovoPassageiroInput): Promise<Passageiro> => {
+    const cleanNome = passageiro.nomeCompleto.trim();
+    const cleanEmail = passageiro.email?.trim() || '';
+    const cleanCelular = passageiro.celular.trim();
+    const cleanCpf = passageiro.cpf?.trim() || '';
+
+    if (!cleanNome) {
+      throw new Error('Informe o nome do passageiro.');
+    }
+
+    if (cleanEmail && hasDuplicateRecord(passageiros, cleanEmail, (item) => item.email || '', normalizeTextValue)) {
+      throw new Error('Já existe um passageiro com este e-mail.');
+    }
+
+    if (hasDuplicateRecord(passageiros, cleanCelular, (item) => item.celular, normalizeDigitsValue)) {
+      throw new Error('Já existe um passageiro com este celular.');
+    }
+
+    if (cleanCpf && hasDuplicateRecord(passageiros, cleanCpf, (item) => item.cpf || '', normalizeDigitsValue)) {
+      throw new Error('Já existe um passageiro com este CPF.');
+    }
+
     const tempId = `temp-${Date.now()}`;
     const optimistic: Passageiro = {
       id: tempId,
-      ...passageiro,
+      nomeCompleto: cleanNome,
+      email: cleanEmail || undefined,
+      celular: cleanCelular,
+      cpf: cleanCpf || undefined,
       enderecos: passageiro.enderecos.map((e, i) => ({
         id: `temp-end-${i}`,
         rotulo: e.rotulo?.trim() || `Endereço ${i + 1}`,
-        enderecoCompleto: e.enderecoCompleto,
-        referencia: e.referencia?.trim() ? e.referencia : undefined,
+        enderecoCompleto: e.enderecoCompleto.trim(),
+        referencia: e.referencia?.trim() || undefined,
       })),
     };
 
     setPassageiros((prev) => [...prev, optimistic]);
 
-    insertPassageiro(passageiro)
-      .then((real) => {
-        setPassageiros((prev) => prev.map((p) => (p.id === tempId ? real : p)));
-      })
-      .catch((err) => {
-        console.error('Error adding passageiro:', err);
-        setPassageiros((prev) => prev.filter((p) => p.id !== tempId));
+    try {
+      const real = await insertPassageiro({
+        ...passageiro,
+        nomeCompleto: cleanNome,
+        email: cleanEmail || undefined,
+        celular: cleanCelular,
+        cpf: cleanCpf || undefined,
       });
 
-    return optimistic;
+      setPassageiros((prev) => prev.map((p) => (p.id === tempId ? real : p)));
+      return real;
+    } catch (error) {
+      setPassageiros((prev) => prev.filter((p) => p.id !== tempId));
+
+      if (isUniqueConstraintError(error)) {
+        const duplicateMessage = cleanEmail && hasDuplicateRecord(passageiros, cleanEmail, (item) => item.email || '', normalizeTextValue)
+          ? 'Já existe um passageiro com este e-mail.'
+          : hasDuplicateRecord(passageiros, cleanCelular, (item) => item.celular, normalizeDigitsValue)
+            ? 'Já existe um passageiro com este celular.'
+            : cleanCpf && hasDuplicateRecord(passageiros, cleanCpf, (item) => item.cpf || '', normalizeDigitsValue)
+              ? 'Já existe um passageiro com este CPF.'
+              : 'Não foi possível salvar o passageiro.';
+
+        throw new Error(duplicateMessage);
+      }
+
+      throw error instanceof Error ? error : new Error('Não foi possível salvar o passageiro.');
+    }
   };
 
-  const addFornecedor = (nome: string, tipo: string, telefone?: string) => {
-    insertFornecedor(nome, tipo, telefone).catch(err => console.error('Error insertFornecedor:', err));
+  const addFornecedor = async (nome: string, tipo: string, telefone?: string): Promise<void> => {
+    const cleanNome = nome.trim();
+
+    if (!cleanNome) {
+      throw new Error('Informe o nome do fornecedor.');
+    }
+
+    if (hasDuplicateRecord(fornecedores, cleanNome, (item) => item.nome, normalizeTextValue)) {
+      throw new Error('Já existe um fornecedor com este nome.');
+    }
+
+    try {
+      await insertFornecedor(cleanNome, tipo, telefone);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new Error('Já existe um fornecedor com este nome.');
+      }
+
+      throw error instanceof Error ? error : new Error('Não foi possível salvar o fornecedor.');
+    }
   };
 
-  const addServico = (nome: string) => {
-    insertServico(nome).catch(err => console.error('Error insertServico:', err));
+  const addDriver = async (name: string): Promise<Driver> => {
+    const cleanName = name.trim();
+
+    if (!cleanName) {
+      throw new Error('Informe o nome do motorista.');
+    }
+
+    if (hasDuplicateRecord(drivers, cleanName, (driver) => driver.name, normalizeTextValue)) {
+      throw new Error('Já existe um motorista com este nome.');
+    }
+
+    try {
+      return await insertDriver({
+        name: cleanName,
+        cpf: '',
+        cnh: '',
+        phone: '',
+        status: 'active'
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new Error('Já existe um motorista com este nome.');
+      }
+
+      throw error instanceof Error ? error : new Error('Não foi possível salvar o motorista.');
+    }
   };
 
-  const updateServico = (id: string, updates: Partial<TipoServico>) => {
-    updateServicoInDB(id, updates).catch(err => console.error('Error updateServicoInDB:', err));
+  const deleteFornecedor = (id: string) => {
+    deleteFornecedorFromDB(id).catch((err: unknown) => console.error('Error deleteFornecedor:', err));
+  };
+
+  const addServico = async (nome: string): Promise<TipoServico> => {
+    const cleanNome = nome.trim();
+
+    if (!cleanNome) {
+      throw new Error('Informe o nome do serviço.');
+    }
+
+    if (hasDuplicateRecord(servicos, cleanNome, (item) => item.nome, normalizeTextValue)) {
+      throw new Error('Já existe um serviço com este nome.');
+    }
+
+    try {
+      return await insertServico(cleanNome);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new Error('Já existe um serviço com este nome.');
+      }
+
+      throw error instanceof Error ? error : new Error('Não foi possível salvar o serviço.');
+    }
+  };
+
+  const updateServico = async (id: string, updates: Partial<TipoServico>): Promise<void> => {
+    if (updates.nome !== undefined) {
+      const cleanNome = updates.nome.trim();
+
+      if (!cleanNome) {
+        throw new Error('Informe o nome do serviço.');
+      }
+
+      if (hasDuplicateRecord(servicos, cleanNome, (item) => item.nome, normalizeTextValue, id)) {
+        throw new Error('Já existe um serviço com este nome.');
+      }
+    }
+
+    try {
+      await updateServicoInDB(id, updates);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new Error('Já existe um serviço com este nome.');
+      }
+
+      throw error instanceof Error ? error : new Error('Não foi possível atualizar o serviço.');
+    }
   };
 
   const deleteServico = (id: string) => {
@@ -419,7 +640,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       })
       .catch((err) => {
         console.error('Error adding OS:', err);
+        console.error('OS Data that failed:', osData);
         setOsList((prev) => prev.filter((o) => o.id !== tempId));
+        throw err; // Re-throw para que o erro possa ser tratado no componente
       });
 
     return optimistic;
@@ -464,6 +687,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         deleteCentroCusto,
         addPassageiro,
         addFornecedor,
+        deleteFornecedor,
+        addDriver,
         addServico,
         updateServico,
         deleteServico,

@@ -10,11 +10,76 @@ import type {
   OrderService,
   NovoPassageiroInput,
   Waypoint,
-  Driver,
-  DriverDoc
+  Driver
 } from '@/context/DataContext';
 
 const supabase = createClient();
+
+const trimText = (value?: string): string => value?.trim() ?? '';
+
+type ClienteRow = { id: string; nome: string; contato: string | null };
+type CentroCustoRow = { id: string; nome: string; cliente_id: string };
+type SolicitanteRow = { id: string; nome: string; cliente_id: string; centro_custo_id: string | null };
+type FornecedorRow = { id: string; nome: string; tipo: string; telefone: string | null };
+type TipoServicoRow = { id: string; nome: string };
+type PassageiroRow = {
+  id: string;
+  nome_completo: string;
+  email: string | null;
+  celular: string | null;
+  cpf: string | null;
+};
+type PassageiroEnderecoRow = {
+  id: string;
+  passageiro_id: string;
+  rotulo: string;
+  endereco_completo: string;
+  referencia: string | null;
+};
+type OSRow = {
+  id: string;
+  protocolo: string | null;
+  os_number: string | null;
+  data: string | null;
+  hora: string | null;
+  hora_extra: string | null;
+  cliente_id: string | null;
+  centro_custo_id?: string | null;
+  solicitante: string | null;
+  tipo_servico: string | null;
+  trecho: string | null;
+  motorista: string | null;
+  valor_bruto: number | string;
+  imposto: number | string;
+  custo: number | string;
+  lucro: number | string;
+  status_operacional: OrderService['status']['operacional'];
+  status_financeiro: OrderService['status']['financeiro'];
+  distancia: string | null;
+};
+type OSWaypointRow = {
+  id: string;
+  ordem_servico_id: string;
+  position: number;
+  label: string;
+  lat: number | null;
+  lng: number | null;
+};
+type OSWaypointPassengerRow = {
+  id: string;
+  waypoint_id: string;
+  passageiro_id: string | null;
+  nome: string | null;
+};
+type DriverRow = {
+  id: string;
+  name: string;
+  cpf?: string;
+  cnh?: string | null;
+  phone?: string | null;
+  status: 'active' | 'inactive';
+  created_at?: string;
+};
 
 // ── Clientes ──────────────────────────────────────────────
 
@@ -31,19 +96,28 @@ export async function fetchClientes(): Promise<Cliente[]> {
     .select('id, nome, cliente_id')
     .order('nome');
 
-  return (clientesRaw || []).map((c: any) => ({
+  const typedClientes = (clientesRaw || []) as ClienteRow[];
+  const typedCentros = (centrosRaw || []) as CentroCustoRow[];
+
+  return typedClientes.map((c) => ({
     id: c.id,
     nome: c.nome,
     contato: c.contato || undefined,
-    centrosCusto: (centrosRaw || [])
-      .filter((cc: any) => cc.cliente_id === c.id)
-      .map((cc: any) => ({ id: cc.id, nome: cc.nome, clienteId: cc.cliente_id })),
+    centrosCusto: typedCentros
+      .filter((cc) => cc.cliente_id === c.id)
+      .map((cc) => ({ id: cc.id, nome: cc.nome, clienteId: cc.cliente_id })),
   }));
 }
 
-export async function insertCentroCusto(nome: string, clienteId: string): Promise<void> {
-  const { error } = await supabase.from('centros_custo').insert({ nome, cliente_id: clienteId });
+export async function insertCentroCusto(nome: string, clienteId: string): Promise<CentroCusto> {
+  const { data, error } = await supabase
+    .from('centros_custo')
+    .insert({ nome, cliente_id: clienteId })
+    .select('id, nome, cliente_id')
+    .single();
+
   if (error) throw error;
+  return { id: data.id, nome: data.nome, clienteId: data.cliente_id };
 }
 
 export async function updateCentroCustoInDB(id: string, updates: Partial<CentroCusto>): Promise<void> {
@@ -62,7 +136,7 @@ export async function deleteCentroCustoFromDB(id: string): Promise<void> {
 export async function insertCliente(nome: string, contato?: string): Promise<Cliente> {
   const { data, error } = await supabase
     .from('clientes')
-    .insert({ nome, contato })
+    .insert({ nome: trimText(nome), contato: trimText(contato) || null })
     .select('id, nome, contato')
     .single();
 
@@ -71,9 +145,19 @@ export async function insertCliente(nome: string, contato?: string): Promise<Cli
 }
 
 export async function updateClienteInDB(id: string, updates: Partial<Cliente>): Promise<void> {
+  const payload: { nome?: string; contato?: string | null } = {};
+
+  if (updates.nome !== undefined) {
+    payload.nome = trimText(updates.nome);
+  }
+
+  if (updates.contato !== undefined) {
+    payload.contato = trimText(updates.contato) || null;
+  }
+
   const { error } = await supabase
     .from('clientes')
-    .update({ nome: updates.nome, contato: updates.contato })
+    .update(payload)
     .eq('id', id);
 
   if (error) throw error;
@@ -97,11 +181,11 @@ export async function fetchSolicitantes(): Promise<Solicitante[]> {
     .order('nome');
 
   if (error) throw error;
-  return (data || []).map((s: any) => ({ 
+  return ((data || []) as SolicitanteRow[]).map((s) => ({ 
     id: s.id, 
     nome: s.nome, 
     clienteId: s.cliente_id,
-    centroCustoId: s.centro_custo_id
+    centroCustoId: s.centro_custo_id || undefined
   }));
 }
 
@@ -152,7 +236,7 @@ export async function fetchFornecedores(): Promise<Fornecedor[]> {
     .order('nome');
 
   if (error) throw error;
-  return (data || []).map((f: any) => ({
+  return ((data || []) as FornecedorRow[]).map((f) => ({
     id: f.id,
     nome: f.nome,
     tipo: f.tipo,
@@ -161,7 +245,16 @@ export async function fetchFornecedores(): Promise<Fornecedor[]> {
 }
 
 export async function insertFornecedor(nome: string, tipo: string, telefone?: string): Promise<void> {
-  const { error } = await supabase.from('fornecedores').insert({ nome, tipo, telefone });
+  const { error } = await supabase.from('fornecedores').insert({
+    nome: trimText(nome),
+    tipo: trimText(tipo),
+    telefone: trimText(telefone) || null,
+  });
+  if (error) throw error;
+}
+
+export async function deleteFornecedor(id: string): Promise<void> {
+  const { error } = await supabase.from('fornecedores').delete().eq('id', id);
   if (error) throw error;
 }
 
@@ -174,23 +267,33 @@ export async function fetchServicos(): Promise<TipoServico[]> {
     .order('nome');
 
   if (error) throw error;
-  return (data || []).map((s: any) => ({
+  return ((data || []) as TipoServicoRow[]).map((s) => ({
     id: s.id,
     nome: s.nome,
   }));
 }
 
-export async function insertServico(nome: string): Promise<void> {
-  const { error } = await supabase.from('tipos_servico').insert({ nome });
+export async function insertServico(nome: string): Promise<TipoServico> {
+  const { data, error } = await supabase
+    .from('tipos_servico')
+    .insert({ nome: trimText(nome) })
+    .select('id, nome')
+    .single();
+
   if (error) throw error;
+  return { id: data.id, nome: data.nome };
 }
 
 export async function updateServicoInDB(id: string, updates: Partial<TipoServico>): Promise<void> {
+  const payload: { nome?: string } = {};
+
+  if (updates.nome !== undefined) {
+    payload.nome = trimText(updates.nome);
+  }
+
   const { error } = await supabase
     .from('tipos_servico')
-    .update({ 
-      nome: updates.nome
-    })
+    .update(payload)
     .eq('id', id);
 
   if (error) throw error;
@@ -219,15 +322,18 @@ export async function fetchPassageiros(): Promise<Passageiro[]> {
     .from('passageiro_enderecos')
     .select('id, passageiro_id, rotulo, endereco_completo, referencia');
 
-  return (passRaw || []).map((p: any) => ({
+  const typedPassengers = (passRaw || []) as PassageiroRow[];
+  const typedAddresses = (endRaw || []) as PassageiroEnderecoRow[];
+
+  return typedPassengers.map((p) => ({
     id: p.id,
     nomeCompleto: p.nome_completo,
     email: p.email || '',
     celular: p.celular || '',
     cpf: p.cpf || '',
-    enderecos: (endRaw || [])
-      .filter((e: any) => e.passageiro_id === p.id)
-      .map((e: any) => ({
+    enderecos: typedAddresses
+      .filter((e) => e.passageiro_id === p.id)
+      .map((e) => ({
         id: e.id,
         rotulo: e.rotulo,
         enderecoCompleto: e.endereco_completo,
@@ -240,10 +346,10 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
   const { data: passRow, error: passError } = await supabase
     .from('passageiros')
     .insert({
-      nome_completo: input.nomeCompleto,
-      email: input.email,
-      celular: input.celular,
-      cpf: input.cpf,
+      nome_completo: trimText(input.nomeCompleto),
+      email: input.email ? trimText(input.email) : null,
+      celular: trimText(input.celular),
+      cpf: input.cpf ? trimText(input.cpf) : null,
     })
     .select('id, nome_completo, email, celular, cpf')
     .single();
@@ -258,15 +364,15 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
       .insert(
         input.enderecos.map((e) => ({
           passageiro_id: passRow.id,
-          rotulo: e.rotulo || 'Principal',
-          endereco_completo: e.enderecoCompleto,
-          referencia: e.referencia || null,
+          rotulo: trimText(e.rotulo) || 'Principal',
+          endereco_completo: trimText(e.enderecoCompleto),
+          referencia: trimText(e.referencia) || null,
         }))
       )
       .select('id, rotulo, endereco_completo, referencia');
 
     if (!endError && endRows) {
-      endRows.forEach((e: any) =>
+      (endRows as PassageiroEnderecoRow[]).forEach((e) =>
         enderecos.push({
           id: e.id,
           rotulo: e.rotulo,
@@ -280,9 +386,9 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
   return {
     id: passRow.id,
     nomeCompleto: passRow.nome_completo,
-    email: passRow.email || '',
+    email: passRow.email || undefined,
     celular: passRow.celular || '',
-    cpf: passRow.cpf || '',
+    cpf: passRow.cpf || undefined,
     enderecos,
   };
 }
@@ -297,9 +403,10 @@ export async function fetchOSList(): Promise<OrderService[]> {
 
   if (error) throw error;
 
-  const osIds = (osRaw || []).map((o: any) => o.id);
-  let wpRaw: any[] = [];
-  let wpPassRaw: any[] = [];
+  const typedOrders = (osRaw || []) as OSRow[];
+  const osIds = typedOrders.map((o) => o.id);
+  let wpRaw: OSWaypointRow[] = [];
+  let wpPassRaw: OSWaypointPassengerRow[] = [];
 
   if (osIds.length > 0) {
     const { data: wpData } = await supabase
@@ -308,8 +415,8 @@ export async function fetchOSList(): Promise<OrderService[]> {
       .in('ordem_servico_id', osIds)
       .order('position');
 
-    wpRaw = wpData || [];
-    const wpIds = wpRaw.map((w: any) => w.id);
+    wpRaw = (wpData || []) as OSWaypointRow[];
+    const wpIds = wpRaw.map((w) => w.id);
 
     if (wpIds.length > 0) {
       const { data: passData } = await supabase
@@ -317,20 +424,20 @@ export async function fetchOSList(): Promise<OrderService[]> {
         .select('id, waypoint_id, passageiro_id, nome')
         .in('waypoint_id', wpIds);
 
-      wpPassRaw = passData || [];
+      wpPassRaw = (passData || []) as OSWaypointPassengerRow[];
     }
   }
 
-  return (osRaw || []).map((o: any) => {
-    const waypoints: Waypoint[] = (wpRaw || [])
-      .filter((w: any) => w.ordem_servico_id === o.id)
-      .map((w: any) => ({
+  return typedOrders.map((o) => {
+    const waypoints: Waypoint[] = wpRaw
+      .filter((w) => w.ordem_servico_id === o.id)
+      .map((w) => ({
         label: w.label,
         lat: w.lat,
         lng: w.lng,
-        passengers: (wpPassRaw || [])
-          .filter((p: any) => p.waypoint_id === w.id)
-          .map((p: any) => ({
+        passengers: wpPassRaw
+          .filter((p) => p.waypoint_id === w.id)
+          .map((p) => ({
             id: p.id,
             solicitanteId: p.passageiro_id || '',
             nome: p.nome || '',
@@ -358,7 +465,7 @@ export async function fetchOSList(): Promise<OrderService[]> {
         operacional: o.status_operacional as OrderService['status']['operacional'],
         financeiro: o.status_financeiro as OrderService['status']['financeiro'],
       },
-      distancia: o.distancia || undefined,
+      distancia: o.distancia ? Number(o.distancia) : undefined,
       rota: waypoints.length > 0 ? { waypoints } : undefined,
     };
   });
@@ -369,6 +476,7 @@ type OSInput = Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'proto
 export async function insertOS(osData: OSInput): Promise<OrderService> {
   const imposto = osData.valorBruto * 0.12;
   const lucro = osData.valorBruto - imposto - osData.custo;
+  const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
 
   const { data: osRow, error: osError } = await supabase
     .from('ordens_servico')
@@ -380,7 +488,7 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
       os_number: osData.os || '',
       cliente_id: osData.clienteId || null,
       solicitante: osData.solicitante || '',
-      centro_custo_id: osData.centroCustoId || null,
+      centro_custo: centroCusto,
       tipo_servico: osData.tipoServico || '',
       trecho: osData.trecho || '',
       motorista: osData.motorista || '',
@@ -423,7 +531,7 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
       const { data: passRows } = await supabase
         .from('os_waypoint_passengers')
         .insert(
-          passengers.map((p: any) => ({
+          passengers.map((p) => ({
             waypoint_id: wpRow.id,
             passageiro_id: p.solicitanteId || null,
             nome: p.nome || '',
@@ -432,7 +540,7 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
         .select('id, passageiro_id, nome');
 
       if (passRows) {
-        passRows.forEach((pr: any) =>
+        (passRows as OSWaypointPassengerRow[]).forEach((pr) =>
           insertedPassengers.push({
             id: pr.id,
             solicitanteId: pr.passageiro_id || '',
@@ -459,7 +567,7 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
     os: osRow.os_number || '',
     clienteId: osRow.cliente_id || '',
     solicitante: osRow.solicitante || '',
-    centroCustoId: osRow.centro_custo_id || '',
+    centroCustoId: osRow.centro_custo || '',
     tipoServico: osRow.tipo_servico || '',
     trecho: osRow.trecho || '',
     motorista: osRow.motorista || '',
@@ -481,6 +589,7 @@ export async function updateOSInDB(
 ): Promise<void> {
   const imposto = osData.valorBruto * 0.12;
   const lucro = osData.valorBruto - imposto - osData.custo;
+  const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
 
   const { error: osError } = await supabase
     .from('ordens_servico')
@@ -491,7 +600,7 @@ export async function updateOSInDB(
       os_number: osData.os || '',
       cliente_id: osData.clienteId || null,
       solicitante: osData.solicitante || '',
-      centro_custo_id: osData.centroCustoId || null,
+      centro_custo: centroCusto,
       tipo_servico: osData.tipoServico || '',
       trecho: osData.trecho || '',
       motorista: osData.motorista || '',
@@ -525,7 +634,7 @@ export async function updateOSInDB(
 
     if (wpRow && wp.passengers && wp.passengers.length > 0) {
       await supabase.from('os_waypoint_passengers').insert(
-        wp.passengers.map((p: any) => ({
+        wp.passengers.map((p) => ({
           waypoint_id: wpRow.id,
           passageiro_id: p.solicitanteId || null,
           nome: p.nome || '',
@@ -561,7 +670,7 @@ export async function fetchCentrosCustoByCliente(clienteId: string): Promise<Cen
     .order('nome');
 
   if (error) throw error;
-  return (data || []).map((cc: any) => ({ id: cc.id, nome: cc.nome, clienteId: clienteId }));
+  return ((data || []) as Array<Pick<CentroCustoRow, 'id' | 'nome'>>).map((cc) => ({ id: cc.id, nome: cc.nome, clienteId: clienteId }));
 }
 
 // ── Motoristas ────────────────────────────────────────────
@@ -573,10 +682,10 @@ export async function fetchDrivers(): Promise<Driver[]> {
     .order('name');
 
   if (error) throw error;
-  return (data || []).map((d: any) => ({
+  return ((data || []) as DriverRow[]).map((d) => ({
     id: d.id,
     name: d.name,
-    cpf: d.cpf,
+    cpf: d.cpf || '',
     cnh: d.cnh || '',
     phone: d.phone || '',
     status: d.status as 'active' | 'inactive',

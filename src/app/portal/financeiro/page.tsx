@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useData } from '@/context/DataContext';
 import { useAuth } from '@/context/AuthContext';
+import { DataTable, Column } from '@/components/ui/DataTable';
 
 export default function MedicaoFinanceiraPage() {
   const { osList, clientes, updateOSStatus } = useData();
@@ -123,81 +124,110 @@ export default function MedicaoFinanceiraPage() {
       </div>
 
       {/* Finance Table */}
-      <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50/80 border-b border-slate-200">
-                <th className="px-8 py-6 text-sm font-bold uppercase text-slate-500 tracking-widest">Documento / Data</th>
-                <th className="px-8 py-6 text-sm font-bold uppercase text-slate-500 tracking-widest">Cliente</th>
-                <th className="px-8 py-6 text-sm font-bold uppercase text-slate-500 tracking-widest">Itinerário / KM</th>
-                <th className="px-8 py-6 text-sm font-bold uppercase text-slate-500 tracking-widest text-right">Faturamento (R$)</th>
-                <th className="px-8 py-6 text-sm font-bold uppercase text-slate-500 tracking-widest text-right">Deduções (12%)</th>
-                <th className="px-8 py-6 text-sm font-bold uppercase text-slate-500 tracking-widest text-right">Repasse (R$)</th>
-                <th className="px-8 py-6 text-sm font-bold uppercase text-slate-500 tracking-widest text-right">Lucro Líquido</th>
-                <th className="px-8 py-6 text-sm font-bold uppercase text-slate-500 tracking-widest text-center">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredData.map((item) => {
-                const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || 'N/A';
-                return (
-                  <tr key={item.id} className="hover:bg-blue-50/30 transition-colors">
-                    <td className="px-8 py-5">
-                      <div className="flex flex-col gap-1">
-                        <span className="text-base font-bold text-slate-800 leading-none">#{item.os}</span>
-                        <span className="text-xs text-slate-400 font-semibold">{new Date(item.data).toLocaleDateString('pt-BR')}</span>
-                      </div>
-                    </td>
-                    <td className="px-8 py-5">
-                      <span className="text-base font-semibold text-slate-700">{clienteNome}</span>
-                    </td>
-                    <td className="px-8 py-5">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-bold text-slate-800">{item.trecho}</span>
-                        {item.distancia && (
-                          <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">{item.distancia} KM</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-8 py-5 text-right font-black text-slate-900 tabular-nums text-lg">
-                      {formatCurrency(item.valorBruto)}
-                    </td>
-                    <td className="px-8 py-5 text-right font-bold text-red-500 tabular-nums text-sm">
-                      -{formatCurrency(item.imposto)}
-                    </td>
-                    <td className="px-8 py-5 text-right font-bold text-slate-600 tabular-nums text-sm">
-                      {formatCurrency(item.custo)}
-                    </td>
-                    <td className="px-8 py-5 text-right">
-                      <span className={`text-lg font-black tabular-nums ${item.lucro >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {formatCurrency(item.lucro)}
-                      </span>
-                    </td>
-                    <td className="px-8 py-5">
-                      <div className="flex justify-center">
-                        {item.status.financeiro === 'Faturado' ? (
-                          <span className="inline-flex items-center gap-2 px-5 py-2 bg-emerald-100 text-emerald-700 rounded-full text-xs font-black uppercase shadow-sm border border-emerald-200">
-                            <CheckCircle2 size={16} />
-                            Faturado
-                          </span>
-                        ) : (
-                          <button 
-                            onClick={() => handleDarBaixa(item.id)}
-                            className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-black uppercase hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
-                          >
-                            Dar Baixa
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable
+        data={filteredData}
+        columns={[
+          {
+            key: 'documento',
+            title: 'Documento / Data',
+            render: (_: any, item: any) => (
+              <div className="flex flex-col gap-1">
+                <span className="text-base font-bold text-slate-800 leading-none">#{item.os}</span>
+                <span className="text-xs text-slate-400 font-semibold">{new Date(item.data).toLocaleDateString('pt-BR')}</span>
+              </div>
+            )
+          },
+          {
+            key: 'cliente',
+            title: 'Cliente',
+            render: (_: any, item: any) => {
+              const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || 'N/A';
+              return (
+                <span className="text-base font-semibold text-slate-700">{clienteNome}</span>
+              );
+            }
+          },
+          {
+            key: 'trecho',
+            title: 'Itinerário / KM',
+            render: (_: any, item: any) => (
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-slate-800">{item.trecho}</span>
+                {item.distancia && (
+                  <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">{item.distancia} KM</span>
+                )}
+              </div>
+            )
+          },
+          {
+            key: 'valorBruto',
+            title: 'Faturamento (R$)',
+            align: 'right',
+            render: (value: number) => (
+              <span className="text-right font-black text-slate-900 tabular-nums text-lg">
+                {formatCurrency(value)}
+              </span>
+            )
+          },
+          {
+            key: 'imposto',
+            title: 'Deduções (12%)',
+            align: 'right',
+            render: (value: number) => (
+              <span className="text-right font-bold text-red-500 tabular-nums text-sm">
+                -{formatCurrency(value)}
+              </span>
+            )
+          },
+          {
+            key: 'custo',
+            title: 'Repasse (R$)',
+            align: 'right',
+            render: (value: number) => (
+              <span className="text-right font-bold text-slate-600 tabular-nums text-sm">
+                {formatCurrency(value)}
+              </span>
+            )
+          },
+          {
+            key: 'lucro',
+            title: 'Lucro Líquido',
+            align: 'right',
+            render: (value: number) => (
+              <span className={`text-right text-lg font-black tabular-nums ${value >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {formatCurrency(value)}
+              </span>
+            )
+          },
+          {
+            key: 'status',
+            title: 'Status',
+            align: 'center',
+            render: (_: any, item: any) => (
+              <div className="flex justify-center">
+                {item.status.financeiro === 'Faturado' ? (
+                  <span className="inline-flex items-center gap-2 px-5 py-2 bg-emerald-100 text-emerald-700 rounded-full text-xs font-black uppercase shadow-sm border border-emerald-200">
+                    <CheckCircle2 size={16} />
+                    Faturado
+                  </span>
+                ) : (
+                  <button 
+                    onClick={() => handleDarBaixa(item.id)}
+                    className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-black uppercase hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
+                  >
+                    Dar Baixa
+                  </button>
+                )}
+              </div>
+            )
+          }
+        ]}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Buscar por OS, Cliente ou Motorista..."
+        emptyMessage="Nenhuma transação financeira encontrada."
+        emptyIcon={<DollarSign size={48} />}
+      />
     </div>
   );
 }

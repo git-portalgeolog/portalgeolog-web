@@ -50,6 +50,67 @@ Sempre verifique o `package.json` antes de executar, mas prefira estes padrões:
 
 ---
 
+## 📊 10. Estilo Global de Tabelas (PRIORIDADE ABSOLUTA)
+
+### Componente Padrão: DataTable
+- **Localização:** `@/components/ui/DataTable.tsx`
+- **OBRIGATÓRIO:** Todas as novas páginas com listagens devem usar `DataTable`
+
+### Padrão Visual Consistente
+```tsx
+// Estrutura obrigatória para todas as tabelas
+<DataTable
+  data={dados}
+  columns={[
+    {
+      key: 'campo',
+      title: 'Título da Coluna',
+      render: (value, item) => (
+        // Render customizado seguindo padrões visuais
+      ),
+      align: 'left' | 'center' | 'right'
+    }
+  ]}
+  searchTerm={searchTerm}
+  onSearchChange={setSearchTerm}
+  searchPlaceholder="Buscar por..."
+  emptyMessage="Nenhum registro encontrado."
+  emptyIcon={<Icone size={48} />}
+/>
+```
+
+### Estilo Visual Obrigatório
+- **Container:** `bg-white rounded-[2rem] border border-slate-200 shadow-xl shadow-slate-200/40`
+- **Header:** `bg-slate-50/80 border-b border-slate-200`
+- **Títulos:** `text-[12px] font-black uppercase tracking-widest text-slate-600`
+- **Padding:** `px-6 py-4` (padrão) ou `px-4 py-2` (compact)
+- **Hover:** `hover:bg-slate-50/50 transition-colors`
+- **Divisores:** `divide-y divide-slate-100`
+
+### Padrões de Conteúdo
+- **Texto principal:** `font-bold text-slate-800 text-base`
+- **Texto secundário:** `text-sm text-slate-500 font-medium`
+- **Ícones:** Tamanho 18px para ações, 14px para informações
+- **Botões de ação:** `p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg`
+
+### Search Integrado
+- **Input:** `pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl`
+- **Ícone:** `<Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />`
+- **Contador:** `text-xs font-black uppercase tracking-[0.3em] text-slate-400`
+
+### Páginas que Seguem Este Padrão
+- ✅ `/portal/servicos` - Implementado
+- ✅ `/portal/fornecedores` - Implementado  
+- ✅ `/portal/passageiros` - Implementado
+- ✅ `/portal/motoristas` - Implementado
+- ✅ `/portal/financeiro` - Implementado
+- ✅ `/portal/os` - Implementado
+
+### Regra de Ouro
+**NUNCA** criar tabelas HTML manualmente em novas páginas. **SEMPRE** usar `DataTable` para garantir consistência visual e comportamental em todo o sistema.
+
+---
+
 ## 🌐 3. Internacionalização (i18n) - PRIORIDADE 2026
 
 Ao refatorar para i18n no `certify-web`:

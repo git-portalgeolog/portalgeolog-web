@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown, Search, Plus } from "lucide-react";
 
 interface Option {
   id: string;
@@ -18,6 +18,8 @@ interface GeologSearchableSelectProps {
   disabled?: boolean;
   placeholder?: string;
   compact?: boolean;
+  required?: boolean;
+  onQuickAdd?: () => void;
 }
 
 export default function GeologSearchableSelect({
@@ -28,6 +30,8 @@ export default function GeologSearchableSelect({
   disabled = false,
   placeholder = "Pesquisar...",
   compact = false,
+  required = false,
+  onQuickAdd,
 }: GeologSearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -167,9 +171,10 @@ export default function GeologSearchableSelect({
   return (
     <div className="space-y-2 group relative" ref={wrapperRef}>
       <label
-        className={`font-black uppercase text-slate-500 tracking-wider ml-1 ${compact ? "text-[10px]" : "text-sm"}`}
+        className={`font-black uppercase text-slate-500 tracking-wider ml-1 ${compact ? "text-[10px]" : "text-sm"} flex items-center gap-1`}
       >
         {label}
+        {required && <span className="text-rose-300 text-base">*</span>}
       </label>
 
       <div
@@ -182,10 +187,25 @@ export default function GeologSearchableSelect({
         >
           {selectedOption ? selectedOption.nome : placeholder}
         </span>
-        <ChevronDown
-          size={compact ? 18 : 20}
-          className={`text-slate-400 transition-transform ${isOpen ? "rotate-180 text-blue-500" : ""}`}
-        />
+        <div className="flex items-center gap-1">
+          {onQuickAdd && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickAdd();
+              }}
+              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
+              title="Cadastrar novo"
+            >
+              <Plus size={16} />
+            </button>
+          )}
+          <ChevronDown
+            size={compact ? 18 : 20}
+            className={`text-slate-400 transition-transform ${isOpen ? "rotate-180 text-blue-500" : ""}`}
+          />
+        </div>
       </div>
 
       {isOpen &&

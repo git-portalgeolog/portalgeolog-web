@@ -5,9 +5,6 @@ import StandardModal from '@/components/StandardModal';
 import { 
   Plus, 
   Search, 
-  Filter, 
-  Download, 
-  MoreHorizontal, 
   Truck, 
   User,
   Calendar,
@@ -15,13 +12,11 @@ import {
   PlusCircle,
   FileText,
   MapPin,
-  Hash,
   Clock,
   CheckCircle2,
   Navigation,
   ArrowRightLeft,
   Building,
-  ChevronDown,
   MoreVertical,
   Eye,
   Pencil,
@@ -29,11 +24,13 @@ import {
   XOctagon,
   MessageCircle,
   Users,
-  AlertTriangle
+  AlertTriangle,
+  ChevronDown
 } from 'lucide-react';
 import { useData, type OrderService } from '@/context/DataContext';
-import GeologSelect from '@/components/ui/GeologSelect';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
+import { DataTable } from '@/components/ui/DataTable';
+import { toast } from 'sonner';
 
 type FormPassenger = { id: string; solicitanteId: string; nome: string; };
 type FormWaypoint = { label: string; lat: number | null; lng: number | null; passengers: FormPassenger[]; };
@@ -53,7 +50,7 @@ type OSFormData = {
 };
 
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, servicos, passageiros, drivers, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente } = useData();
+  const { osList, clientes, solicitantes, servicos, passageiros, drivers, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente, addCliente, addServico, addSolicitante, addCentroCusto, addDriver } = useData();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQuickPassengerModalOpen, setIsQuickPassengerModalOpen] = useState(false);
   const [quickPassengerTarget, setQuickPassengerTarget] = useState<{ waypointIndex: number; passengerId: string } | null>(null);
@@ -63,8 +60,13 @@ export default function OSOperationalPage() {
   const [viewingOSId, setViewingOSId] = useState<string | null>(null);
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
   const actionMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const passengerDraftIdRef = useRef(0);
+  
+  // Estados para cadastros rápidos
+  const [quickAddModal, setQuickAddModal] = useState<'cliente' | 'servico' | 'motorista' | 'solicitante' | 'centroCusto' | null>(null);
+  const [quickAddForm, setQuickAddForm] = useState({ nome: '' });
 
-  const isAnyModalOpen = isModalOpen || isQuickPassengerModalOpen || Boolean(viewingOSId) || Boolean(cancelTargetId);
+  const isAnyModalOpen = isModalOpen || isQuickPassengerModalOpen || Boolean(viewingOSId) || Boolean(cancelTargetId) || Boolean(quickAddModal);
 
   // Lock body scroll when modal is open
   useEffect(() => {
@@ -185,13 +187,14 @@ export default function OSOperationalPage() {
   const [formData, setFormData] = useState(initialForm);
   const initialQuickPassengerForm = {
     nomeCompleto: '',
-    email: '',
     celular: '',
-    cpf: '',
+    rotulo: 'Residencial',
+    referencia: '',
     enderecoCompleto: ''
   };
   const [quickPassengerForm, setQuickPassengerForm] = useState(initialQuickPassengerForm);
   const [quickPassengerErrors, setQuickPassengerErrors] = useState<{ celular?: string }>({});
+  const [isAddressExpanded, setIsAddressExpanded] = useState(true);
   const driverOptions = useMemo(() => {
     return drivers.filter(d => d.status !== 'inactive').map(d => ({
       id: d.name,
@@ -199,19 +202,7 @@ export default function OSOperationalPage() {
     }));
   }, [drivers]);
 
-  const formatCPF = (value: string) => {
-    const digits = value.replace(/\D/g, '').slice(0, 11);
-    const part1 = digits.slice(0, 3);
-    const part2 = digits.slice(3, 6);
-    const part3 = digits.slice(6, 9);
-    const part4 = digits.slice(9, 11);
-
-    if (digits.length <= 3) return part1;
-    if (digits.length <= 6) return `${part1}.${part2}`;
-    if (digits.length <= 9) return `${part1}.${part2}.${part3}`;
-    return `${part1}.${part2}.${part3}-${part4}`;
-  };
-
+  
   const formatPhone = (value: string) => {
     const digits = value.replace(/\D/g, '').slice(0, 11);
     const part1 = digits.slice(0, 2);
@@ -298,7 +289,8 @@ export default function OSOperationalPage() {
   const handleAddPassenger = (waypointIndex: number) => {
     const newWaypoints = [...formData.waypoints];
     const waypoint = { ...newWaypoints[waypointIndex] };
-    waypoint.passengers = [...(waypoint.passengers || []), { id: Date.now().toString(), solicitanteId: '', nome: '' }];
+    passengerDraftIdRef.current += 1;
+    waypoint.passengers = [...(waypoint.passengers || []), { id: `draft-passenger-${passengerDraftIdRef.current}`, solicitanteId: '', nome: '' }];
     newWaypoints[waypointIndex] = waypoint;
     setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
   };
@@ -306,7 +298,7 @@ export default function OSOperationalPage() {
   const handleRemovePassenger = (waypointIndex: number, passengerId: string) => {
     const newWaypoints = [...formData.waypoints];
     const waypoint = { ...newWaypoints[waypointIndex] };
-    waypoint.passengers = (waypoint.passengers || []).filter((p: any) => p.id !== passengerId);
+    waypoint.passengers = (waypoint.passengers || []).filter((p) => p.id !== passengerId);
     newWaypoints[waypointIndex] = waypoint;
     setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
   };
@@ -315,21 +307,132 @@ export default function OSOperationalPage() {
     const newWaypoints = [...formData.waypoints];
     const waypoint = { ...newWaypoints[waypointIndex] };
     const passageiroSelecionado = passageiros.find(p => p.id === novoPassageiroId);
-    waypoint.passengers = (waypoint.passengers || []).map((p: any) => 
+    waypoint.passengers = (waypoint.passengers || []).map((p) => 
       p.id === passengerId ? { ...p, solicitanteId: novoPassageiroId, nome: passageiroSelecionado?.nomeCompleto || '' } : p
     );
     newWaypoints[waypointIndex] = waypoint;
     setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
   };
 
+  const getWaypointInfo = (waypointIndex: number) => {
+    const totalWaypoints = formData.waypoints.length;
+    const isFirst = waypointIndex === 0;
+    const isLast = waypointIndex === totalWaypoints - 1;
+    
+    if (isFirst) {
+      return {
+        type: 'ORIGEM',
+        color: 'emerald',
+        bgColor: 'bg-emerald-50',
+        textColor: 'text-emerald-600',
+        borderColor: 'border-emerald-200',
+        description: 'Ponto de partida'
+      };
+    } else if (isLast) {
+      return {
+        type: 'DESTINO FINAL',
+        color: 'blue',
+        bgColor: 'bg-blue-50',
+        textColor: 'text-blue-600',
+        borderColor: 'border-blue-200',
+        description: 'Ponto de chegada'
+      };
+    } else {
+      return {
+        type: 'PARADA',
+        color: 'slate',
+        bgColor: 'bg-slate-50',
+        textColor: 'text-slate-600',
+        borderColor: 'border-slate-200',
+        description: 'Parada intermediária'
+      };
+    }
+  };
+
   const openQuickPassengerModal = (waypointIndex: number, passengerId: string) => {
     setQuickPassengerTarget({ waypointIndex, passengerId });
     setQuickPassengerForm(initialQuickPassengerForm);
     setQuickPassengerErrors({});
+    setIsAddressExpanded(true);
     setIsQuickPassengerModalOpen(true);
   };
 
-  const handleQuickPassengerSubmit = (event: React.FormEvent) => {
+  const handleQuickAddServico = () => {
+    setQuickAddModal('servico');
+    setQuickAddForm({ nome: '' });
+  };
+
+  const handleQuickAddMotorista = () => {
+    setQuickAddModal('motorista');
+    setQuickAddForm({ nome: '' });
+  };
+
+  const handleQuickAddSolicitante = () => {
+    if (!formData.clienteId) {
+      toast.error('Selecione primeiro uma empresa/cliente');
+      return;
+    }
+    setQuickAddModal('solicitante');
+    setQuickAddForm({ nome: '' });
+  };
+
+  const handleQuickAddCentroCusto = () => {
+    if (!formData.clienteId) {
+      toast.error('Selecione primeiro uma empresa/cliente');
+      return;
+    }
+    setQuickAddModal('centroCusto');
+    setQuickAddForm({ nome: '' });
+  };
+
+  const handleQuickAddSubmit = async () => {
+    if (!quickAddModal || !quickAddForm.nome.trim()) return;
+
+    try {
+      switch (quickAddModal) {
+        case 'cliente': {
+          const newCliente = await addCliente(quickAddForm.nome.trim());
+          toast.success('Empresa cadastrada com sucesso!');
+          // Selecionar automaticamente
+          setFormData(prev => ({ ...prev, clienteId: newCliente.id, solicitante: '', centroCusto: '' }));
+          break;
+        }
+        case 'servico': {
+          const newServico = await addServico(quickAddForm.nome.trim());
+          toast.success('Serviço cadastrado com sucesso!');
+          // Selecionar automaticamente
+          setFormData(prev => ({ ...prev, tipoServico: newServico.nome }));
+          break;
+        }
+        case 'motorista': {
+          const newDriver = await addDriver(quickAddForm.nome.trim());
+          toast.success('Motorista cadastrado com sucesso!');
+          setFormData(prev => ({ ...prev, motorista: newDriver.name }));
+          break;
+        }
+        case 'solicitante': {
+          const newSolicitante = await addSolicitante(quickAddForm.nome.trim(), formData.clienteId);
+          toast.success('Solicitante cadastrado com sucesso!');
+          // Selecionar automaticamente
+          setFormData(prev => ({ ...prev, solicitante: newSolicitante.nome }));
+          break;
+        }
+        case 'centroCusto': {
+          const newCentroCusto = await addCentroCusto(quickAddForm.nome.trim(), formData.clienteId);
+          toast.success('Centro de custo cadastrado com sucesso!');
+          // Selecionar automaticamente
+          setFormData(prev => ({ ...prev, centroCusto: newCentroCusto.id }));
+          break;
+        }
+      }
+      setQuickAddModal(null);
+      setQuickAddForm({ nome: '' });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao cadastrar');
+    }
+  };
+
+  const handleQuickPassengerSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!quickPassengerTarget) return;
 
@@ -347,86 +450,51 @@ export default function OSOperationalPage() {
       return;
     }
 
-    const novoPassageiro = addPassageiro({
-      nomeCompleto: trimmedNome,
-      email: quickPassengerForm.email.trim(),
-      celular: quickPassengerForm.celular.trim(),
-      cpf: quickPassengerForm.cpf.trim(),
-      enderecos: [
-        {
-          rotulo: 'Base Principal',
-          enderecoCompleto: trimmedEndereco
-        }
-      ]
-    });
-
-    const newWaypoints = [...formData.waypoints];
-    const waypoint = { ...newWaypoints[quickPassengerTarget.waypointIndex] };
-    waypoint.passengers = (waypoint.passengers || []).map((p: any) =>
-      p.id === quickPassengerTarget.passengerId
-        ? { ...p, solicitanteId: novoPassageiro.id, nome: novoPassageiro.nomeCompleto }
-        : p
-    );
-    newWaypoints[quickPassengerTarget.waypointIndex] = waypoint;
-    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
-
-    setIsQuickPassengerModalOpen(false);
-    setQuickPassengerTarget(null);
-  };
-
-  const sendWhatsAppNotification = async (osData: any) => {
-    const phone = "5522997259180"; // Número de destino atualizado (Thorfinn)
-    const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
-
-    // Link para o motorista clicar (Você substituirá localhost pelo seu domínio final quando publicar)
-    const acceptLink = `https://portalgeolog.web.app/os/aceitar?id=${osData.id}`;
-
-    // Formatação do itinerário para WhatsApp
-    const waypoints = osData.waypoints || [];
-    let itineraryText = "";
-    if (waypoints.length >= 2) {
-      itineraryText = waypoints.map((w: any, idx: number) => {
-        const label = w.label.trim();
-        if (idx === 0) return `🟢 *Origem:* ${label}`;
-        if (idx === waypoints.length - 1) return `🔵 *Destino Final:* ${label}`;
-        return `🛑 *Parada:* ${label}`;
-      }).join('\n\n');
-    } else {
-      itineraryText = `📍 ${osData.trecho}`;
-    }
-
-    const message = `*🔔 AVISO - PORTAL GEOLOG*\n\n` +
-      `Olá, *${osData.motorista}*!\n` +
-      `Você foi escalado para um novo serviço.\n\n` +
-      `📌 *OS:* #${osData.os}\n` +
-      `🏢 *Empresa:* ${cliente}\n` +
-      `📍 *Itinerário:*\n\n${itineraryText}\n\n` +
-      `📅 *Data:* ${osData.data.split('-').reverse().join('/')}\n` +
-      `🛠️ *Serviço:* ${osData.tipoServico}\n\n` +
-      `👇 *CLIQUE NO LINK ABAIXO PARA ACEITAR:* \n` +
-      `${acceptLink}\n\n` +
-      `_Ao clicar, o status será atualizado automaticamente no painel._`;
-
-
     try {
-      const response = await fetch('/api/whatsapp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, message })
+      const novoPassageiro = await addPassageiro({
+        nomeCompleto: trimmedNome,
+        celular: quickPassengerForm.celular.trim(),
+        enderecos: [
+          {
+            rotulo: quickPassengerForm.rotulo.trim(),
+            referencia: quickPassengerForm.referencia.trim(),
+            enderecoCompleto: trimmedEndereco
+          }
+        ]
       });
 
-      if (response.ok) {
-        console.log("WhatsApp enviado com sucesso!");
-      } else {
-        console.error("Falha ao enviar WhatsApp via API");
-      }
-    } catch (err) {
-      console.error("Erro na chamada da API de WhatsApp:", err);
+      const newWaypoints = [...formData.waypoints];
+      const waypoint = { ...newWaypoints[quickPassengerTarget.waypointIndex] };
+      waypoint.passengers = (waypoint.passengers || []).map((p) =>
+        p.id === quickPassengerTarget.passengerId
+          ? { ...p, solicitanteId: novoPassageiro.id, nome: novoPassageiro.nomeCompleto }
+          : p
+      );
+      newWaypoints[quickPassengerTarget.waypointIndex] = waypoint;
+      setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+
+      setIsQuickPassengerModalOpen(false);
+      setQuickPassengerTarget(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o passageiro.');
     }
   };
 
   const handleAddOS = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validação dos campos obrigatórios
+    if (!formData.data || !formData.clienteId || !formData.motorista || 
+        !formData.tipoServico || !formData.valorBruto || formData.custo === undefined) {
+      toast.error('Preencha todos os campos obrigatórios.');
+      return;
+    }
+    
+    if (formData.valorBruto <= 0 || formData.custo < 0) {
+      toast.error('Valores inválidos. Verifique os campos financeiros.');
+      return;
+    }
+    
     const finalData = {
       ...formData,
       trecho: trechoPreview,
@@ -439,10 +507,13 @@ export default function OSOperationalPage() {
       return;
     }
 
-    const newOS = addOS(finalData);
-    await sendWhatsAppNotification(newOS);
-
-    resetMainModalState();
+    try {
+      addOS(finalData);
+      resetMainModalState();
+    } catch (error) {
+      console.error('Error in handleAddOS:', error);
+      toast.error(error instanceof Error ? error.message : 'Não foi possível criar a ordem de serviço.');
+    }
   };
 
   const formatCurrency = (value: number) => {
@@ -452,7 +523,7 @@ export default function OSOperationalPage() {
     }).format(value);
   };
 
-  const currentImposto = formData.valorBruto * 0.12;
+  const currentImposto = formData.valorBruto * 0.15;
   const currentLucro = formData.valorBruto - currentImposto - formData.custo;
 
   const availableSolicitantes = useMemo(() => {
@@ -556,24 +627,10 @@ export default function OSOperationalPage() {
       return;
     }
 
-    if (name.includes('.')) {
-      const [parent, child, field] = name.split('.'); 
-      setFormData(prev => ({
-        ...prev,
-        [parent]: {
-          ...(prev as any)[parent],
-          [child]: {
-            ...(prev as any)[parent][child],
-            [field]: field === 'lat' || field === 'lng' ? parseFloat(value) || 0 : value
-          }
-        }
-      }));
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        [name]: name === 'valorBruto' || name === 'custo' ? parseFloat(value) || 0 : value
-      }));
-    }
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'valorBruto' || name === 'custo' ? parseFloat(value) || 0 : value
+    }));
   };
 
   const getStatusConfig = (status: string) => {
@@ -666,131 +723,215 @@ export default function OSOperationalPage() {
 
         <button 
           onClick={handleOpenCreateOSModal}
-          className="flex items-center justify-center gap-2 bg-[var(--color-geolog-blue)] text-white px-8 py-3.5 rounded-2xl font-black shadow-lg shadow-blue-900/10 hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest shrink-0 w-full md:w-auto"
+          className="flex items-center justify-center gap-2 bg-[var(--color-geolog-blue)] text-white px-8 py-3.5 rounded-2xl font-black shadow-lg shadow-blue-900/10 hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest shrink-0 w-full md:w-auto cursor-pointer"
         >
           <Plus size={18} strokeWidth={3} />
           Nova OS
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm relative overflow-visible">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">Protocolo</th>
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">OS</th>
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">Cliente</th>
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">Itinerário</th>
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600">Motorista</th>
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600 text-center">Status</th>
-              <th className="px-6 py-4 text-[11px] md:text-xs font-black uppercase tracking-[0.4em] text-slate-600 text-center">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredData.map((item) => {
-              const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || 'N/A';
-              const config = getStatusConfig(item.status.operacional);
+      <DataTable
+        data={filteredData}
+        columns={[
+          {
+            key: 'protocolo',
+            title: 'Protocolo',
+            render: (value: unknown, item: OrderService) => {
+              void value;
 
               return (
-                <tr key={item.id} className="hover:bg-slate-50/50 transition-colors align-top">
-                  <td className="px-6 py-5">
-                    <div className="space-y-1">
-                      <p className="font-black text-base text-slate-800 tracking-tight">{item.protocolo}</p>
-                      <p className="text-sm font-semibold text-slate-400">{item.data.split('-').reverse().join('/')}</p>
-                    </div>
-                  </td>
-                  <td className="px-6 py-5">
-                    <p className="font-black text-base text-slate-700">{item.os || '—'}</p>
-                  </td>
-                  <td className="px-6 py-5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
-                        <Building size={18} />
-                      </div>
-                      <div>
-                        <p className="font-bold text-base text-slate-700">{clienteNome}</p>
-                        <p className="text-sm text-slate-400 uppercase tracking-wide">{item.tipoServico.split('-')[0].trim()}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-5">
-                    <p className="text-base font-semibold text-slate-700 leading-snug">{item.trecho}</p>
-                  </td>
-                  <td className="px-6 py-5">
-                    <div className="flex items-center gap-2 text-slate-700">
-                      <User size={14} className="text-blue-500" />
-                      <span className="text-base font-bold">{item.motorista}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-5 text-center">
-                    <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs md:text-sm font-bold uppercase tracking-wide border ${config.bg} ${config.border} ${config.text}`}>
-                      {config.icon}
-                      {config.label}
-                    </span>
-                  </td>
-                  <td className="px-6 py-5 text-center">
-                    <div
-                      className="relative inline-block"
-                      ref={(el) => {
-                        if (el) {
-                          actionMenuRefs.current[item.id] = el;
-                        } else {
-                          delete actionMenuRefs.current[item.id];
-                        }
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
-                        }}
-                        className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm"
-                        aria-haspopup="true"
-                        aria-expanded={openActionMenuId === item.id}
-                      >
-                        <MoreVertical size={18} />
-                      </button>
-                      {openActionMenuId === item.id && (
-                        <div className="absolute right-0 mt-2 min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-50">
-                          <button
-                            onClick={() => handleViewOS(item.id)}
-                            className="w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-3"
-                          >
-                            <Eye size={16} className="text-slate-400" />
-                            Visualizar
-                          </button>
-                          <button
-                            onClick={() => handleEditOS(item.id)}
-                            className="w-full px-4 py-2 text-left text-sm font-bold text-blue-600 rounded-xl hover:bg-blue-50 flex items-center gap-3"
-                          >
-                            <Pencil size={16} className="text-blue-400" />
-                            Editar
-                          </button>
-                          <button
-                            onClick={() => handleReopenOS(item.id)}
-                            className="w-full px-4 py-2 text-left text-sm font-bold text-emerald-600 rounded-xl hover:bg-emerald-50 flex items-center gap-3"
-                          >
-                            <RotateCcw size={16} className="text-emerald-400" />
-                            Reabrir
-                          </button>
-                          <button
-                            onClick={() => handleCancelOS(item.id)}
-                            className="w-full px-4 py-2 text-left text-sm font-bold text-rose-600 rounded-xl hover:bg-rose-50 flex items-center gap-3"
-                          >
-                            <XOctagon size={16} className="text-rose-400" />
-                            Cancelar
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+              <div className="space-y-1">
+                <p className="font-black text-base text-slate-800 tracking-tight">{item.protocolo}</p>
+                <p className="text-sm font-semibold text-slate-400">{item.data.split('-').reverse().join('/')}</p>
+              </div>
               );
-            })}
-          </tbody>
-        </table>
-      </div>
+            }
+          },
+          {
+            key: 'os',
+            title: 'OS',
+            render: (value: unknown, item: OrderService) => {
+              void value;
+
+              return (
+              <p className="font-black text-base text-slate-700">{item.os || '—'}</p>
+              );
+            }
+          },
+          {
+            key: 'cliente',
+            title: 'Cliente',
+            width: '280px',
+            render: (value: unknown, item: OrderService) => {
+              void value;
+
+              const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || 'N/A';
+              return (
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
+                  <Building size={18} />
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-slate-700">{clienteNome}</p>
+                  <p className="text-sm text-slate-400 uppercase tracking-wide">{String(item.tipoServico).split('-')[0].trim()}</p>
+                </div>
+              </div>
+              );
+            }
+          },
+          {
+            key: 'trecho',
+            title: 'Itinerário',
+            width: '160px',
+            render: (value: unknown, item: OrderService) => {
+              void value;
+              const waypointCount = item.rota?.waypoints?.filter((waypoint) => waypoint.label.trim() !== '').length ?? 0;
+              const stopCount = waypointCount > 1 ? waypointCount - 2 : 0;
+              const displayCount = waypointCount > 0 ? waypointCount : 1;
+              
+              return (
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 rounded-lg">
+                    <Navigation size={13} className="text-blue-600" />
+                    <span className="text-sm font-extrabold text-blue-700">{displayCount}</span>
+                  </div>
+                  <span className="text-base font-medium text-slate-500">
+                    {waypointCount <= 1 ? 'Direto' : stopCount === 1 ? '1 parada' : `${stopCount} paradas`}
+                  </span>
+                </div>
+              );
+            }
+          },
+          {
+            key: 'passageiros',
+            title: 'Passageiros',
+            width: '120px',
+            align: 'center',
+            render: (value: unknown, item: OrderService) => {
+              void value;
+              const passengerCount = item.rota?.waypoints?.reduce((total, waypoint) => {
+                return total + (waypoint.passengers?.length ?? 0);
+              }, 0) ?? 0;
+              
+              return (
+                <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-xl border border-emerald-100">
+                  <Users size={14} className="text-emerald-600" />
+                  <span className="text-sm font-bold text-emerald-700">{passengerCount}</span>
+                </div>
+              );
+            }
+          },
+          {
+            key: 'motorista',
+            title: 'Motorista',
+            width: '240px',
+            render: (value: unknown, item: OrderService) => {
+              void value;
+
+              return (
+              <div className="flex items-center gap-3">
+                <User size={14} className="text-blue-500" />
+                <span className="text-base font-bold">{String(item.motorista)}</span>
+              </div>
+            )
+            }
+          },
+          {
+            key: 'status',
+            title: 'Status',
+            align: 'center',
+            width: '140px',
+            render: (value: unknown, item: OrderService) => {
+              void value;
+
+              const config = getStatusConfig(item.status.operacional);
+              return (
+                <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs md:text-sm font-bold uppercase tracking-wide border ${config.bg} ${config.border} ${config.text}`}>
+                  {config.icon}
+                  {config.label}
+                </span>
+              );
+            }
+          },
+          {
+            key: 'acoes',
+            title: 'Ações',
+            align: 'center',
+            render: (value: unknown, item: OrderService) => {
+              void value;
+
+              return (
+              <div
+                className="relative inline-block"
+                ref={(el) => {
+                  if (el) {
+                    actionMenuRefs.current[item.id] = el;
+                  } else {
+                    delete actionMenuRefs.current[item.id];
+                  }
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
+                  }}
+                  className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm"
+                  aria-haspopup="true"
+                  aria-expanded={openActionMenuId === item.id}
+                >
+                  <MoreVertical size={18} />
+                </button>
+                {openActionMenuId === item.id && (
+                  <div 
+                    className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
+                    style={{
+                      top: actionMenuRefs.current[item.id]?.getBoundingClientRect().bottom + 8,
+                      right: window.innerWidth - actionMenuRefs.current[item.id]?.getBoundingClientRect().right
+                    }}
+                  >
+                    <button
+                      onClick={() => handleViewOS(item.id)}
+                      className="w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-3 cursor-pointer"
+                    >
+                      <Eye size={16} className="text-slate-400" />
+                      Visualizar
+                    </button>
+                    <button
+                      onClick={() => handleEditOS(item.id)}
+                      className="w-full px-4 py-2 text-left text-sm font-bold text-blue-600 rounded-xl hover:bg-blue-50 flex items-center gap-3 cursor-pointer"
+                    >
+                      <Pencil size={16} className="text-blue-400" />
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => handleReopenOS(item.id)}
+                      className="w-full px-4 py-2 text-left text-sm font-bold text-emerald-600 rounded-xl hover:bg-emerald-50 flex items-center gap-3 cursor-pointer"
+                    >
+                      <RotateCcw size={16} className="text-emerald-400" />
+                      Reabrir
+                    </button>
+                    <button
+                      onClick={() => handleCancelOS(item.id)}
+                      className="w-full px-4 py-2 text-left text-sm font-bold text-rose-600 rounded-xl hover:bg-rose-50 flex items-center gap-3 cursor-pointer"
+                    >
+                      <XOctagon size={16} className="text-rose-400" />
+                      Cancelar
+                    </button>
+                  </div>
+                )}
+              </div>
+              );
+            }
+          }
+        ]}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Pesquisar por Motorista, Trecho ou OS..."
+        emptyMessage="Nenhuma OS encontrada."
+        emptyIcon={<Truck size={48} />}
+      />
 
       {/* Modal Nova OS */}
       {isModalOpen && (
@@ -806,14 +947,14 @@ export default function OSOperationalPage() {
               <button
                 type="button"
                 onClick={resetMainModalState}
-                className="px-6 py-4 text-slate-600 font-bold hover:text-slate-900 transition-colors text-sm uppercase tracking-widest"
+                className="px-6 py-4 text-slate-600 font-bold hover:text-slate-900 transition-colors text-sm uppercase tracking-widest cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 form="nova-os-form"
-                className="px-12 py-4 bg-[var(--color-geolog-blue)] text-white font-black rounded-xl shadow-xl shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest"
+                className="px-12 py-4 bg-[var(--color-geolog-blue)] text-white font-black rounded-xl shadow-xl shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest cursor-pointer"
               >
                 {editingOSId ? 'Salvar Alterações' : 'Confirmar OS'}
               </button>
@@ -835,7 +976,7 @@ export default function OSOperationalPage() {
                         <div className="space-y-2.5">
                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                               <div className="relative space-y-1.5">
-                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Data</label>
+                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1 mt-2">Data <span className="text-rose-300 text-base">*</span></label>
                                  <input 
                                    type="text" 
                                    name="data" 
@@ -848,7 +989,7 @@ export default function OSOperationalPage() {
                                  <Calendar size={18} className="absolute right-5 top-1/2 text-slate-300 pointer-events-none" style={{ transform: 'translateY(-10%)' }} />
                               </div>
                               <div className="space-y-1.5">
-                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Hora</label>
+                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1 mt-2">Hora <span className="text-rose-300 text-base">*</span></label>
                                  <input 
                                    type="text" 
                                    name="hora" 
@@ -856,15 +997,14 @@ export default function OSOperationalPage() {
                                    onChange={handleInputChange} 
                                    placeholder="HH:MM"
                                    maxLength={5}
-                                   className="w-full px-4 py-4 bg-white border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm tracking-[0.2em] font-mono" 
+                                   className="w-full px-6 py-4 bg-white border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm tracking-[0.2em] font-mono" 
                                  />
                               </div>
                               <div className="space-y-1.5">
-                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">OS</label>
+                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2 mt-2">OS <span className="text-slate-400 text-xs font-normal normal-case tracking-normal">Opcional</span></label>
                                  <input 
                                    type="text" 
                                    name="os" 
-                                   required 
                                    value={formData.os} 
                                    onChange={handleInputChange} 
                                    placeholder="Ex: 9988" 
@@ -879,6 +1019,7 @@ export default function OSOperationalPage() {
                              options={clientes} 
                              value={formData.clienteId} 
                              onChange={handleClienteChange} 
+                             required
                           />
                        </div>
                     </div>
@@ -893,6 +1034,8 @@ export default function OSOperationalPage() {
                              setFormData(prev => ({ ...prev, solicitante: opt?.nome || '' })); 
                            }} 
                            disabled={!formData.clienteId} 
+                           required
+                           onQuickAdd={handleQuickAddSolicitante}
                         />
                         <GeologSearchableSelect 
                            label="Centro de Custo" 
@@ -902,6 +1045,8 @@ export default function OSOperationalPage() {
                              setFormData(prev => ({ ...prev, centroCusto: id })); 
                            }} 
                            disabled={!formData.clienteId}
+                           required
+                           onQuickAdd={handleQuickAddCentroCusto}
                         />
                      </div>
 
@@ -914,12 +1059,16 @@ export default function OSOperationalPage() {
                              const opt = driverOptions.find(m => m.id === id); 
                              setFormData(prev => ({ ...prev, motorista: opt?.nome || '' })); 
                            }} 
+                           required
+                           onQuickAdd={handleQuickAddMotorista}
                         />
                         <GeologSearchableSelect 
                            label="Tipo de Serviço" 
                            options={servicos.map(s => ({ id: s.id, nome: s.nome }))} 
                            value={servicos.find(s => s.nome === formData.tipoServico)?.id || ''} 
                            onChange={handleServicoChange} 
+                           required
+                           onQuickAdd={handleQuickAddServico}
                         />
                      </div>
                   </div>
@@ -928,27 +1077,35 @@ export default function OSOperationalPage() {
                   {/* 2. ITINERÁRIO DINÂMICO */}
                   <div className="space-y-8">
                      <div className="flex items-center justify-between border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                        <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                        <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-2" style={{ lineHeight: '1.3' }}>
                           <MapPin size={20} className="text-blue-600" /> Itinerário / Paradas
                         </h3>
                         <div className="flex gap-2">
-                           <button type="button" onClick={handleSwapRoute} className="flex items-center gap-3 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-all shadow-sm">
+                           <button type="button" onClick={handleSwapRoute} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-all shadow-sm cursor-pointer">
                               <ArrowRightLeft size={16} /> Inverter
                            </button>
-                           <button type="button" onClick={handleAddWaypoint} className="flex items-center gap-3 px-4 py-2 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm">
+                           <button type="button" onClick={handleAddWaypoint} className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer">
                               <Plus size={16} /> Adicionar Parada
                            </button>
                         </div>
                      </div>
 
                      <div className="relative pl-8 space-y-6">
-                        {/* Timeline Connector */}
-                        <div className="absolute left-3.5 top-3 bottom-3 w-0.5 bg-slate-300" />
-                        
                         {formData.waypoints.map((waypoint, index) => (
                            <div key={index} className="relative group">
+                              {index < formData.waypoints.length - 1 && (
+                                <div className="absolute -left-[1.125rem] top-8 -bottom-6 w-0.5 bg-slate-300" />
+                              )}
+                              {index === formData.waypoints.length - 1 && (waypoint.passengers?.length || 0) > 0 && (
+                                <div 
+                                  className="absolute -left-[1.125rem] top-8 w-0.5 bg-slate-300" 
+                                  style={{ 
+                                    height: `calc(100% - ${waypoint.passengers.length === 1 ? '94px' : waypoint.passengers.length === 2 ? '70px' : waypoint.passengers.length === 3 ? '82px' : '94px'})` 
+                                  }}
+                                />
+                              )}
                               {/* Timeline Dot (Círculo) */}
-                              <div className={`absolute -left-[1.625rem] top-8 w-4 h-4 rounded-full border-4 border-white shadow-sm ring-2 z-10 ${index === 0 ? 'bg-emerald-500 ring-emerald-100' : index === formData.waypoints.length - 1 ? 'bg-blue-600 ring-blue-100' : 'bg-slate-400 ring-slate-100'}`} />
+                              <div className={`absolute -left-[1.625rem] top-2 w-4 h-4 rounded-full border-4 border-white shadow-sm ring-2 z-10 ${index === 0 ? 'bg-emerald-500 ring-emerald-100' : index === formData.waypoints.length - 1 ? 'bg-blue-600 ring-blue-100' : 'bg-slate-400 ring-slate-100'}`} />
                               
                               <div className="flex items-start gap-4">
                                  <div className="flex-1 space-y-4">
@@ -990,7 +1147,7 @@ export default function OSOperationalPage() {
                                              <button 
                                                 type="button" 
                                                 onClick={() => handleRemoveWaypoint(index)}
-                                                className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-all opacity-0 group-hover:opacity-100 flex items-center justify-center shadow-sm border border-red-100 cursor-pointer"
+                                                className="p-3 bg-red-50 text-red-400 rounded-xl hover:bg-red-100 transition-all opacity-0 group-hover:opacity-100 flex items-center justify-center shadow-sm border border-red-100 cursor-pointer"
                                                 title="Remover Parada"
                                              >
                                                 <X size={20} />
@@ -1002,7 +1159,7 @@ export default function OSOperationalPage() {
                                     {/* Linhas de Passageiros */}
                                     {waypoint.passengers && waypoint.passengers.length > 0 && (
                                        <div className="mt-4 border-t border-dashed border-slate-200">
-                                          {waypoint.passengers.map((passenger: any, passengerIndex: number) => (
+                                          {waypoint.passengers.map((passenger, passengerIndex) => (
                                              <div key={passenger.id} className={`relative flex items-center gap-4 group/pass ${passengerIndex === 0 ? 'mt-2' : 'mt-0.5'} ${passengerIndex === waypoint.passengers.length - 1 ? 'mb-6' : 'mb-1'}`}>
                                                 {/* Linha horizontal da trilha - começa na linha vertical */}
                                                 <div className="absolute -left-[1.125rem] top-1/2 -translate-y-1/2 w-12 h-0.5 bg-slate-300 z-10" />
@@ -1011,35 +1168,45 @@ export default function OSOperationalPage() {
                                                 <div className={`absolute left-[1.375rem] top-1/2 -translate-y-1/2 w-4 h-4 rounded-sm border-4 border-white shadow-sm ring-2 z-20 ${index === 0 ? 'bg-emerald-500 ring-emerald-100' : index === formData.waypoints.length - 1 ? 'bg-blue-600 ring-blue-100' : 'bg-slate-400 ring-slate-100'}`} />
                                                 
                                                 <div className="flex-1 flex items-center gap-3 ml-8">
-                                                   <div className="w-1/2 ml-6">
+                                                   <div className="w-3/5 ml-6">
                                                       <div className="flex items-center gap-3">
-                                                        <div className={`flex-1 ${passengerIndex === 0 ? 'mt-3' : 'mt-0'} ${passengerIndex === waypoint.passengers.length - 1 ? 'mb-8' : 'mb-2'}`}>
+                                                        <div className="flex-1">
                                                           <GeologSearchableSelect 
                                                              label=""
                                                              placeholder="Selecione o passageiro..."
-                                                             options={passageiros.map(p => ({ id: p.id, nome: p.nomeCompleto }))}
+                                                             options={passageiros.map(p => ({ 
+                                                               id: p.id, 
+                                                               nome: p.nomeCompleto,
+                                                               sublabel: p.enderecos?.[0]?.rotulo || undefined
+                                                             }))}
                                                              value={passenger.solicitanteId || ''}
                                                              onChange={(val) => handlePassengerChange(index, passenger.id, val)}
                                                           />
                                                         </div>
-                                                        <button
-                                                          type="button"
-                                                          onClick={() => openQuickPassengerModal(index, passenger.id)}
-                                                          className="self-center p-3 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all opacity-0 group-hover/pass:opacity-100 flex items-center justify-center shadow-sm border border-blue-200 cursor-pointer"
-                                                          title="Cadastrar passageiro"
-                                                        >
-                                                          <PlusCircle size={18} />
-                                                        </button>
+                                                        <div className="flex items-center justify-center h-[56px]">
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => openQuickPassengerModal(index, passenger.id)}
+                                                            className="p-3 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all opacity-0 group-hover/pass:opacity-100 flex items-center justify-center shadow-sm border border-blue-200 cursor-pointer"
+                                                            style={{ marginBottom: '-15px' }}
+                                                            title="Cadastrar passageiro"
+                                                          >
+                                                            <PlusCircle size={18} />
+                                                          </button>
+                                                        </div>
                                                       </div>
                                                    </div>
-                                                   <button 
-                                                      type="button" 
-                                                      onClick={() => handleRemovePassenger(index, passenger.id)}
-                                                      className="self-center p-3 text-red-400 hover:text-red-600 hover:bg-red-100 rounded-xl transition-all opacity-0 group-hover/pass:opacity-100 cursor-pointer"
-                                                      title="Remover Passageiro"
-                                                   >
-                                                      <X size={18} />
-                                                   </button>
+                                                   <div className="flex items-center justify-center h-[56px]">
+                                                     <button 
+                                                        type="button" 
+                                                        onClick={() => handleRemovePassenger(index, passenger.id)}
+                                                        className="p-3 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover/pass:opacity-100 cursor-pointer"
+                                                        style={{ marginBottom: '-15px' }}
+                                                        title="Remover Passageiro"
+                                                     >
+                                                        <X size={18} />
+                                                     </button>
+                                                   </div>
                                                 </div>
                                              </div>
                                           ))}
@@ -1070,40 +1237,46 @@ export default function OSOperationalPage() {
                         </h3>
                      </div>
 
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-2.5">
+                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                        <div className="flex flex-col gap-2">
                            <label className="text-sm font-bold text-slate-800 uppercase tracking-tight ml-1">Valor Bruto (R$)</label>
-                           <input 
-                             type="number" 
-                             name="valorBruto" 
-                             step="0.01" 
-                             value={formData.valorBruto || ''} 
-                             onChange={handleInputChange} 
-                             className="w-full bg-slate-50 border-2 border-slate-200 py-4 px-6 rounded-xl font-black text-2xl text-blue-700 outline-none tabular-nums focus:bg-white focus:border-blue-600 transition-all shadow-sm" 
-                           />
+                           <div className="relative">
+                              <input 
+                                type="number" 
+                                name="valorBruto" 
+                                step="0.01" 
+                                value={formData.valorBruto || ''} 
+                                onChange={handleInputChange} 
+                                className="w-full bg-slate-50 border-2 border-slate-200 px-6 h-[58px] rounded-xl font-bold text-lg text-blue-700 outline-none tabular-nums focus:bg-white focus:border-blue-600 transition-all shadow-sm" 
+                              />
+                           </div>
                         </div>
-                        <div className="space-y-2.5">
+
+                        <div className="flex flex-col gap-2">
                            <label className="text-sm font-bold text-slate-800 uppercase tracking-tight ml-1">Custo Motorista (R$)</label>
-                           <div className="flex flex-col lg:flex-row gap-4">
+                           <div className="relative">
                               <input 
                                 type="number" 
                                 name="custo" 
                                 step="0.01" 
                                 value={formData.custo || ''} 
                                 onChange={handleInputChange} 
-                                className="w-full bg-slate-50 border-2 border-slate-200 py-4 px-6 rounded-xl font-black text-2xl text-red-600 outline-none tabular-nums focus:bg-white focus:border-red-600 transition-all shadow-sm" 
+                                className="w-full bg-slate-50 border-2 border-slate-200 px-6 h-[58px] rounded-xl font-bold text-lg text-red-500 outline-none tabular-nums focus:bg-white focus:border-red-300 transition-all shadow-sm" 
                               />
-                              <div className="space-y-1.5 w-full lg:max-w-[10rem]">
-                                 <label className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Hora Extra</label>
-                                 <input 
-                                   type="text" 
-                                   name="horaExtra" 
-                                   value={formData.horaExtra} 
-                                   disabled
-                                   placeholder="Aguardando"
-                                   className="w-full px-4 py-4 bg-slate-100 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-400 outline-none cursor-not-allowed" 
-                                 />
-                              </div>
+                           </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                           <label className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Hora Extra</label>
+                           <div className="relative">
+                              <input 
+                                type="time" 
+                                name="horaExtra" 
+                                value={formData.horaExtra} 
+                                disabled
+                                placeholder="Aguardando"
+                                className="w-full lg:max-w-[10rem] px-6 h-[58px] bg-slate-100 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-400 outline-none cursor-not-allowed" 
+                              />
                            </div>
                         </div>
                      </div>
@@ -1111,7 +1284,12 @@ export default function OSOperationalPage() {
                      <div className={`p-8 md:p-10 rounded-[2.5rem] ${currentLucro >= 0 ? 'bg-emerald-600 shadow-emerald-900/10' : 'bg-red-600 shadow-red-900/10'} text-white shadow-2xl transition-all duration-500`}>
                         <div className="flex justify-between items-center">
                            <div className="space-y-1">
-                              <span className="text-xs font-bold uppercase opacity-80 tracking-[0.2em]">Lucro Líquido Estimado</span>
+                              <div className="flex items-center gap-2">
+                                 <span className="text-xs font-bold uppercase opacity-80 tracking-[0.2em]">Lucro Líquido Estimado</span>
+                                 <div className="px-3 py-1.5 bg-white/20 rounded-full backdrop-blur-md">
+                                    <span className="text-[12px] font-black">-15% taxa</span>
+                                 </div>
+                              </div>
                               <p className="text-4xl font-black tracking-tighter tabular-nums leading-none">{formatCurrency(currentLucro)}</p>
                            </div>
                            <div className="text-right space-y-2">
@@ -1137,9 +1315,9 @@ export default function OSOperationalPage() {
           maxWidthClassName="max-w-4xl"
         >
           <form onSubmit={handleQuickPassengerSubmit} className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Nome completo <span className="text-rose-500 text-base">*</span></label>
+            <div className="grid grid-cols-1 md:grid-cols-25 gap-6">
+              <div className="space-y-2 md:col-span-18">
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Nome completo <span className="text-rose-300 text-base">*</span></label>
                 <input
                   required
                   value={quickPassengerForm.nomeCompleto}
@@ -1148,8 +1326,8 @@ export default function OSOperationalPage() {
                   placeholder="Ex: Lucas Vieira"
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Celular <span className="text-rose-500 text-base">*</span></label>
+              <div className="space-y-2 md:col-span-7">
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Celular <span className="text-rose-300 text-base">*</span></label>
                 <input
                   required
                   value={quickPassengerForm.celular}
@@ -1166,51 +1344,88 @@ export default function OSOperationalPage() {
                   placeholder="(00) 00000-0000"
                 />
                 {quickPassengerErrors.celular && (
-                  <p className="text-xs font-semibold text-rose-500 ml-1">{quickPassengerErrors.celular}</p>
+                  <p className="text-xs font-semibold text-rose-400 ml-1">{quickPassengerErrors.celular}</p>
                 )}
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Endereço principal <span className="text-rose-500 text-base">*</span></label>
-              <input
-                required
-                value={quickPassengerForm.enderecoCompleto}
-                onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, enderecoCompleto: e.target.value }))}
-                className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                placeholder="Rua, número, bairro, cidade - UF"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail</label>
-                <input
-                  type="email"
-                  value={quickPassengerForm.email}
-                  onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, email: e.target.value }))}
-                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                  placeholder="contato@exemplo.com"
+            <div className="relative rounded-[2rem] border-2 border-slate-200 bg-white p-6 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsAddressExpanded(!isAddressExpanded)}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
+                title={isAddressExpanded ? "Recolher endereço" : "Expandir endereço"}
+              >
+                <ChevronDown 
+                  size={20} 
+                  className={`transition-transform duration-200 ${isAddressExpanded ? 'rotate-180' : ''}`}
                 />
+              </button>
+              
+              <div className="flex items-center gap-3 mb-6">
+                <div className={`w-10 h-10 rounded-xl ${quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).bgColor : 'bg-blue-50'} ${quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).textColor : 'text-blue-600'} flex items-center justify-center`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-map-pin" aria-hidden="true">
+                    <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path>
+                    <circle cx="12" cy="10" r="3"></circle>
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                    {isAddressExpanded 
+                      ? (quickPassengerTarget ? `${getWaypointInfo(quickPassengerTarget.waypointIndex).type} - Endereço` : "Endereço 1")
+                      : (quickPassengerForm.enderecoCompleto || (quickPassengerTarget ? `Endereço vinculado à ${getWaypointInfo(quickPassengerTarget.waypointIndex).type}` : "Endereço vinculado ao roteiro"))
+                    }
+                  </p>
+                  <p className={`text-base font-black ${quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).textColor : 'text-slate-800'}`}>
+                    {isAddressExpanded 
+                      ? (quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).description : "Ponto de apoio / destino recorrente")
+                      : (quickPassengerForm.enderecoCompleto || (quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).type : "Origem, Parada ou Destino Final"))
+                    }
+                  </p>
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">CPF</label>
-                <input
-                  value={quickPassengerForm.cpf}
-                  onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, cpf: formatCPF(e.target.value) }))}
-                  maxLength={14}
-                  inputMode="numeric"
-                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                  placeholder="000.000.000-00"
-                />
-              </div>
+              
+              {isAddressExpanded && (
+                <div className="space-y-6 animate-in slide-in-from-top-2 duration-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Rótulo</label>
+                      <input 
+                        value={quickPassengerForm.rotulo}
+                        onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, rotulo: e.target.value }))}
+                        placeholder="Residencial, Base, Hotel..." 
+                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Referência</label>
+                      <input 
+                        value={quickPassengerForm.referencia}
+                        onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, referencia: e.target.value }))}
+                        placeholder="Portaria azul, torre B, etc" 
+                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2 mt-6">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Endereço completo <span className="text-rose-300 text-base">*</span></label>
+                    <input
+                      required
+                      value={quickPassengerForm.enderecoCompleto}
+                      onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, enderecoCompleto: e.target.value }))}
+                      className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                      placeholder="Rua, número, bairro, cidade - UF"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-4">
               <button
                 type="button"
                 onClick={() => setIsQuickPassengerModalOpen(false)}
-                className="px-6 py-3 text-slate-500 font-black rounded-xl border border-slate-200 hover:bg-slate-50 transition-all uppercase tracking-widest text-xs"
+                className="px-6 py-3 text-slate-500 font-black rounded-xl border border-slate-200 hover:bg-slate-50 transition-all uppercase tracking-widest text-xs cursor-pointer"
               >
                 Cancelar
               </button>
@@ -1374,7 +1589,7 @@ export default function OSOperationalPage() {
                           <MessageCircle size={16} className="text-slate-400" />
                           {passenger.celular}
                         </div>
-                        <div className="flex items-center gap-3 rounded-2xl bg-white border border-slate-200 px-4 py-3">
+                        <div className="flex items-center gap-2 rounded-2xl bg-white border border-slate-200 px-4 py-3">
                           <MapPin size={16} className="text-slate-400" />
                           {passenger.endereco}
                         </div>
@@ -1446,12 +1661,57 @@ export default function OSOperationalPage() {
           </div>
         </StandardModal>
       )}
+
+      {/* Modal Cadastro Rápido */}
+      {quickAddModal && (
+        <StandardModal
+          onClose={() => setQuickAddModal(null)}
+          title={`Novo ${quickAddModal === 'cliente' ? 'Empresa' : quickAddModal === 'servico' ? 'Serviço' : quickAddModal === 'motorista' ? 'Motorista' : quickAddModal === 'solicitante' ? 'Solicitante' : 'Centro de Custo'}`}
+          subtitle="Cadastro rápido direto no atendimento"
+          icon={<Plus size={24} />}
+          maxWidthClassName="max-w-2xl"
+        >
+          <form onSubmit={(e) => { e.preventDefault(); handleQuickAddSubmit(); }} className="space-y-6">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                  Nome <span className="text-rose-300 text-base">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={quickAddForm.nome}
+                  onChange={(e) => setQuickAddForm(prev => ({ ...prev, nome: e.target.value }))}
+                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                  placeholder={quickAddModal === 'cliente' ? 'Ex: Empresa ABC Ltda' : quickAddModal === 'servico' ? 'Ex: Transporte Executivo' : quickAddModal === 'motorista' ? 'Ex: João Silva' : quickAddModal === 'solicitante' ? 'Ex: Maria Santos' : 'Ex: Departamento Comercial'}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-4 pt-4">
+              <button
+                type="button"
+                onClick={() => setQuickAddModal(null)}
+                className="px-6 py-3 text-slate-500 font-black rounded-xl border border-slate-200 hover:bg-white transition-all uppercase tracking-widest text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="px-8 py-3 bg-[var(--color-geolog-blue)] text-white font-black rounded-xl shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest text-xs cursor-pointer"
+              >
+                Salvar
+              </button>
+            </div>
+          </form>
+        </StandardModal>
+      )}
     </div>
   );
 }
 
 
-function OpStatCard({ label, value, icon }: { label: string, value: number, icon: any }) {
+function OpStatCard({ label, value, icon }: { label: string, value: number, icon: React.ReactNode }) {
   return (
     <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center gap-6">
       <div className="p-4 bg-slate-50 rounded-2xl">{icon}</div>

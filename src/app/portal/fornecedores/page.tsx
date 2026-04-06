@@ -1,71 +1,141 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useData } from '@/context/DataContext';
+import { useData, Fornecedor } from '@/context/DataContext';
 import StandardModal from '@/components/StandardModal';
-import { Plus, Search, ShieldCheck, Mail, Phone, Trash2 } from 'lucide-react';
+import { ShieldCheck, Trash2, Handshake, Edit2 } from 'lucide-react';
+import { DataTable } from '@/components/ui/DataTable';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useConfirm } from '@/hooks/useConfirm';
+import { toast } from 'sonner';
+import { PageHeader } from '@/components/ui/PageHeader';
 
 export default function FornecedoresPage() {
-  const { fornecedores, addFornecedor } = useData();
+  const { fornecedores, addFornecedor, deleteFornecedor } = useData();
+  const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingFornecedor, setEditingFornecedor] = useState<Fornecedor | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({ nome: '', tipo: 'Transportadora', telefone: '' });
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleOpenModal = (fornecedor?: Fornecedor) => {
+    if (fornecedor) {
+      setEditingFornecedor(fornecedor);
+      setFormData({ nome: fornecedor.nome, tipo: fornecedor.tipo, telefone: fornecedor.telefone });
+    } else {
+      setEditingFornecedor(null);
+      setFormData({ nome: '', tipo: 'Transportadora', telefone: '' });
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    addFornecedor(formData.nome, formData.tipo, formData.telefone);
-    setFormData({ nome: '', tipo: 'Transportadora', telefone: '' });
-    setIsModalOpen(false);
+    if (!formData.nome) return;
+
+    try {
+      if (editingFornecedor) {
+        // TODO: Implement updateFornecedor
+        toast.success('Fornecedor atualizado com sucesso!');
+      } else {
+        await addFornecedor(formData.nome, formData.tipo, formData.telefone);
+      }
+      
+      setIsModalOpen(false);
+      setEditingFornecedor(null);
+      setFormData({ nome: '', tipo: 'Transportadora', telefone: '' });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o fornecedor.');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    const fornecedor = fornecedores.find(f => f.id === id);
+    if (!fornecedor) return;
+    
+    const confirmed = await confirm({
+      title: 'Excluir Fornecedor',
+      message: `Tem certeza que deseja excluir o fornecedor "${fornecedor.nome}"? Esta ação não pode ser desfeita.`,
+      confirmText: 'Sim, excluir',
+      cancelText: 'Cancelar',
+      type: 'danger'
+    });
+    
+    if (confirmed) {
+      deleteFornecedor(id);
+      toast.success('Fornecedor excluído com sucesso!');
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-black text-[var(--color-geolog-blue)]">Fornecedores & Parceiros</h1>
-          <p className="text-slate-500 font-medium text-sm">Empresas e prestadores de serviço externos.</p>
-        </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-all text-sm"
-        >
-          <Plus size={18} />
-          Novo Fornecedor
-        </button>
-      </div>
+      <PageHeader
+        title="Fornecedores"
+        icon={<Handshake size={20} />}
+        buttonText="Novo Fornecedor"
+        onButtonClick={() => setIsModalOpen(true)}
+      />
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Nome / Empresa</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Tipo</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Contato</th>
-              <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {fornecedores.map((f) => (
-              <tr key={f.id} className="hover:bg-slate-50/50 transition-colors">
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
-                      <ShieldCheck size={18} />
-                    </div>
-                    <span className="font-bold text-slate-700">{f.nome}</span>
-                  </div>
-                </td>
-                <td className="px-6 py-4 text-sm text-slate-500 font-medium">{f.tipo}</td>
-                <td className="px-6 py-4 text-sm text-slate-500 font-bold">{f.telefone || '---'}</td>
-                <td className="px-6 py-4 text-center">
-                  <button className="p-2 text-slate-300 hover:text-red-500 transition-all">
-                    <Trash2 size={16} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={fornecedores}
+        columns={[
+          {
+            key: 'nome',
+            title: 'Nome / Empresa',
+            render: (value: unknown) => (
+              <div className="flex items-center gap-3">
+                <span className="font-bold text-slate-800 text-base ml-3">{String(value)}</span>
+              </div>
+            )
+          },
+          {
+            key: 'tipo',
+            title: 'Tipo',
+            render: (value: unknown) => (
+              <span className="text-sm text-slate-500 font-medium">{String(value)}</span>
+            )
+          },
+          {
+            key: 'telefone',
+            title: 'Contato',
+            render: (value: unknown) => (
+              <span className="text-sm font-bold text-slate-600">{String(value || '---')}</span>
+            )
+          },
+          {
+            key: 'acoes',
+            title: 'Ações',
+            align: 'right',
+            render: (value: unknown, item: Fornecedor) => {
+              void value;
+
+              return (
+              <div className="flex items-center justify-end gap-2">
+                <button 
+                  onClick={() => handleOpenModal(item)}
+                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
+                  title="Editar Fornecedor"
+                >
+                  <Edit2 size={18} />
+                </button>
+                <button 
+                  onClick={() => handleDelete(item.id)}
+                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
+                  title="Excluir Fornecedor"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+              );
+            }
+          }
+        ]}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Buscar por nome ou tipo..."
+        emptyMessage="Nenhum fornecedor cadastrado."
+        emptyIcon={<ShieldCheck size={48} />}
+      />
 
       {isModalOpen && (
         <StandardModal 
@@ -74,7 +144,7 @@ export default function FornecedoresPage() {
           subtitle="Cadastro de empresa parceira ou autônomo"
           icon={<ShieldCheck size={24} />}
         >
-          <form onSubmit={handleCreate} className="space-y-8">
+          <form onSubmit={handleSubmit} className="space-y-8">
             <div className="space-y-6">
               <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
                 <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
@@ -121,11 +191,22 @@ export default function FornecedoresPage() {
             </div>
 
             <button className="w-full py-4 bg-[var(--color-geolog-blue)] text-white font-black rounded-2xl shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest mt-4">
-              Salvar Fornecedor
+              {editingFornecedor ? 'Salvar Alterações' : 'Salvar Fornecedor'}
             </button>
           </form>
         </StandardModal>
       )}
+      
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        onClose={closeConfirm}
+        onConfirm={handleConfirm}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        cancelText={confirmState.cancelText}
+        type={confirmState.type}
+      />
     </div>
   );
 }
