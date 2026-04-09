@@ -138,7 +138,7 @@ const normalizeTextValue = (value: string): string => value.trim().toLowerCase()
 const normalizeDigitsValue = (value: string): string => value.replace(/\D/g, '');
 
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, servicos, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente, addCliente, addServico, addSolicitante, addCentroCusto } = useData();
+  const { osList, clientes, solicitantes, servicos, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente, addCliente, addServico, addSolicitante, addCentroCusto, refreshData } = useData();
   const supabase = createClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQuickPassengerModalOpen, setIsQuickPassengerModalOpen] = useState(false);
@@ -655,16 +655,23 @@ export default function OSOperationalPage() {
             insertData.parceiro_id = quickAddDriverForm.parceiro_id;
           }
 
-          const { error } = await supabase.from('drivers').insert([insertData]);
+          const { data, error } = await supabase
+            .from('drivers')
+            .insert([insertData])
+            .select('id, name')
+            .single();
 
           if (error) throw error;
 
           toast.success('Motorista cadastrado com sucesso!');
-          setQuickAddedDriverOptions((prev) => {
-            if (prev.some((option) => option.id === name)) return prev;
-            return [...prev, { id: name, nome: name }];
-          });
-          setFormData(prev => ({ ...prev, motorista: name }));
+          if (data) {
+            setQuickAddedDriverOptions((prev) => {
+              if (prev.some((option) => option.id === data.id)) return prev;
+              return [...prev, { id: data.id, nome: data.name }];
+            });
+            setFormData((prev) => ({ ...prev, motorista: data.name }));
+          }
+          void refreshData();
           break;
         }
         case 'solicitante': {

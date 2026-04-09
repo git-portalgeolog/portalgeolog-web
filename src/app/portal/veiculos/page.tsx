@@ -227,11 +227,21 @@ export default function VeiculosPage() {
         insertData.parceiro_id = formData.parceiro_id;
       }
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('veiculos')
-        .insert([insertData]);
+        .insert([insertData])
+        .select('*')
+        .single();
 
       if (error) throw error;
+
+      if (data) {
+        setVehicles((prev) => [...prev, data as Vehicle].sort((a, b) => {
+          const marcaCompare = a.marca.localeCompare(b.marca, 'pt-BR');
+          if (marcaCompare !== 0) return marcaCompare;
+          return a.modelo.localeCompare(b.modelo, 'pt-BR');
+        }));
+      }
 
       setIsModalOpen(false);
       resetForm();
@@ -372,7 +382,8 @@ export default function VeiculosPage() {
                 });
 
                 if (confirmed) {
-                  deleteVeiculo(item.id);
+                  await deleteVeiculo(item.id);
+                  setVehicles((prev) => prev.filter((vehicle) => vehicle.id !== item.id));
                   toast.success('Veículo excluído com sucesso.');
                 }
               };
@@ -747,7 +758,7 @@ export default function VeiculosPage() {
               if (hasDuplicatePlate(formData.placa) && selectedVehicle && selectedVehicle.placa !== formData.placa) {
                 throw new Error('Já existe um veículo com esta placa.');
               }
-              await updateVeiculo(selectedVehicle!.id, {
+              const updatedVehicle = await updateVeiculo(selectedVehicle!.id, {
                 placa: formData.placa,
                 renavam: formData.renavam,
                 modelo: formData.modelo,
@@ -759,6 +770,7 @@ export default function VeiculosPage() {
                 proprietario_tipo: formData.proprietario_tipo,
                 parceiro_id: formData.proprietario_tipo === 'parceiro' ? formData.parceiro_id : undefined,
               });
+              setVehicles((prev) => prev.map((vehicle) => (vehicle.id === updatedVehicle.id ? updatedVehicle : vehicle)));
               setIsEditModalOpen(false);
               setSelectedVehicle(null);
               resetForm();

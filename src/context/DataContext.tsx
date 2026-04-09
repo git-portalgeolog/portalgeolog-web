@@ -239,6 +239,8 @@ interface DataContextType {
   updatePassageiro: (id: string, passageiro: NovoPassageiroInput) => Promise<Passageiro>;
   deletePassageiro: (id: string) => void;
   addDriver: (name: string) => Promise<Driver>;
+  updateVeiculo: (id: string, input: Partial<Vehicle>) => Promise<Vehicle>;
+  deleteVeiculo: (id: string) => Promise<void>;
   
   // Parceiros
   addParceiro: (parceiro: NovoParceiroInput) => Promise<ParceiroServico>;
@@ -338,60 +340,52 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (authLoading || !user) return;
 
-    // Debounce para evitar múltiplas conexões em re-renderizações rápidas
-    const timer = setTimeout(() => {
-      console.log('🔌 Supabase Real-time: Conectando canal central...');
-      
-      // Remove canal existente antes de criar novo para evitar erro de callbacks após subscribe
-      supabase.removeChannel(supabase.channel('geolog-realtime-global'));
-      
-      const channel = supabase
-        .channel('geolog-realtime-global')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_servico' }, () => {
-          console.log('📦 OS Change detected');
-          dbFetchOSList().then(setOsList).catch(() => {});
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
-          dbFetchClientes().then(setClientes).catch(() => {});
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'solicitantes' }, () => {
-          dbFetchSolicitantes().then(setSolicitantes).catch(() => {});
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'tipos_servico' }, () => {
-          dbFetchServicos().then(setServicos).catch(() => {});
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'centros_custo' }, () => {
-          dbFetchClientes().then(setClientes).catch(() => {}); // Centros de custo estao dentro de clientes no estado
-        })
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'app_notifications' }, (payload: { new: AppNotificationRecord }) => {
-          const notif = payload.new;
-          if (notif.type === 'success') toast.success(notif.title, { description: notif.message });
-          else if (notif.type === 'error') toast.error(notif.title, { description: notif.message });
-          else if (notif.type === 'warning') toast.warning(notif.title, { description: notif.message });
-          else toast.info(notif.title, { description: notif.message });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'passageiros' }, () => {
-          dbFetchPassageiros().then(setPassageiros).catch(() => {});
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, () => {
-          dbFetchDrivers().then(setDrivers).catch(() => {});
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'parceiros_servico' }, () => {
-          dbFetchParceiros().then(setParceiros).catch(() => {});
-        })
-        .subscribe((status: string) => {
-          if (status === 'SUBSCRIBED') {
-             console.log('✅ Real-time ativado.');
-          }
-          // Ignoramos erros ruidosos de canal, o Supabase gerencia reconexão internamente
-        });
+    console.log('🔌 Supabase Real-time: Conectando canal central...');
 
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    }, 1500);
+    const channel = supabase
+      .channel('geolog-realtime-global')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_servico' }, () => {
+        console.log('📦 OS Change detected');
+        dbFetchOSList().then(setOsList).catch(() => {});
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
+        dbFetchClientes().then(setClientes).catch(() => {});
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'solicitantes' }, () => {
+        dbFetchSolicitantes().then(setSolicitantes).catch(() => {});
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tipos_servico' }, () => {
+        dbFetchServicos().then(setServicos).catch(() => {});
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'centros_custo' }, () => {
+        dbFetchClientes().then(setClientes).catch(() => {}); // Centros de custo estao dentro de clientes no estado
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'app_notifications' }, (payload: { new: AppNotificationRecord }) => {
+        const notif = payload.new;
+        if (notif.type === 'success') toast.success(notif.title, { description: notif.message });
+        else if (notif.type === 'error') toast.error(notif.title, { description: notif.message });
+        else if (notif.type === 'warning') toast.warning(notif.title, { description: notif.message });
+        else toast.info(notif.title, { description: notif.message });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'passageiros' }, () => {
+        dbFetchPassageiros().then(setPassageiros).catch(() => {});
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, () => {
+        dbFetchDrivers().then(setDrivers).catch(() => {});
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'parceiros_servico' }, () => {
+        dbFetchParceiros().then(setParceiros).catch(() => {});
+      })
+      .subscribe((status: string) => {
+        if (status === 'SUBSCRIBED') {
+           console.log('✅ Real-time ativado.');
+        }
+        // Ignoramos erros ruidosos de canal, o Supabase gerencia reconexão internamente
+      });
 
-    return () => clearTimeout(timer);
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [
     authLoading,
     dbFetchClientes,
@@ -418,7 +412,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      return await insertCliente(cleanNome, contato);
+      const result = await insertCliente(cleanNome, contato);
+      setClientes((prev) => [...prev, result].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')));
+      void refreshData();
+      return result;
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new Error('Já existe uma empresa com este nome.');
@@ -443,6 +440,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     try {
       await updateClienteInDB(id, updates);
+      setClientes((prev) => prev.map((cliente) => {
+        if (cliente.id !== id) return cliente;
+
+        const nextNome = updates.nome !== undefined ? updates.nome.trim() : cliente.nome;
+        const nextContato = updates.contato !== undefined ? (updates.contato.trim() || undefined) : cliente.contato;
+
+        return {
+          ...cliente,
+          nome: nextNome,
+          contato: nextContato,
+        };
+      }));
+      void refreshData();
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new Error('Já existe uma empresa com este nome.');
@@ -453,7 +463,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteCliente = (id: string) => {
-    deleteClienteFromDB(id).catch(err => console.error('Error deleteClienteFromDB:', err));
+    deleteClienteFromDB(id)
+      .then(() => {
+        setClientes((prev) => prev.filter((cliente) => cliente.id !== id));
+        setSolicitantes((prev) => prev.filter((solicitante) => solicitante.clienteId !== id));
+        void refreshData();
+      })
+      .catch(err => console.error('Error deleteClienteFromDB:', err));
   };
 
   const addSolicitante = async (nome: string, clienteId: string, centroCustoId?: string): Promise<Solicitante> => {
@@ -469,7 +485,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Já existe um solicitante com este nome para esta empresa.');
     }
 
-    return await insertSolicitante(cleanNome, clienteId, centroCustoId);
+    const result = await insertSolicitante(cleanNome, clienteId, centroCustoId);
+    setSolicitantes((prev) => [...prev, result].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')));
+    void refreshData();
+    return result;
   };
 
   const addCentroCusto = async (nome: string, clienteId: string): Promise<CentroCusto> => {
@@ -485,23 +504,87 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Já existe um centro de custo com este nome para esta empresa.');
     }
 
-    return await insertCentroCusto(cleanNome, clienteId);
+    const result = await insertCentroCusto(cleanNome, clienteId);
+    setClientes((prev) => prev.map((cliente) => {
+      if (cliente.id !== clienteId) return cliente;
+
+      const centrosCusto = [...cliente.centrosCusto, result].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+      return {
+        ...cliente,
+        centrosCusto,
+      };
+    }));
+    void refreshData();
+    return result;
   };
 
   const updateCentroCusto = (id: string, updates: Partial<CentroCusto>) => {
-    updateCentroCustoInDB(id, updates).catch(err => console.error('Error updateCentroCustoInDB:', err));
+    updateCentroCustoInDB(id, updates)
+      .then(() => {
+        setClientes((prev) => prev.map((cliente) => {
+          const currentCentro = cliente.centrosCusto.find((centroCusto) => centroCusto.id === id);
+
+          if (!currentCentro) return cliente;
+
+          const nextClienteId = updates.clienteId ?? currentCentro.clienteId;
+          const nextCentro = {
+            id,
+            nome: updates.nome !== undefined ? updates.nome.trim() : currentCentro.nome,
+            clienteId: nextClienteId,
+          };
+
+          const centrosCusto = cliente.centrosCusto.filter((centroCusto) => centroCusto.id !== id);
+          if (cliente.id === nextClienteId) {
+            centrosCusto.push(nextCentro);
+          }
+
+          return {
+            ...cliente,
+            centrosCusto: centrosCusto.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+          };
+        }));
+        void refreshData();
+      })
+      .catch(err => console.error('Error updateCentroCustoInDB:', err));
   };
 
   const deleteCentroCusto = (id: string) => {
-    deleteCentroCustoFromDB(id).catch(err => console.error('Error deleteCentroCustoFromDB:', err));
+    deleteCentroCustoFromDB(id)
+      .then(() => {
+        setClientes((prev) => prev.map((cliente) => ({
+          ...cliente,
+          centrosCusto: cliente.centrosCusto.filter((centroCusto) => centroCusto.id !== id),
+        })));
+        void refreshData();
+      })
+      .catch(err => console.error('Error deleteCentroCustoFromDB:', err));
   };
 
   const updateSolicitante = (id: string, updates: Partial<Solicitante>) => {
-    updateSolicitanteInDB(id, updates).catch(err => console.error('Error updateSolicitanteInDB:', err));
+    updateSolicitanteInDB(id, updates)
+      .then(() => {
+        setSolicitantes((prev) => prev.map((solicitante) => {
+          if (solicitante.id !== id) return solicitante;
+
+          return {
+            ...solicitante,
+            nome: updates.nome !== undefined ? updates.nome.trim() : solicitante.nome,
+            clienteId: updates.clienteId ?? solicitante.clienteId,
+            centroCustoId: updates.centroCustoId ?? solicitante.centroCustoId,
+          };
+        }));
+        void refreshData();
+      })
+      .catch(err => console.error('Error updateSolicitanteInDB:', err));
   };
 
   const deleteSolicitante = (id: string) => {
-    deleteSolicitanteFromDB(id).catch(err => console.error('Error deleteSolicitanteFromDB:', err));
+    deleteSolicitanteFromDB(id)
+      .then(() => {
+        setSolicitantes((prev) => prev.filter((solicitante) => solicitante.id !== id));
+        void refreshData();
+      })
+      .catch(err => console.error('Error deleteSolicitanteFromDB:', err));
   };
 
   const addPassageiro = async (passageiro: NovoPassageiroInput): Promise<Passageiro> => {
@@ -553,6 +636,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       });
 
       setPassageiros((prev) => prev.map((p) => (p.id === tempId ? real : p)));
+      void refreshData();
       return real;
     } catch (error) {
       setPassageiros((prev) => prev.filter((p) => p.id !== tempId));
@@ -626,6 +710,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       });
 
       setPassageiros((prev) => prev.map((p) => (p.id === id ? real : p)));
+      void refreshData();
       return real;
     } catch (error) {
       setPassageiros(previousState);
@@ -651,11 +736,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const previousState = passageiros;
     setPassageiros((prev) => prev.filter((p) => p.id !== id));
 
-    deletePassageiroFromDB(id).catch((error) => {
-      setPassageiros(previousState);
-      console.error('Error deletePassageiroFromDB:', error);
-      throw error;
-    });
+    deletePassageiroFromDB(id)
+      .then(() => {
+        void refreshData();
+      })
+      .catch((error) => {
+        setPassageiros(previousState);
+        console.error('Error deletePassageiroFromDB:', error);
+        throw error;
+      });
   };
 
   const updateVeiculo = async (id: string, input: Partial<Vehicle>): Promise<Vehicle> => {
@@ -663,11 +752,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return real;
   };
 
-  const deleteVeiculo = (id: string) => {
-    deleteVeiculoFromDB(id).catch((error) => {
+  const deleteVeiculo = async (id: string): Promise<void> => {
+    try {
+      await deleteVeiculoFromDB(id);
+    } catch (error) {
       console.error('Error deleteVeiculoFromDB:', error);
       throw error;
-    });
+    }
   };
 
   const addDriver = async (name: string): Promise<Driver> => {
@@ -682,13 +773,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      return await insertDriver({
+      const result = await insertDriver({
         name: cleanName,
         cpf: '',
         cnh: '',
         phone: '',
         status: 'active'
       });
+      setDrivers((prev) => [...prev, result].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')));
+      void refreshData();
+      return result;
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new Error('Já existe um motorista com este nome.');
@@ -710,7 +804,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      return await insertServico(cleanNome);
+      const result = await insertServico(cleanNome);
+      setServicos((prev) => [...prev, result].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')));
+      void refreshData();
+      return result;
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new Error('Já existe um serviço com este nome.');
@@ -735,6 +832,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     try {
       await updateServicoInDB(id, updates);
+      setServicos((prev) => prev.map((servico) => {
+        if (servico.id !== id) return servico;
+
+        return {
+          ...servico,
+          nome: updates.nome !== undefined ? updates.nome.trim() : servico.nome,
+        };
+      }));
+      void refreshData();
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new Error('Já existe um serviço com este nome.');
@@ -745,7 +851,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteServico = (id: string) => {
-    deleteServicoFromDB(id).catch(err => console.error('Error deleteServicoFromDB:', err));
+    deleteServicoFromDB(id)
+      .then(() => {
+        setServicos((prev) => prev.filter((servico) => servico.id !== id));
+        void refreshData();
+      })
+      .catch(err => console.error('Error deleteServicoFromDB:', err));
   };
 
   const addOS = (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>): OrderService => {
@@ -767,6 +878,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     insertOS(osData)
       .then((real) => {
         setOsList((prev) => prev.map((o) => (o.id === tempId ? real : o)));
+        void refreshData();
       })
       .catch((err) => {
         console.error('Error adding OS:', err);
@@ -779,11 +891,42 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateOS = (id: string, osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => {
-    updateOSInDB(id, osData).catch(err => console.error('Error updateOSInDB:', err));
+    const currentOS = osList.find((os) => os.id === id);
+    if (currentOS) {
+      const imposto = osData.valorBruto * 0.12;
+      const lucro = osData.valorBruto - imposto - osData.custo;
+
+      setOsList((prev) => prev.map((os) => (os.id === id ? {
+        ...currentOS,
+        ...osData,
+        imposto,
+        lucro,
+        status: currentOS.status,
+        protocolo: currentOS.protocolo,
+      } : os)));
+    }
+
+    updateOSInDB(id, osData)
+      .then(() => {
+        void refreshData();
+      })
+      .catch(err => console.error('Error updateOSInDB:', err));
   };
 
   const updateOSStatus = (id: string, updates: Partial<OSStatus>) => {
-    updateOSStatusInDB(id, updates).catch(err => console.error('Error updateOSStatusInDB:', err));
+    setOsList((prev) => prev.map((os) => (os.id === id ? {
+      ...os,
+      status: {
+        operacional: updates.operacional ?? os.status.operacional,
+        financeiro: updates.financeiro ?? os.status.financeiro,
+      },
+    } : os)));
+
+    updateOSStatusInDB(id, updates)
+      .then(() => {
+        void refreshData();
+      })
+      .catch(err => console.error('Error updateOSStatusInDB:', err));
   };
 
   const getSolicitantesByCliente = useCallback((clienteId: string) => {
@@ -810,6 +953,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       const result = await insertParceiro(input);
       setParceiros((prev) => [...prev, result].sort((a, b) => a.razaoSocialOuNomeCompleto.localeCompare(b.razaoSocialOuNomeCompleto, 'pt-BR')));
       createNotification('success', 'Parceiro cadastrado', `"${cleanNome}" foi adicionado como parceiro de serviço.`, 'interno');
+      void refreshData();
       return result;
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -831,6 +975,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     try {
       await updateParceiroInDB(id, input);
+      setParceiros((prev) => prev.map((parceiro) => (parceiro.id === id ? {
+        ...parceiro,
+        ...input,
+        razaoSocialOuNomeCompleto: cleanNome,
+      } : parceiro)).sort((a, b) => a.razaoSocialOuNomeCompleto.localeCompare(b.razaoSocialOuNomeCompleto, 'pt-BR')));
+      void refreshData();
       createNotification('info', 'Parceiro atualizado', `Os dados de "${cleanNome}" foram atualizados.`, 'interno');
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -843,9 +993,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const deleteParceiro = (id: string) => {
     const parceiro = parceiros.find((p) => p.id === id);
     deleteParceiroFromDB(id).then(() => {
+      setParceiros((prev) => prev.filter((p) => p.id !== id));
       if (parceiro) {
         createNotification('warning', 'Parceiro excluído', `"${parceiro.razaoSocialOuNomeCompleto}" foi removido do sistema.`, 'interno');
       }
+      void refreshData();
     }).catch(err => console.error('Error deleteParceiroFromDB:', err));
   };
 
@@ -873,6 +1025,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         updatePassageiro,
         deletePassageiro,
         addDriver,
+        updateVeiculo,
+        deleteVeiculo,
         addParceiro,
         updateParceiro,
         deleteParceiro,

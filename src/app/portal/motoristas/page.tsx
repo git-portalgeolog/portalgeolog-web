@@ -47,6 +47,7 @@ export default function MotoristasPage() {
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const supabase = createClient();
+  const { parceiros, refreshData } = useData();
 
   // Form state
   const [formData, setFormData] = useState({
@@ -61,7 +62,6 @@ export default function MotoristasPage() {
     tipo_documento: 'cpf' as 'cpf' | 'passaporte',
   });
 
-  const { parceiros } = useData();
   const parceiroOptions = parceiros.map(p => ({ id: p.id, nome: p.razaoSocialOuNomeCompleto }));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
@@ -346,11 +346,18 @@ export default function MotoristasPage() {
         insertData.parceiro_id = formData.parceiro_id;
       }
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('drivers')
-        .insert([insertData]);
+        .insert([insertData])
+        .select('*')
+        .single();
 
       if (error) throw error;
+
+      if (data) {
+        setDrivers((prev) => [...prev, data as Driver].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')));
+        void refreshData();
+      }
 
       setIsModalOpen(false);
       setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vehicle_id: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf' });
@@ -455,12 +462,19 @@ export default function MotoristasPage() {
       // Atualiza email (limpa se vazio)
       updateData.email = formData.email.trim() ? formData.email.trim().toLowerCase() : null;
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('drivers')
         .update(updateData)
-        .eq('id', editingDriver.id);
+        .select('*')
+        .eq('id', editingDriver.id)
+        .single();
 
       if (error) throw error;
+
+      if (data) {
+        setDrivers((prev) => prev.map((driver) => (driver.id === editingDriver.id ? (data as Driver) : driver)));
+        void refreshData();
+      }
 
       toast.success('Motorista atualizado com sucesso!');
       setEditingDriver(null);
@@ -503,6 +517,8 @@ export default function MotoristasPage() {
       console.error('Erro ao excluir motorista:', error);
       toast.error('Erro ao excluir motorista.');
     } else {
+      setDrivers((prev) => prev.filter((driver) => driver.id !== id));
+      void refreshData();
       toast.success('Motorista excluído com sucesso!');
     }
   };

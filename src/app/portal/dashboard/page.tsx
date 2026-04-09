@@ -1,50 +1,19 @@
 'use client';
 
+import { useData } from '@/context/DataContext';
 import { useAuth } from '@/context/AuthContext';
-import { createClient } from '@/lib/supabase/client';
-import { useState, useEffect } from 'react';
+import { useMemo } from 'react';
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const supabase = createClient();
-  const [stats, setStats] = useState({
+  const { drivers } = useData();
+  const stats = useMemo(() => ({
     trips: 0,
-    drivers: 0,
-    alerts: 0
-  });
+    drivers: drivers.length,
+    alerts: 0,
+  }), [drivers.length]);
 
-  useEffect(() => {
-    if (!user) return;
-
-    const fetchStats = async () => {
-      // Count drivers
-      const { count, error } = await supabase
-        .from('drivers')
-        .select('*', { count: 'exact', head: true });
-      
-      if (!error && count !== null) {
-        setStats(prev => ({ ...prev, drivers: count }));
-      }
-    };
-
-    fetchStats();
-
-    // Monitor driver count in real-time
-    const channel = supabase
-      .channel('dashboard-drivers-count')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'drivers' },
-        () => {
-          fetchStats();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, supabase]);
+  if (!user) return null;
 
   return (
     <div>
