@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useData, TipoServico } from '@/context/DataContext';
-import { Bus, Trash2, Edit2 } from 'lucide-react';
+import { Bus, Trash2, Edit2, Plus } from 'lucide-react';
 import StandardModal from '@/components/StandardModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useConfirm } from '@/hooks/useConfirm';
@@ -71,12 +71,19 @@ export default function ServicosPage() {
       <PageHeader
         title="Tipos de Serviço"
         icon={<Bus size={20} />}
-        buttonText="Novo Serviço"
-        onButtonClick={() => handleOpenModal()}
       />
 
       <DataTable
         data={servicos}
+        actionButton={
+          <button
+            onClick={() => handleOpenModal()}
+            className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-3.5 rounded-2xl font-bold hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer shadow-lg shadow-blue-900/20 whitespace-nowrap"
+          >
+            <Plus size={18} />
+            Novo Serviço
+          </button>
+        }
         columns={[
           {
             key: 'nome',
@@ -131,12 +138,6 @@ export default function ServicosPage() {
         >
           <form onSubmit={handleSubmit} className="space-y-8">
             <div className="space-y-6">
-              <div className="flex items-center border-b-2 border-slate-100 pb-4">
-                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3">
-                  <Bus size={20} className="text-slate-500" /> Detalhes do Serviço
-                </h3>
-              </div>
-
               <div className="grid grid-cols-1 gap-6">
                 <div className="space-y-2">
                   <label className="text-base font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome do Serviço</label>

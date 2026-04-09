@@ -19,7 +19,14 @@ import {
   ShieldCheck,
   Package,
   DollarSign,
-  UserSquare2} from 'lucide-react';
+  UserSquare2,
+  CheckCircle,
+  Info,
+  AlertTriangle,
+  XCircle,
+  Briefcase,
+  User,
+  Handshake} from 'lucide-react';
 import Link from 'next/link';
 
 export default function DashboardLayout({
@@ -28,7 +35,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const { user, profile, loading, logout } = useAuth();
-  const { unreadCount, notifications, markAsRead, markAllAsRead, realtimeConnected } = useNotifications();
+  const { unreadCount, notifications, dismiss, dismissAll, realtimeConnected } = useNotifications();
   const [showNotifications, setShowNotifications] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
@@ -116,6 +123,13 @@ export default function DashboardLayout({
             collapsed={collapsed}
           />
           <NavLink 
+            href="/portal/veiculos" 
+            icon={<Truck />} 
+            label="Veículos" 
+            active={pathname === '/portal/veiculos'} 
+            collapsed={collapsed}
+          />
+          <NavLink 
             href="/portal/passageiros" 
             icon={<UserSquare2 />} 
             label="Passageiros" 
@@ -133,10 +147,10 @@ export default function DashboardLayout({
             collapsed={collapsed}
           />
           <NavLink 
-            href="/portal/fornecedores" 
-            icon={<ShieldCheck />} 
-            label="Fornecedores" 
-            active={pathname === '/portal/fornecedores'} 
+            href="/portal/parcerias" 
+            icon={<Handshake />} 
+            label="Parceiros de Serviço" 
+            active={pathname === '/portal/parcerias'} 
             collapsed={collapsed}
           />
           <NavLink 
@@ -217,7 +231,7 @@ export default function DashboardLayout({
                </button>
                
                {showNotifications && (
-                 <div className="absolute right-0 mt-2 w-96 bg-white border border-slate-200 rounded-2xl shadow-2xl z-[9999] overflow-hidden">
+                 <div className="absolute right-0 mt-2 w-[480px] bg-white border border-slate-200 rounded-2xl shadow-2xl z-[9999] overflow-hidden">
                    <div className="p-4 border-b border-slate-200">
                      <div className="flex items-center justify-between">
                        <div className="flex items-center gap-2">
@@ -232,40 +246,87 @@ export default function DashboardLayout({
                          </span>
                          {unreadCount > 0 && (
                            <button 
-                             onClick={markAllAsRead}
+                             onClick={dismissAll}
                              className="text-xs text-blue-600 hover:text-blue-700 font-black"
                            >
-                             Marcar todas como lidas
+                             Limpar todas
                            </button>
                          )}
                        </div>
                      </div>
                    </div>
-                   <div className="max-h-96 overflow-y-auto">
+                   <div className="max-h-[520px] overflow-y-auto">
                      {notifications.length === 0 ? (
                        <div className="p-8 text-center text-slate-400">
                          <Bell size={32} className="mx-auto mb-2 opacity-50" />
                          <p className="text-sm">Nenhuma notificação</p>
                        </div>
                      ) : (
-                       notifications.map((notification) => (
-                         <div 
-                           key={notification.id}
-                           className="p-4 border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
-                           onClick={() => markAsRead(notification.id)}
-                         >
-                           <div className="flex items-start gap-3">
-                             <div className="w-2 h-2 bg-blue-600 rounded-full mt-2 flex-shrink-0"></div>
-                             <div className="flex-1">
-                               <p className="font-black text-sm text-slate-800">{notification.title}</p>
-                               <p className="text-xs text-slate-600 mt-1">{notification.message}</p>
-                               <p className="text-xs text-slate-400 mt-2">
-                                 {new Date(notification.created_at).toLocaleString('pt-BR')}
-                               </p>
-                             </div>
-                           </div>
-                         </div>
-                       ))
+                       notifications.map((notification) => {
+                          const iconConfig = {
+                            success: { icon: CheckCircle, color: 'text-green-500', bg: 'bg-green-50' },
+                            info: { icon: Info, color: 'text-blue-500', bg: 'bg-blue-50' },
+                            warning: { icon: AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-50' },
+                            error: { icon: XCircle, color: 'text-red-500', bg: 'bg-red-50' },
+                          };
+                          const config = iconConfig[notification.type] || iconConfig.info;
+                          const IconComponent = config.icon;
+                          
+                          // Detectar tipo de entidade pelo conteúdo
+                          const content = (notification.title + ' ' + notification.message).toLowerCase();
+                          let EntityIcon = Info;
+                          let entityColor = 'text-slate-400';
+                          
+                          if (content.includes('os') || content.includes('ordem de serviço') || content.includes('serviço')) {
+                            EntityIcon = FileText;
+                            entityColor = 'text-blue-400';
+                          } else if (content.includes('cliente')) {
+                            EntityIcon = Building;
+                            entityColor = 'text-indigo-400';
+                          } else if (content.includes('parceiro')) {
+                            EntityIcon = ShieldCheck;
+                            entityColor = 'text-purple-400';
+                          } else if (content.includes('motorista')) {
+                            EntityIcon = Truck;
+                            entityColor = 'text-orange-400';
+                          } else if (content.includes('passageiro')) {
+                            EntityIcon = User;
+                            entityColor = 'text-teal-400';
+                          } else if (content.includes('veículo') || content.includes('veiculo') || content.includes('frota')) {
+                            EntityIcon = Truck;
+                            entityColor = 'text-cyan-400';
+                          } else if (content.includes('financeiro') || content.includes('fatura') || content.includes('pagamento')) {
+                            EntityIcon = DollarSign;
+                            entityColor = 'text-emerald-400';
+                          } else if (content.includes('serviço') || content.includes('servico')) {
+                            EntityIcon = Briefcase;
+                            entityColor = 'text-pink-400';
+                          }
+                          
+                          return (
+                            <div 
+                              key={notification.id}
+                              className="p-4 border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                              onClick={() => dismiss(notification.id)}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className={`p-2 rounded-xl ${config.bg} flex-shrink-0`}>
+                                  <IconComponent size={20} className={config.color} />
+                                </div>
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <EntityIcon size={14} className={`${entityColor} flex-shrink-0`} />
+                                    <p className="font-black text-sm text-slate-800">{notification.title}</p>
+                                  </div>
+                                  <p className="text-sm text-slate-600 mt-1 leading-relaxed">{notification.message}</p>
+                                  <p className="text-xs text-slate-400 mt-2">
+                                    {new Date(notification.created_at).toLocaleString('pt-BR')}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
                      )}
                    </div>
                  </div>

@@ -1,43 +1,56 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useData, Passageiro, PassageiroEndereco, NovoPassageiroInput } from '@/context/DataContext';
+import { createClient } from '@/lib/supabase/client';
 import StandardModal from '@/components/StandardModal';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useConfirm } from '@/hooks/useConfirm';
 import {
   Plus,
-  Search,
   UserSquare2,
   Mail,
   Phone,
-  Hash,
   MapPin,
   PlusCircle,
   Trash2,
   Layers,
-  ChevronRight
+  Eye,
+  Edit,
+  IdCard
 } from 'lucide-react';
-import { DataTable, Column } from '@/components/ui/DataTable';
+import { DataTable } from '@/components/ui/DataTable';
 import { PageHeader } from '@/components/ui/PageHeader';
+import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
+import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import { toast } from 'sonner';
 
 interface NewPassengerForm extends Omit<NovoPassageiroInput, 'enderecos'> {
   enderecos: Array<Omit<PassageiroEndereco, 'id'>>;
+  notificar: string;
+  genero: string;
 }
 
-const initialEndereco = { rotulo: 'Residencial', enderecoCompleto: '', referencia: '' };
+const initialEndereco = { rotulo: 'RESIDENCIAL', enderecoCompleto: '', referencia: '' };
 
 const initialForm: NewPassengerForm = {
   nomeCompleto: '',
   email: '',
   celular: '',
   cpf: '',
-  enderecos: [{ ...initialEndereco }]
+  enderecos: [{ ...initialEndereco }],
+  notificar: 'Sim',
+  genero: 'Sem resposta'
 };
 
 export default function PassageirosPage() {
-  const { passageiros, addPassageiro } = useData();
+  const { passageiros, addPassageiro, updatePassageiro, deletePassageiro } = useData();
+  const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedPassenger, setSelectedPassenger] = useState<Passageiro | null>(null);
   const [formData, setFormData] = useState<NewPassengerForm>(initialForm);
 
   const filteredPassageiros = useMemo(() => {
@@ -45,8 +58,8 @@ export default function PassageirosPage() {
       const term = searchTerm.toLowerCase();
       return (
         passageiro.nomeCompleto.toLowerCase().includes(term) ||
-        passageiro.cpf.replace(/\D/g, '').includes(term.replace(/\D/g, '')) ||
-        passageiro.email.toLowerCase().includes(term)
+        (passageiro.cpf ?? '').replace(/\D/g, '').includes(term.replace(/\D/g, '')) ||
+        (passageiro.email ?? '').toLowerCase().includes(term)
       );
     });
   }, [passageiros, searchTerm]);
@@ -66,10 +79,16 @@ export default function PassageirosPage() {
   };
 
   const handleEnderecoChange = (index: number, field: keyof Omit<PassageiroEndereco, 'id'>, value: string) => {
+    let formattedValue = value;
+
+    if (field === 'rotulo') {
+      formattedValue = formatUppercase(value);
+    }
+
     setFormData((prev) => ({
       ...prev,
       enderecos: prev.enderecos.map((endereco, idx) =>
-        idx === index ? { ...endereco, [field]: value } : endereco
+        idx === index ? { ...endereco, [field]: formattedValue } : endereco
       )
     }));
   };
@@ -90,25 +109,53 @@ export default function PassageirosPage() {
     return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').trim();
   };
 
+  const formatUppercase = (value: string) => {
+    return value.toUpperCase();
+  };
+
+  const formatLowercase = (value: string) => {
+    return value.toLowerCase();
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    const cleanedEnderecos = formData.enderecos.filter((endereco) => endereco.enderecoCompleto.trim());
+    // Validar que ao menos 1 endereço tenha Rótulo, Endereço completo e Referência preenchidos
+    const validEnderecos = formData.enderecos.filter((endereco) => 
+      endereco.rotulo.trim() && 
+      endereco.enderecoCompleto.trim() && 
+      endereco.referencia?.trim()
+    );
 
-    if (!cleanedEnderecos.length) {
+    if (!validEnderecos.length) {
+      toast.error('Preencha ao menos um endereço com Rótulo, Endereço completo e Referência.');
+      return;
+    }
+
+    // Validar celular (obrigatório, 11 dígitos)
+    const celularDigits = formData.celular.replace(/\D/g, '');
+    if (celularDigits.length !== 11) {
+      toast.error('Celular deve conter exatamente 11 dígitos.');
+      return;
+    }
+
+    // Validar CPF (opcional, mas se preenchido precisa ter 11 dígitos)
+    const cpfDigits = formData.cpf.replace(/\D/g, '');
+    if (cpfDigits.length > 0 && cpfDigits.length !== 11) {
+      toast.error('CPF deve conter exatamente 11 dígitos.');
       return;
     }
 
     try {
       await addPassageiro({
         nomeCompleto: formData.nomeCompleto.trim(),
-        email: formData.email.trim(),
+        email: formData.email?.trim(),
         celular: formData.celular.trim(),
-        cpf: formData.cpf.trim(),
-        enderecos: cleanedEnderecos.map((endereco) => ({
-          rotulo: endereco.rotulo.trim() || 'Endereço',
+        cpf: formData.cpf?.trim(),
+        enderecos: validEnderecos.map((endereco) => ({
+          rotulo: endereco.rotulo.trim(),
           enderecoCompleto: endereco.enderecoCompleto.trim(),
-          referencia: endereco.referencia?.trim() || ''
+          referencia: endereco.referencia.trim()
         }))
       });
 
@@ -117,6 +164,63 @@ export default function PassageirosPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o passageiro.');
     }
+  };
+
+  const handleEditSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!selectedPassenger) return;
+
+    const cleanedEnderecos = formData.enderecos.filter((endereco) => 
+      endereco.rotulo.trim() && 
+      endereco.enderecoCompleto.trim() && 
+      endereco.referencia?.trim()
+    );
+
+    if (!cleanedEnderecos.length) {
+      toast.error('Preencha ao menos um endereço com Rótulo, Endereço completo e Referência.');
+      return;
+    }
+
+    const celularDigits = formData.celular.replace(/\D/g, '');
+    if (celularDigits.length !== 11) {
+      toast.error('Celular deve conter exatamente 11 dígitos.');
+      return;
+    }
+
+    const cpfDigits = formData.cpf.replace(/\D/g, '');
+    if (cpfDigits.length > 0 && cpfDigits.length !== 11) {
+      toast.error('CPF deve conter exatamente 11 dígitos.');
+      return;
+    }
+
+    try {
+      await updatePassageiro(selectedPassenger.id, {
+        nomeCompleto: formData.nomeCompleto.trim(),
+        email: formData.email?.trim(),
+        celular: formData.celular.trim(),
+        cpf: formData.cpf?.trim(),
+        enderecos: cleanedEnderecos.map((endereco) => ({
+          rotulo: endereco.rotulo.trim(),
+          enderecoCompleto: endereco.enderecoCompleto.trim(),
+          referencia: endereco.referencia.trim()
+        })),
+        notificar: formData.notificar === 'Sim',
+        genero: formData.genero
+      });
+
+      setFormData(initialForm);
+      setSelectedPassenger(null);
+      setIsEditModalOpen(false);
+      toast.success('Passageiro atualizado com sucesso.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível atualizar o passageiro.');
+    }
+  };
+
+  const resetForm = () => {
+    setFormData(initialForm);
+    setSelectedPassenger(null);
   };
 
   const handleInputChange = (field: keyof Omit<NewPassengerForm, 'enderecos'>, value: string) => {
@@ -130,6 +234,14 @@ export default function PassageirosPage() {
       formattedValue = formatPhone(value);
     }
 
+    if (field === 'nomeCompleto') {
+      formattedValue = formatUppercase(value);
+    }
+
+    if (field === 'email') {
+      formattedValue = formatLowercase(value);
+    }
+
     setFormData((prev) => ({
       ...prev,
       [field]: formattedValue
@@ -141,13 +253,19 @@ export default function PassageirosPage() {
       <PageHeader
         title="Passageiros Cadastrados"
         icon={<UserSquare2 size={20} />}
-        buttonText="Novo Passageiro"
-        onButtonClick={() => setIsModalOpen(true)}
-        buttonIcon={<Plus size={18} />}
       />
 
       <DataTable
         data={filteredPassageiros}
+        actionButton={
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-3.5 rounded-2xl font-bold hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer shadow-lg shadow-blue-900/20 whitespace-nowrap"
+          >
+            <Plus size={18} />
+            Novo Passageiro
+          </button>
+        }
         columns={[
           {
             key: 'nomeCompleto',
@@ -156,37 +274,58 @@ export default function PassageirosPage() {
               <div className="flex items-center gap-3">
                 <div>
                   <p className="font-bold text-slate-800">{String(value)}</p>
-                  <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Passageiro cadastrado</p>
                 </div>
               </div>
             )
           },
           {
             key: 'contato',
-            title: 'Contato',
+            title: 'Contato e ID',
             render: (value: unknown, item: Passageiro) => {
               void value;
 
               return (
               <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2 text-slate-600">
-                  <Mail size={14} className="text-blue-500" />
-                  <span className="font-medium">{item.email}</span>
-                </div>
+                {item.email && (
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <Mail size={14} className="text-blue-500" />
+                    <span className="font-medium">{item.email}</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 text-slate-600">
                   <Phone size={14} className="text-blue-500" />
                   <span className="font-medium">{item.celular}</span>
                 </div>
+                {item.cpf && (
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <IdCard size={14} className="text-blue-500" />
+                    <span className="font-medium">{item.cpf}</span>
+                  </div>
+                )}
               </div>
               );
             }
           },
           {
-            key: 'cpf',
-            title: 'CPF',
-            render: (value: unknown) => (
-              <span className="text-sm font-bold text-slate-600">{String(value)}</span>
-            )
+            key: 'notificacao',
+            title: 'Notificação',
+            render: (value: unknown, item: Passageiro) => {
+              void value;
+
+              if (item.notificar === true) {
+                return (
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-black uppercase tracking-wider">
+                    Enviar
+                  </div>
+                );
+              }
+
+              return (
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-black uppercase tracking-wider">
+                  Não enviar
+                </div>
+              );
+            }
           },
           {
             key: 'enderecos',
@@ -214,6 +353,79 @@ export default function PassageirosPage() {
               </div>
               );
             }
+          },
+          {
+            key: 'acoes',
+            title: 'Ações',
+            align: 'center' as const,
+            render: (value: unknown, item: Passageiro) => {
+              void value;
+              const { updatePassageiro, deletePassageiro } = useData();
+
+              const handleDelete = async () => {
+                const confirmed = await confirm({
+                  title: 'Excluir Passageiro',
+                  message: `Tem certeza que deseja excluir o passageiro "${item.nomeCompleto}"? Esta ação não pode ser desfeita.`,
+                  confirmText: 'Sim, excluir',
+                  cancelText: 'Cancelar',
+                  type: 'danger'
+                });
+
+                if (confirmed) {
+                  deletePassageiro(item.id);
+                  toast.success('Passageiro excluído com sucesso.');
+                }
+              };
+
+              const handleEdit = () => {
+                setSelectedPassenger(item);
+                setFormData({
+                  nomeCompleto: item.nomeCompleto,
+                  email: item.email || '',
+                  celular: item.celular,
+                  cpf: item.cpf || '',
+                  enderecos: item.enderecos.map(e => ({
+                    rotulo: e.rotulo,
+                    enderecoCompleto: e.enderecoCompleto,
+                    referencia: e.referencia || ''
+                  })),
+                  notificar: item.notificar === true ? 'Sim' : 'Não',
+                  genero: item.genero || 'Sem resposta'
+                });
+                setIsEditModalOpen(true);
+              };
+
+              const handleView = () => {
+                setSelectedPassenger(item);
+                setIsViewModalOpen(true);
+              };
+
+              return (
+                <div className="flex items-center gap-2 justify-center">
+                  <button
+                    onClick={handleView}
+                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                    title="Visualizar"
+                  >
+                    <Eye size={18} />
+                  </button>
+                  <button
+                    onClick={handleEdit}
+                    className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors cursor-pointer"
+                    title="Editar"
+                  >
+                    <Edit size={18} />
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                    title="Excluir"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              );
+            }
           }
         ]}
         searchTerm={searchTerm}
@@ -229,7 +441,7 @@ export default function PassageirosPage() {
           title="Novo Passageiro"
           subtitle="Cadastro prioritário e monitoramento de endereços habituais"
           icon={<UserSquare2 className="w-6 h-6 md:w-7 md:h-7" />}
-          maxWidthClassName="max-w-6xl"
+          maxWidthClassName="max-w-5xl"
           bodyClassName="p-6 md:p-10 pb-16 space-y-12"
         >
           <form onSubmit={handleSubmit} className="space-y-12">
@@ -240,30 +452,19 @@ export default function PassageirosPage() {
                 </h3>
               </div>
               <div className="grid grid-cols-1 gap-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome completo</label>
-                  <input
-                    required
-                    placeholder="Ex: Marina Costa"
-                    value={formData.nomeCompleto}
-                    onChange={(event) => handleInputChange('nomeCompleto', event.target.value)}
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                  />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail</label>
+                <div className="flex flex-col md:flex-row gap-6 items-start">
+                  <div className="space-y-2 flex-[2]">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome completo <RequiredAsterisk /></label>
                     <input
-                      type="email"
                       required
-                      placeholder="contato@exemplo.com"
-                      value={formData.email}
-                      onChange={(event) => handleInputChange('email', event.target.value)}
+                      placeholder="Ex: Marina Costa"
+                      value={formData.nomeCompleto}
+                      onChange={(event) => handleInputChange('nomeCompleto', event.target.value)}
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular</label>
+                  <div className="space-y-2 flex-1">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <RequiredAsterisk /></label>
                     <input
                       required
                       placeholder="(22) 99999-0000"
@@ -272,24 +473,54 @@ export default function PassageirosPage() {
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
+                  <div className="space-y-2 flex-[0.8]">
+                    <GeologSearchableSelect
+                      label="Notificar"
+                      options={[
+                        { id: 'Sim', nome: 'Sim' },
+                        { id: 'Não', nome: 'Não' }
+                      ]}
+                      value={formData.notificar}
+                      onChange={(value) => setFormData({...formData, notificar: value})}
+                      triggerClassName="mt-1 h-[56px] py-3"
+                      required
+                      disableSearch
+                    />
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
+                <div className="flex flex-col md:flex-row gap-6 items-start">
+                  <div className="space-y-2 flex-[1.5]">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail</label>
+                    <input
+                      type="email"
+                      placeholder="contato@exemplo.com"
+                      value={formData.email}
+                      onChange={(event) => handleInputChange('email', event.target.value)}
+                      className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                    />
+                  </div>
+                  <div className="space-y-2 flex-[0.7]">
                     <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">CPF</label>
                     <input
-                      required
                       placeholder="000.000.000-00"
                       value={formData.cpf}
                       onChange={(event) => handleInputChange('cpf', event.target.value)}
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
-                  <div className="space-y-2 px-6 py-4 bg-blue-50 border-2 border-blue-100 rounded-xl flex items-center justify-between">
-                    <div>
-                      <p className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em]">Base monitorada</p>
-                      <p className="text-lg font-black text-slate-800">{formData.enderecos.length} endereço(s)</p>
-                    </div>
-                    <ChevronRight size={20} className="text-blue-500" />
+                  <div className="space-y-2 flex-[0.8]">
+                    <GeologSearchableSelect
+                      label="Gênero"
+                      options={[
+                        { id: 'Masculino', nome: 'Masculino' },
+                        { id: 'Feminino', nome: 'Feminino' },
+                        { id: 'Sem resposta', nome: 'Sem resposta' }
+                      ]}
+                      value={formData.genero}
+                      onChange={(value) => setFormData({...formData, genero: value})}
+                      triggerClassName="mt-1 h-[56px] py-3"
+                      disableSearch
+                    />
                   </div>
                 </div>
               </div>
@@ -312,67 +543,70 @@ export default function PassageirosPage() {
                 </button>
               </div>
 
-              <div className="space-y-5 max-h-[45vh] overflow-y-auto pr-2 custom-scrollbar">
-                {formData.enderecos.map((endereco, index) => (
-                  <div key={index} className="relative rounded-[2rem] border-2 border-slate-200 bg-white p-6 shadow-sm">
-                    {formData.enderecos.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveEndereco(index)}
-                        className="absolute top-5 right-5 p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                        aria-label="Remover endereço"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                    <div className="flex items-center gap-3 mb-6">
-                      <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                        <MapPin size={18} />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Endereço {index + 1}</p>
-                        <p className="text-base font-black text-slate-800">Ponto de apoio / destino recorrente</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Rótulo</label>
+              <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="hidden md:grid grid-cols-[1.2fr_2fr_1fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                  <span>Rótulo <RequiredAsterisk /></span>
+                  <span>Endereço completo <RequiredAsterisk /></span>
+                  <span>Referência <RequiredAsterisk /></span>
+                  <span className="text-right">Ações</span>
+                </div>
+                <div className="divide-y divide-slate-100 max-h-[40vh] overflow-y-auto custom-scrollbar">
+                  {formData.enderecos.map((endereco, index) => (
+                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1.2fr_2fr_1fr_auto] gap-4 items-start px-6 py-5">
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Rótulo <RequiredAsterisk /></label>
                         <input
+                          required
                           placeholder="Residencial, Base, Hotel..."
                           value={endereco.rotulo}
                           onChange={(event) => handleEnderecoChange(index, 'rotulo', event.target.value)}
-                          className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Referência</label>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Endereço completo <RequiredAsterisk /></label>
                         <input
-                          placeholder="Portaria azul, torre B, etc"
+                          required
+                          placeholder="Rua, número, bairro, cidade - UF"
+                          value={endereco.enderecoCompleto}
+                          onChange={(event) => handleEnderecoChange(index, 'enderecoCompleto', event.target.value)}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Referência <RequiredAsterisk /></label>
+                        <input
+                          required
+                          placeholder="Portão azul, bloco B..."
                           value={endereco.referencia || ''}
                           onChange={(event) => handleEnderecoChange(index, 'referencia', event.target.value)}
-                          className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
+                      <div className="flex md:pt-1 justify-end">
+                        {formData.enderecos.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveEndereco(index)}
+                            className="inline-flex items-center justify-center p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                            aria-label="Remover endereço"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 pt-3">Principal</span>
+                        )}
+                      </div>
                     </div>
-                    <div className="space-y-2 mt-6">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Endereço completo</label>
-                      <input
-                        required
-                        placeholder="Rua, número, bairro, cidade - UF"
-                        value={endereco.enderecoCompleto}
-                        onChange={(event) => handleEnderecoChange(index, 'enderecoCompleto', event.target.value)}
-                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                      />
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </section>
 
-            <div className="flex justify-end">
+            <div className="flex justify-end pt-4">
               <button
                 type="submit"
-                className="px-12 py-4 bg-[var(--color-geolog-blue)] text-white font-black rounded-xl shadow-xl shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest"
+                className="px-12 py-4 bg-green-600 text-white font-black rounded-xl shadow-xl shadow-green-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest cursor-pointer"
               >
                 Salvar passageiro
               </button>
@@ -380,6 +614,258 @@ export default function PassageirosPage() {
           </form>
         </StandardModal>
       )}
+
+      {isViewModalOpen && selectedPassenger && (
+        <StandardModal
+          onClose={() => {
+            setIsViewModalOpen(false);
+            setSelectedPassenger(null);
+          }}
+          title="Detalhes do Passageiro"
+          subtitle="Informações completas do passageiro selecionado"
+          icon={<Eye className="w-6 h-6 md:w-7 md:h-7" />}
+        >
+          <div className="space-y-6 py-6">
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
+                <UserSquare2 size={24} className="text-blue-600" />
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.1em]">Informações Pessoais</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">Nome Completo</label>
+                  <p className="text-base font-bold text-slate-800 mt-1">{selectedPassenger.nomeCompleto}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">Celular</label>
+                  <p className="text-base font-bold text-slate-800 mt-1">{selectedPassenger.celular}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">E-mail</label>
+                  <p className="text-base font-bold text-slate-800 mt-1">{selectedPassenger.email || 'Não informado'}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">CPF</label>
+                  <p className="text-base font-bold text-slate-800 mt-1">{selectedPassenger.cpf || 'Não informado'}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
+                <MapPin size={24} className="text-blue-600" />
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.1em]">Endereços</h3>
+              </div>
+              <div className="space-y-3">
+                {selectedPassenger.enderecos.map((endereco) => (
+                  <div key={endereco.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-500 mb-2">
+                      <MapPin size={14} className="text-blue-500" />
+                      {endereco.rotulo}
+                    </div>
+                    <p className="text-base font-bold text-slate-700">{endereco.enderecoCompleto}</p>
+                    {endereco.referencia && (
+                      <p className="text-sm font-medium text-slate-500 mt-1">Referência: {endereco.referencia}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </StandardModal>
+      )}
+
+      {isEditModalOpen && (
+        <StandardModal
+          onClose={() => {
+            setIsEditModalOpen(false);
+            resetForm();
+          }}
+          title="Editar Passageiro"
+          subtitle="Atualize as informações do passageiro"
+          icon={<Edit className="w-6 h-6 md:w-7 md:h-7" />}
+          maxWidthClassName="max-w-5xl"
+          bodyClassName="p-6 md:p-10 pb-16 space-y-12"
+        >
+          <form onSubmit={handleEditSubmit} className="space-y-12">
+            <section className="space-y-6">
+              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
+                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                  <UserSquare2 size={20} className="text-slate-500" /> Detalhes do Passageiro
+                </h3>
+              </div>
+              <div className="grid grid-cols-1 gap-6">
+                <div className="flex flex-col md:flex-row gap-6 items-start">
+                  <div className="space-y-2 flex-[2]">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome completo <RequiredAsterisk /></label>
+                    <input
+                      required
+                      placeholder="Ex: Marina Costa"
+                      value={formData.nomeCompleto}
+                      onChange={(event) => handleInputChange('nomeCompleto', event.target.value)}
+                      className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                    />
+                  </div>
+                  <div className="space-y-2 flex-1">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <RequiredAsterisk /></label>
+                    <input
+                      required
+                      placeholder="(22) 99999-0000"
+                      value={formData.celular}
+                      onChange={(event) => handleInputChange('celular', event.target.value)}
+                      className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                    />
+                  </div>
+                  <div className="space-y-2 flex-[0.8]">
+                    <GeologSearchableSelect
+                      label="Notificar"
+                      options={[
+                        { id: 'Sim', nome: 'Sim' },
+                        { id: 'Não', nome: 'Não' }
+                      ]}
+                      value={formData.notificar}
+                      onChange={(value) => setFormData({...formData, notificar: value})}
+                      triggerClassName="mt-1 h-[56px] py-3"
+                      required
+                      disableSearch
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-col md:flex-row gap-6 items-start">
+                  <div className="space-y-2 flex-[1.5]">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail</label>
+                    <input
+                      type="email"
+                      placeholder="contato@exemplo.com"
+                      value={formData.email}
+                      onChange={(event) => handleInputChange('email', event.target.value)}
+                      className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                    />
+                  </div>
+                  <div className="space-y-2 flex-[0.7]">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">CPF</label>
+                    <input
+                      placeholder="000.000.000-00"
+                      value={formData.cpf}
+                      onChange={(event) => handleInputChange('cpf', event.target.value)}
+                      className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                    />
+                  </div>
+                  <div className="space-y-2 flex-[0.8]">
+                    <GeologSearchableSelect
+                      label="Gênero"
+                      options={[
+                        { id: 'Masculino', nome: 'Masculino' },
+                        { id: 'Feminino', nome: 'Feminino' },
+                        { id: 'Sem resposta', nome: 'Sem resposta' }
+                      ]}
+                      value={formData.genero}
+                      onChange={(value) => setFormData({...formData, genero: value})}
+                      triggerClassName="mt-1 h-[56px] py-3"
+                      disableSearch
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
+                <div>
+                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                    <MapPin size={20} className="text-blue-600" /> Endereços monitorados
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-1">Preencha ao menos um endereço completo</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddEndereco}
+                  className="flex items-center gap-3 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm"
+                >
+                  <PlusCircle size={14} /> Adicionar endereço
+                </button>
+              </div>
+
+              <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="hidden md:grid grid-cols-[1.2fr_2fr_1fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                  <span>Rótulo <RequiredAsterisk /></span>
+                  <span>Endereço completo <RequiredAsterisk /></span>
+                  <span>Referência <RequiredAsterisk /></span>
+                  <span className="text-right">Ações</span>
+                </div>
+                <div className="divide-y divide-slate-100 max-h-[40vh] overflow-y-auto custom-scrollbar">
+                  {formData.enderecos.map((endereco, index) => (
+                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1.2fr_2fr_1fr_auto] gap-4 items-start px-6 py-5">
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Rótulo <RequiredAsterisk /></label>
+                        <input
+                          required
+                          placeholder="Residencial, Base, Hotel..."
+                          value={endereco.rotulo}
+                          onChange={(event) => handleEnderecoChange(index, 'rotulo', event.target.value)}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Endereço completo <RequiredAsterisk /></label>
+                        <input
+                          required
+                          placeholder="Rua, número, bairro, cidade - UF"
+                          value={endereco.enderecoCompleto}
+                          onChange={(event) => handleEnderecoChange(index, 'enderecoCompleto', event.target.value)}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Referência <RequiredAsterisk /></label>
+                        <input
+                          required
+                          placeholder="Portão azul, bloco B..."
+                          value={endereco.referencia || ''}
+                          onChange={(event) => handleEnderecoChange(index, 'referencia', event.target.value)}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="flex md:pt-1 justify-end">
+                        {formData.enderecos.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveEndereco(index)}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Remover endereço"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <div className="flex justify-end pt-4">
+              <button
+                type="submit"
+                className="px-12 py-4 bg-green-600 text-white font-black rounded-xl shadow-xl shadow-green-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest cursor-pointer"
+              >
+                Atualizar passageiro
+              </button>
+            </div>
+          </form>
+        </StandardModal>
+      )}
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        onClose={closeConfirm}
+        onConfirm={handleConfirm}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        cancelText={confirmState.cancelText}
+        type={confirmState.type}
+      />
     </div>
   );
 }

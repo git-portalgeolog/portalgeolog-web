@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 
 interface StandardModalProps {
@@ -26,6 +26,20 @@ export default function StandardModal({
   containerClassName = '',
   bodyClassName = 'p-6 md:p-10 pb-16 space-y-12'
 }: StandardModalProps) {
+  useEffect(() => {
+    // Bloquear scroll do body quando modal está aberto
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+
+    return () => {
+      // Restaurar scroll quando modal fecha
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    };
+  }, []);
+
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 modal-font">
       <div className="absolute inset-0 bg-[#001C3A]/60 backdrop-blur-md" onClick={onClose} />
@@ -59,7 +73,7 @@ export default function StandardModal({
           </button>
         </div>
 
-        <div className={`flex-1 overflow-y-auto overflow-x-visible custom-scrollbar ${bodyClassName}`}>
+        <div className={`flex-1 overflow-y-auto overflow-hidden custom-scrollbar ${bodyClassName}`}>
           {children}
         </div>
 

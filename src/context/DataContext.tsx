@@ -2,32 +2,43 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { fetchClientes, 
-  fetchSolicitantes, 
-  fetchFornecedores, 
-  fetchServicos, 
+import { fetchClientes,
+  fetchSolicitantes,
+  fetchServicos,
   fetchPassageiros,
   fetchOSList,
   fetchDrivers,
   insertCliente,
   updateClienteInDB,
   deleteClienteFromDB,
+  updatePassageiroInDB,
+  deletePassageiroFromDB,
+  updateVeiculoInDB,
+  deleteVeiculoFromDB,
   insertSolicitante,
   updateSolicitanteInDB,
   deleteSolicitanteFromDB,
   insertCentroCusto,
   updateCentroCustoInDB,
   deleteCentroCustoFromDB,
-  insertFornecedor,
-  deleteFornecedor as deleteFornecedorFromDB,
   insertServico,
   updateServicoInDB,
   deleteServicoFromDB,
   insertPassageiro,
   insertDriver,
+  deleteDriverFromDB,
   insertOS,
   updateOSInDB,
-  updateOSStatusInDB
+  updateOSStatusInDB,
+  createNotification,
+  fetchParceiros,
+  insertParceiro,
+  updateParceiroInDB,
+  deleteParceiroFromDB,
+  type ParceiroServico,
+  type ParceiroContato,
+  type ParceiroFilial,
+  type NovoParceiroInput
 } from '@/lib/supabase/queries';
 import { toast } from 'sonner';
 import { useAuth } from './AuthContext';
@@ -52,13 +63,6 @@ export interface Solicitante {
   nome: string;
   clienteId: string;
   centroCustoId?: string;
-}
-
-export interface Fornecedor {
-  id: string;
-  nome: string;
-  tipo: string;
-  telefone?: string;
 }
 
 export interface TipoServico {
@@ -112,7 +116,24 @@ export interface Passageiro {
   email?: string;
   celular: string;
   cpf?: string;
+  notificar?: boolean;
+  genero?: string;
   enderecos: PassageiroEndereco[];
+}
+
+export interface Vehicle {
+  id: string;
+  placa: string;
+  renavam: string;
+  modelo: string;
+  marca: string;
+  ano: number;
+  cor?: string;
+  tipo: 'carro' | 'van' | 'onibus' | 'moto' | 'caminhao' | 'outro';
+  status: 'ativo' | 'inativo' | 'manutencao';
+  proprietario_tipo: 'interno' | 'parceiro';
+  parceiro_id?: string;
+  created_at: string;
 }
 
 export interface PassageiroEndereco {
@@ -127,6 +148,8 @@ export interface NovoPassageiroInput {
   email?: string;
   celular: string;
   cpf?: string;
+  notificar?: boolean;
+  genero?: string;
   enderecos: {
     rotulo?: string;
     enderecoCompleto: string;
@@ -143,6 +166,8 @@ export interface Driver {
   phone?: string;
   created_at?: string;
   docs?: DriverDoc[];
+  vinculoTipo?: 'interno' | 'parceiro';
+  parceiroId?: string;
 }
 
 export interface DriverDoc {
@@ -195,25 +220,30 @@ const hasDuplicateRecord = <T extends { id: string }>(
 interface DataContextType {
   clientes: Cliente[];
   solicitantes: Solicitante[];
-  fornecedores: Fornecedor[];
   servicos: TipoServico[];
   passageiros: Passageiro[];
   osList: OrderService[];
   drivers: Driver[];
+  parceiros: ParceiroServico[];
   loading: boolean;
-  
+
   addCliente: (nome: string, contato?: string) => Promise<Cliente>;
   updateCliente: (id: string, updates: Partial<Cliente>) => Promise<void>;
   deleteCliente: (id: string) => void;
-  
+
   addSolicitante: (nome: string, clienteId: string, centroCustoId?: string) => Promise<Solicitante>;
   updateSolicitante: (id: string, updates: Partial<Solicitante>) => void;
   deleteSolicitante: (id: string) => void;
-  
+
   addPassageiro: (passageiro: NovoPassageiroInput) => Promise<Passageiro>;
-  addFornecedor: (nome: string, tipo: string, telefone?: string) => Promise<void>;
-  deleteFornecedor: (id: string) => void;
+  updatePassageiro: (id: string, passageiro: NovoPassageiroInput) => Promise<Passageiro>;
+  deletePassageiro: (id: string) => void;
   addDriver: (name: string) => Promise<Driver>;
+  
+  // Parceiros
+  addParceiro: (parceiro: NovoParceiroInput) => Promise<ParceiroServico>;
+  updateParceiro: (id: string, parceiro: NovoParceiroInput) => Promise<void>;
+  deleteParceiro: (id: string) => void;
   
   // Centros de Custo
   addCentroCusto: (nome: string, clienteId: string) => Promise<CentroCusto>;
@@ -238,11 +268,11 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [solicitantes, setSolicitantes] = useState<Solicitante[]>([]);
-  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [servicos, setServicos] = useState<TipoServico[]>([]);
   const [passageiros, setPassageiros] = useState<Passageiro[]>([]);
   const [osList, setOsList] = useState<OrderService[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [parceiros, setParceiros] = useState<ParceiroServico[]>([]);
   const [loading, setLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
   const supabase = useMemo(() => createClient(), []);
@@ -250,11 +280,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   // Fetch functions wrapped for stability
   const dbFetchClientes = useCallback(async () => fetchClientes(), []);
   const dbFetchSolicitantes = useCallback(async () => fetchSolicitantes(), []);
-  const dbFetchFornecedores = useCallback(async () => fetchFornecedores(), []);
   const dbFetchServicos = useCallback(async () => fetchServicos(), []);
   const dbFetchPassageiros = useCallback(async () => fetchPassageiros(), []);
+  const dbFetchParceiros = useCallback(async () => fetchParceiros(), []);
   const dbFetchOSList = useCallback(async () => fetchOSList(), []);
   const dbFetchDrivers = useCallback(async () => fetchDrivers(), []);
+
 
   const refreshData = useCallback(async () => {
     try {
@@ -263,22 +294,22 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         const results = await Promise.allSettled([
           dbFetchClientes(),
           dbFetchSolicitantes(),
-          dbFetchFornecedores(),
           dbFetchServicos(),
           dbFetchPassageiros(),
           dbFetchOSList(),
           dbFetchDrivers(),
+          dbFetchParceiros(),
         ]);
 
-        const [c, s, f, sv, p, os, d] = results;
+        const [c, s, sv, p, os, d, pa] = results;
 
         if (c.status === 'fulfilled') setClientes(c.value); else console.error('❌ Error fetching Clientes');
         if (s.status === 'fulfilled') setSolicitantes(s.value); else console.error('❌ Error fetching Solicitantes');
-        if (f.status === 'fulfilled') setFornecedores(f.value); else console.error('❌ Error fetching Fornecedores');
         if (sv.status === 'fulfilled') setServicos(sv.value); else console.error('❌ Error fetching Servicos');
         if (p.status === 'fulfilled') setPassageiros(p.value); else console.error('❌ Error fetching Passageiros');
         if (os.status === 'fulfilled') setOsList(os.value); else console.error('❌ Error fetching OS List');
         if (d.status === 'fulfilled') setDrivers(d.value); else console.error('❌ Error fetching Drivers');
+        if (pa.status === 'fulfilled') setParceiros(pa.value); else console.error('❌ Error fetching Parceiros');
 
         // Se pelo menos uma falhou criticamente (ex: erro de rede), Promise.allSettled lida bem,
         // mas se quisermos lançar erro para o catch principal:
@@ -293,7 +324,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       console.error('🔥 CRITICAL: Error refreshing global data:', err);
       toast.error('Erro ao sincronizar dados. Tente atualizar a página.');
     }
-  }, [dbFetchClientes, dbFetchSolicitantes, dbFetchFornecedores, dbFetchServicos, dbFetchPassageiros, dbFetchOSList, dbFetchDrivers]);
+  }, [dbFetchClientes, dbFetchSolicitantes, dbFetchServicos, dbFetchPassageiros, dbFetchOSList, dbFetchDrivers, dbFetchParceiros]);
 
   useEffect(() => {
     if (!authLoading) {
@@ -345,6 +376,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, () => {
           dbFetchDrivers().then(setDrivers).catch(() => {});
         })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'parceiros_servico' }, () => {
+          dbFetchParceiros().then(setParceiros).catch(() => {});
+        })
         .subscribe((status: string) => {
           if (status === 'SUBSCRIBED') {
              console.log('✅ Real-time ativado.');
@@ -366,6 +400,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     dbFetchPassageiros,
     dbFetchServicos,
     dbFetchSolicitantes,
+    dbFetchParceiros,
     supabase,
     user,
   ]);
@@ -422,11 +457,35 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addSolicitante = async (nome: string, clienteId: string, centroCustoId?: string): Promise<Solicitante> => {
-    return await insertSolicitante(nome, clienteId, centroCustoId);
+    const cleanNome = nome.trim();
+
+    if (!cleanNome) {
+      throw new Error('Informe o nome do solicitante.');
+    }
+
+    const solicitantesDoCliente = solicitantes.filter((solicitante) => solicitante.clienteId === clienteId);
+
+    if (hasDuplicateRecord(solicitantesDoCliente, cleanNome, (solicitante) => solicitante.nome, normalizeTextValue)) {
+      throw new Error('Já existe um solicitante com este nome para esta empresa.');
+    }
+
+    return await insertSolicitante(cleanNome, clienteId, centroCustoId);
   };
 
   const addCentroCusto = async (nome: string, clienteId: string): Promise<CentroCusto> => {
-    return await insertCentroCusto(nome, clienteId);
+    const cleanNome = nome.trim();
+
+    if (!cleanNome) {
+      throw new Error('Informe o nome do centro de custo.');
+    }
+
+    const centrosDoCliente = getCentrosCustoByCliente(clienteId);
+
+    if (hasDuplicateRecord(centrosDoCliente, cleanNome, (centroCusto) => centroCusto.nome, normalizeTextValue)) {
+      throw new Error('Já existe um centro de custo com este nome para esta empresa.');
+    }
+
+    return await insertCentroCusto(cleanNome, clienteId);
   };
 
   const updateCentroCusto = (id: string, updates: Partial<CentroCusto>) => {
@@ -514,26 +573,101 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const addFornecedor = async (nome: string, tipo: string, telefone?: string): Promise<void> => {
-    const cleanNome = nome.trim();
+  const updatePassageiro = async (id: string, passageiro: NovoPassageiroInput): Promise<Passageiro> => {
+    const cleanNome = passageiro.nomeCompleto.trim();
+    const cleanEmail = passageiro.email?.trim() || '';
+    const cleanCelular = passageiro.celular.trim();
+    const cleanCpf = passageiro.cpf?.trim() || '';
 
     if (!cleanNome) {
-      throw new Error('Informe o nome do fornecedor.');
+      throw new Error('Informe o nome do passageiro.');
     }
 
-    if (hasDuplicateRecord(fornecedores, cleanNome, (item) => item.nome, normalizeTextValue)) {
-      throw new Error('Já existe um fornecedor com este nome.');
+    // Verificar duplicatas excluindo o próprio passageiro
+    const otherPassageiros = passageiros.filter(p => p.id !== id);
+
+    if (cleanEmail && hasDuplicateRecord(otherPassageiros, cleanEmail, (item) => item.email || '', normalizeTextValue)) {
+      throw new Error('Já existe um passageiro com este e-mail.');
     }
+
+    if (hasDuplicateRecord(otherPassageiros, cleanCelular, (item) => item.celular, normalizeDigitsValue)) {
+      throw new Error('Já existe um passageiro com este celular.');
+    }
+
+    if (cleanCpf && hasDuplicateRecord(otherPassageiros, cleanCpf, (item) => item.cpf || '', normalizeDigitsValue)) {
+      throw new Error('Já existe um passageiro com este CPF.');
+    }
+
+    // Atualização otimista
+    const optimistic: Passageiro = {
+      id,
+      nomeCompleto: cleanNome,
+      email: cleanEmail || undefined,
+      celular: cleanCelular,
+      cpf: cleanCpf || undefined,
+      enderecos: passageiro.enderecos.map((e, i) => ({
+        id: `temp-end-${i}`,
+        rotulo: e.rotulo?.trim() || `Endereço ${i + 1}`,
+        enderecoCompleto: e.enderecoCompleto.trim(),
+        referencia: e.referencia?.trim() || undefined,
+      })),
+    };
+
+    const previousState = passageiros;
+    setPassageiros((prev) => prev.map((p) => (p.id === id ? optimistic : p)));
 
     try {
-      await insertFornecedor(cleanNome, tipo, telefone);
+      const real = await updatePassageiroInDB(id, {
+        ...passageiro,
+        nomeCompleto: cleanNome,
+        email: cleanEmail || undefined,
+        celular: cleanCelular,
+        cpf: cleanCpf || undefined,
+      });
+
+      setPassageiros((prev) => prev.map((p) => (p.id === id ? real : p)));
+      return real;
     } catch (error) {
+      setPassageiros(previousState);
+
       if (isUniqueConstraintError(error)) {
-        throw new Error('Já existe um fornecedor com este nome.');
+        const duplicateMessage = cleanEmail && hasDuplicateRecord(otherPassageiros, cleanEmail, (item) => item.email || '', normalizeTextValue)
+          ? 'Já existe um passageiro com este e-mail.'
+          : hasDuplicateRecord(otherPassageiros, cleanCelular, (item) => item.celular, normalizeDigitsValue)
+            ? 'Já existe um passageiro com este celular.'
+            : cleanCpf && hasDuplicateRecord(otherPassageiros, cleanCpf, (item) => item.cpf || '', normalizeDigitsValue)
+              ? 'Já existe um passageiro com este CPF.'
+              : 'Não foi possível atualizar o passageiro.';
+
+        throw new Error(duplicateMessage);
       }
 
-      throw error instanceof Error ? error : new Error('Não foi possível salvar o fornecedor.');
+      throw error instanceof Error ? error : new Error('Não foi possível atualizar o passageiro.');
     }
+  };
+
+  const deletePassageiro = (id: string) => {
+    // Atualização otimista
+    const previousState = passageiros;
+    setPassageiros((prev) => prev.filter((p) => p.id !== id));
+
+    deletePassageiroFromDB(id).catch((error) => {
+      setPassageiros(previousState);
+      console.error('Error deletePassageiroFromDB:', error);
+      throw error;
+    });
+  };
+
+  const updateVeiculo = async (id: string, input: Partial<Vehicle>): Promise<Vehicle> => {
+    const real = await updateVeiculoInDB(id, input);
+    return real;
+  };
+
+  const deleteVeiculo = (id: string) => {
+    deleteVeiculoFromDB(id).catch((error) => {
+      console.error('Error deleteVeiculoFromDB:', error);
+      throw error;
+    });
   };
 
   const addDriver = async (name: string): Promise<Driver> => {
@@ -562,10 +696,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
       throw error instanceof Error ? error : new Error('Não foi possível salvar o motorista.');
     }
-  };
-
-  const deleteFornecedor = (id: string) => {
-    deleteFornecedorFromDB(id).catch((err: unknown) => console.error('Error deleteFornecedor:', err));
   };
 
   const addServico = async (nome: string): Promise<TipoServico> => {
@@ -665,16 +795,70 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return cliente?.centrosCusto || [];
   }, [clientes]);
 
+  // Parceiros CRUD
+  const addParceiro = async (input: NovoParceiroInput): Promise<ParceiroServico> => {
+    const cleanNome = input.razaoSocialOuNomeCompleto.trim();
+    if (!cleanNome) {
+      throw new Error('Informe a razão social ou nome completo do parceiro.');
+    }
+
+    if (hasDuplicateRecord(parceiros, cleanNome, (p) => p.razaoSocialOuNomeCompleto, normalizeTextValue)) {
+      throw new Error('Já existe um parceiro com esta razão social/nome.');
+    }
+
+    try {
+      const result = await insertParceiro(input);
+      setParceiros((prev) => [...prev, result].sort((a, b) => a.razaoSocialOuNomeCompleto.localeCompare(b.razaoSocialOuNomeCompleto, 'pt-BR')));
+      createNotification('success', 'Parceiro cadastrado', `"${cleanNome}" foi adicionado como parceiro de serviço.`, 'interno');
+      return result;
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new Error('Já existe um parceiro com este documento.');
+      }
+      throw error instanceof Error ? error : new Error('Não foi possível salvar o parceiro.');
+    }
+  };
+
+  const updateParceiro = async (id: string, input: NovoParceiroInput): Promise<void> => {
+    const cleanNome = input.razaoSocialOuNomeCompleto.trim();
+    if (!cleanNome) {
+      throw new Error('Informe a razão social ou nome completo do parceiro.');
+    }
+
+    if (hasDuplicateRecord(parceiros, cleanNome, (p) => p.razaoSocialOuNomeCompleto, normalizeTextValue, id)) {
+      throw new Error('Já existe um parceiro com esta razão social/nome.');
+    }
+
+    try {
+      await updateParceiroInDB(id, input);
+      createNotification('info', 'Parceiro atualizado', `Os dados de "${cleanNome}" foram atualizados.`, 'interno');
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new Error('Já existe um parceiro com este documento.');
+      }
+      throw error instanceof Error ? error : new Error('Não foi possível atualizar o parceiro.');
+    }
+  };
+
+  const deleteParceiro = (id: string) => {
+    const parceiro = parceiros.find((p) => p.id === id);
+    deleteParceiroFromDB(id).then(() => {
+      if (parceiro) {
+        createNotification('warning', 'Parceiro excluído', `"${parceiro.razaoSocialOuNomeCompleto}" foi removido do sistema.`, 'interno');
+      }
+    }).catch(err => console.error('Error deleteParceiroFromDB:', err));
+  };
+
   return (
     <DataContext.Provider
       value={{
         clientes,
         solicitantes,
-        fornecedores,
         servicos,
         passageiros,
         osList,
         drivers,
+        parceiros,
         loading,
         addCliente,
         updateCliente,
@@ -686,9 +870,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         updateCentroCusto,
         deleteCentroCusto,
         addPassageiro,
-        addFornecedor,
-        deleteFornecedor,
+        updatePassageiro,
+        deletePassageiro,
         addDriver,
+        addParceiro,
+        updateParceiro,
+        deleteParceiro,
         addServico,
         updateServico,
         deleteServico,
@@ -710,3 +897,6 @@ export const useData = () => {
   if (!context) throw new Error('useData must be used within a DataProvider');
   return context;
 };
+
+// Re-exportar tipos para uso externo
+export type { ParceiroServico, ParceiroContato, ParceiroFilial, NovoParceiroInput } from '@/lib/supabase/queries';

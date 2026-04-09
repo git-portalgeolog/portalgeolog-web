@@ -30,6 +30,7 @@ export interface DataTableProps<T> {
   hover?: boolean;
   striped?: boolean;
   compact?: boolean;
+  actionButton?: ReactNode;
 }
 
 export function DataTable<T extends { id?: string | number }>({
@@ -45,7 +46,8 @@ export function DataTable<T extends { id?: string | number }>({
   showHeader = true,
   hover = true,
   striped = true,
-  compact = false
+  compact = false,
+  actionButton
 }: DataTableProps<T>) {
   const filteredData = searchTerm
     ? data.filter(item =>
@@ -81,23 +83,21 @@ export function DataTable<T extends { id?: string | number }>({
 
   return (
     <div className={`space-y-4 ${className}`}>
-      {onSearchChange && (
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input
-              type="text"
-              placeholder={searchPlaceholder}
-              className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all"
-              value={searchTerm}
-              onChange={(e) => onSearchChange(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-3 text-xs font-black uppercase tracking-[0.3em] text-slate-400">
-            <span>Total: {filteredData.length}</span>
-            <span className="text-slate-300">|</span>
-            <span>Registros</span>
-          </div>
+      {(onSearchChange || actionButton) && (
+        <div className="flex gap-3 items-center">
+          {onSearchChange && (
+            <div className="relative group flex-1">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
+              <input
+                type="text"
+                placeholder={searchPlaceholder}
+                className="w-full pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-2xl shadow-sm outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 font-bold text-sm transition-all"
+                value={searchTerm}
+                onChange={(e) => onSearchChange(e.target.value)}
+              />
+            </div>
+          )}
+          {actionButton && actionButton}
         </div>
       )}
 

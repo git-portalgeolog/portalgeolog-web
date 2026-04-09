@@ -3,18 +3,25 @@ import StandardModal from '@/components/StandardModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useConfirm } from '@/hooks/useConfirm';
 import { motion } from 'framer-motion';
-import { 
-  UploadCloud, 
-  FileText, 
-  FileSpreadsheet, 
-  Image as ImageIcon, 
-  File, 
-  Trash2, 
-  Loader2, 
+import {
+  UploadCloud,
+  FileText,
+  FileSpreadsheet,
+  Image as ImageIcon,
+  File,
+  Trash2,
+  Loader2,
   AlertCircle,
-  ExternalLink
+  Download,
+  CheckCircle2,
+  FolderOpen,
+  FileVideo,
+  FileArchive,
+  FileCode,
+  Music
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/context/AuthContext';
 
 interface DriverDoc {
   id: string;
@@ -27,7 +34,10 @@ interface DriverDoc {
 }
 
 interface DriverDocsModalProps {
-  driver: any;
+  driver: {
+    id: string;
+    name?: string | null;
+  } | null;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -41,9 +51,18 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
+  const { user } = useAuth();
   
   const driverId = driver?.id;
   const driverName = driver?.name || 'Motorista';
+
+  const suggestedDocs = [
+    { name: 'CNH (Carteira Nacional de Habilitação)', icon: 'license', required: true },
+    { name: 'CPF', icon: 'id', required: true },
+    { name: 'Comprovante de Residência', icon: 'home', required: false },
+    { name: 'Exame Médico (ASO)', icon: 'medical', required: false },
+    { name: 'Curso de Direção Defensiva', icon: 'car', required: false },
+  ];
 
   const fetchDocs = async () => {
     const { data, error } = await supabase
@@ -90,6 +109,17 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!driverId) {
+      setError('Motorista inválido.');
+      return;
+    }
+
+    // Verificar se usuário está autenticado
+    if (!user) {
+      setError("Você precisa estar logado para fazer upload de documentos.");
+      return;
+    }
+
     // Basic validation
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (file.size > maxSize) {
@@ -102,45 +132,35 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
     setError(null);
 
     try {
-      const fileName = `${Date.now()}_${file.name}`;
-      const filePath = `${driverId}/${fileName}`;
-      
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('driver-docs')
-        .upload(filePath, file, {
-          upsert: true
-        });
+      const formData = new FormData();
+      formData.append('driverId', driverId);
+      formData.append('file', file);
 
-      if (uploadError) throw uploadError;
+      const response = await fetch('/api/driver-docs', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'
+      });
 
-      setUploadProgress(70);
+      const result: unknown = await response.json();
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('driver-docs')
-        .getPublicUrl(filePath);
-      
-      const { error: dbError } = await supabase
-        .from('driver_documents')
-        .insert([
-          {
-            driver_id: driverId,
-            name: file.name,
-            url: publicUrl,
-            type: file.type,
-            size: file.size,
-            path: filePath
-          }
-        ]);
-
-      if (dbError) throw dbError;
+      if (!response.ok) {
+        const message =
+          result && typeof result === 'object' && 'error' in result && typeof result.error === 'string'
+            ? result.error
+            : 'Erro no upload.';
+        throw new Error(message);
+      }
 
       setUploadProgress(100);
       setUploading(false);
       setUploadProgress(0);
       if (fileInputRef.current) fileInputRef.current.value = '';
-    } catch (err: any) {
+      await fetchDocs();
+    } catch (err: unknown) {
       console.error("Erro geral no upload:", err);
-      setError(`Erro no upload: ${err.message || "Ocorreu um erro inesperado."}`);
+      const message = err instanceof Error ? err.message : 'Ocorreu um erro inesperado.';
+      setError(`Erro no upload: ${message}`);
       setUploading(false);
     }
   };
@@ -171,18 +191,27 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
         .eq('id', docObj.id);
 
       if (dbError) throw dbError;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Erro ao excluir:", err);
-      setError(`Erro ao excluir: ${err.message || "Erro ao excluir o documento."}`);
+      const message = err instanceof Error ? err.message : 'Erro ao excluir o documento.';
+      setError(`Erro ao excluir: ${message}`);
     }
   };
 
   const getFileIcon = (type: string) => {
-    if (type.includes('pdf')) return <FileText className="text-red-400" size={24} />;
-    if (type.includes('spreadsheet') || type.includes('excel') || type.includes('csv')) 
-      return <FileSpreadsheet className="text-emerald-400" size={24} />;
-    if (type.includes('image')) return <ImageIcon className="text-blue-400" size={24} />;
-    return <File className="text-gray-400" size={24} />;
+    if (type.includes('pdf')) return <FileText className="text-red-500" size={24} />;
+    if (type.includes('spreadsheet') || type.includes('excel') || type.includes('csv') || type.includes('xls'))
+      return <FileSpreadsheet className="text-emerald-500" size={24} />;
+    if (type.includes('image')) return <ImageIcon className="text-blue-500" size={24} />;
+    if (type.includes('video') || type.includes('mp4') || type.includes('avi') || type.includes('mov'))
+      return <FileVideo className="text-purple-500" size={24} />;
+    if (type.includes('zip') || type.includes('rar') || type.includes('7z') || type.includes('tar'))
+      return <FileArchive className="text-orange-500" size={24} />;
+    if (type.includes('code') || type.includes('json') || type.includes('xml') || type.includes('html') || type.includes('css') || type.includes('js') || type.includes('ts'))
+      return <FileCode className="text-indigo-500" size={24} />;
+    if (type.includes('audio') || type.includes('mp3') || type.includes('wav') || type.includes('ogg'))
+      return <Music className="text-pink-500" size={24} />;
+    return <File className="text-slate-400" size={24} />;
   };
 
   const formatSize = (bytes: number) => {
@@ -198,15 +227,24 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
       <StandardModal
       onClose={onClose}
       title="Documentações"
-      subtitle={`Motorista: ${driverName}`}
+      subtitle={`Motorista: ${driverName} • ${documents.length} documento${documents.length !== 1 ? 's' : ''}`}
       icon={<FileText className="w-6 h-6 md:w-7 md:h-7" />}
-      maxWidthClassName="max-w-3xl"
-      bodyClassName="p-6 md:p-10 space-y-10"
+      maxWidthClassName="max-w-6xl"
+      bodyClassName="p-6 md:p-10 space-y-6"
       footer={
-        <div className="p-6 md:p-8 bg-slate-50/80 border-t border-slate-100 flex justify-end">
-          <button 
+        <div className="p-6 md:p-8 bg-slate-50/80 border-t border-slate-100 flex justify-end gap-3">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || !user}
+            title={!user ? "Faça login para anexar documentos" : "Anexar documento"}
+            className="px-10 py-4 bg-[var(--color-geolog-blue)] text-white font-black rounded-2xl hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-[0.2em] shadow-lg shadow-blue-900/20 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {uploading ? <Loader2 className="animate-spin" size={18} /> : <UploadCloud size={18} />}
+            Anexar documento
+          </button>
+          <button
             onClick={onClose}
-            className="px-10 py-4 bg-white border-2 border-slate-200 text-slate-600 font-black rounded-2xl hover:bg-slate-100 transition-all text-xs uppercase tracking-[0.2em] shadow-sm"
+            className="px-10 py-4 bg-white border-2 border-slate-200 text-slate-600 font-black rounded-2xl hover:bg-slate-100 transition-all text-xs uppercase tracking-[0.2em] shadow-sm cursor-pointer"
           >
             Fechar Janela
           </button>
@@ -220,47 +258,14 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
             </div>
           )}
 
-          {/* Upload Area */}
-          <div className="space-y-6">
-            <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-              <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                <UploadCloud size={20} className="text-slate-500" /> Upload de Arquivos
-              </h3>
-            </div>
-
-            <div 
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-slate-200 rounded-[2rem] p-10 flex flex-col items-center justify-center gap-4 hover:border-blue-400 hover:bg-blue-50/30 transition-all cursor-pointer group relative overflow-hidden bg-slate-50/50"
-            >
-              <input 
-                type="file" 
-                className="hidden" 
-                ref={fileInputRef} 
-                onChange={handleFileUpload}
-                accept=".pdf,.xlsx,.xls,.csv,.jpg,.jpeg,.png"
-              />
-              <div className="w-20 h-20 bg-white shadow-sm border border-slate-100 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                {uploading ? <Loader2 className="text-blue-600 animate-spin" size={32} /> : <UploadCloud className="text-blue-600" size={32} />}
-              </div>
-              <div className="text-center space-y-1">
-                <p className="font-black text-slate-800 text-lg">Clique para fazer upload</p>
-                <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">PDF, Excel ou Imagens (Máx: 10MB)</p>
-              </div>
-              
-              {uploading && (
-                <div className="w-full max-w-sm mt-6 space-y-2 animate-in fade-in zoom-in">
-                  <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${uploadProgress}%` }}
-                      className="h-full bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.5)]"
-                    />
-                  </div>
-                  <p className="text-xs text-center font-black text-blue-600 uppercase tracking-widest">{Math.round(uploadProgress)}% concluído</p>
-                </div>
-              )}
-            </div>
-          </div>
+          {/* Input file escondido */}
+          <input
+            type="file"
+            className="hidden"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept=".pdf,.xlsx,.xls,.csv,.jpg,.jpeg,.png"
+          />
 
           {/* Docs List */}
           <div className="space-y-6">
@@ -276,11 +281,22 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
                 <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Carregando arquivos...</p>
               </div>
             ) : documents.length === 0 ? (
-              <div className="py-20 text-center bg-slate-50/50 rounded-[2rem] border-2 border-dashed border-slate-100 flex flex-col items-center justify-center gap-4">
-                <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center text-slate-300">
-                  <File size={32} />
+              <div className="py-16 text-center bg-slate-50/50 rounded-[2rem] border-2 border-dashed border-slate-100 flex flex-col items-center justify-center gap-6">
+                <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center text-slate-300 shadow-sm">
+                  <FolderOpen size={40} />
                 </div>
-                <p className="text-slate-400 font-bold italic">Nenhum documento anexado ainda.</p>
+                <div className="space-y-2">
+                  <p className="text-slate-400 font-bold italic">Nenhum documento anexado ainda.</p>
+                  <p className="text-xs font-bold text-slate-300 uppercase tracking-widest">Sugestões de documentos:</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-w-md">
+                  {suggestedDocs.map((doc, idx) => (
+                    <div key={idx} className="flex items-center gap-2 text-left px-3 py-2 bg-white rounded-lg border border-slate-100">
+                      {doc.required && <CheckCircle2 size={14} className="text-blue-500" />}
+                      <span className="text-xs font-semibold text-slate-600">{doc.name}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4">
@@ -306,16 +322,16 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
                     <div className="flex items-center gap-3">
                       <a 
                         href={docObj.url} 
-                        target="_blank" 
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
-                        title="Visualizar/Abrir"
+                        title="Download"
                       >
-                        <ExternalLink size={20} />
+                        <Download size={20} />
                       </a>
                       <button 
                         onClick={() => handleDeleteDoc(docObj)}
-                        className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                        className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
                         title="Excluir"
                       >
                         <Trash2 size={20} />
@@ -326,7 +342,7 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
               </div>
             )}
           </div>
-    </StandardModal>
+      </StandardModal>
     
     <ConfirmDialog
       isOpen={confirmState.isOpen}

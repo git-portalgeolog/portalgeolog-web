@@ -7,9 +7,11 @@ export const runtime = 'edge';
 
 function getRequiredEnv(name: string): string {
   const value = process.env[name];
+
   if (!value) {
     throw new Error(`${name} is required`);
   }
+
   return value;
 }
 
@@ -22,6 +24,7 @@ function createAdminClient() {
 
 async function createAuthClient() {
   const cookieStore = await cookies();
+
   return createServerClient(
     getRequiredEnv('NEXT_PUBLIC_SUPABASE_URL'),
     getRequiredEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
@@ -31,14 +34,22 @@ async function createAuthClient() {
           return cookieStore.getAll();
         },
         setAll() {
-          // No-op in route handlers; the session is already refreshed by middleware.
+          // No-op in route handlers; middleware keeps the session fresh.
         }
       }
     }
   );
 }
 
-export async function GET(request: Request) {
+type CreateAppNotificationBody = {
+  type?: 'success' | 'info' | 'warning' | 'error';
+  title?: string;
+  message?: string;
+  targetAudience?: 'interno' | 'gestor' | 'all';
+  targetUserId?: string | null;
+};
+
+export async function GET() {
   try {
     const authClient = await createAuthClient();
     const {
@@ -51,20 +62,25 @@ export async function GET(request: Request) {
     }
 
     const adminClient = createAdminClient();
-    
-    const { data: notifications, error } = await adminClient
-      .from('notifications')
+
+    const { data: roleRow } = await adminClient
+      .from('user_roles')
+      .select('tipo_usuario')
+      .eq('id', user.id)
+      .single();
+
+    const tipoUsuario = roleRow?.tipo_usuario ?? 'interno';
+
+    const { data, error } = await adminClient
+      .from('app_notifications')
       .select('*')
-      .eq('user_id', user.id)
-      .eq('read', false)
-      .order('created_at', { ascending: false });
+      .in('target_audience', [tipoUsuario, 'all'])
+      .order('created_at', { ascending: false })
+      .limit(30);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    return NextResponse.json(notifications || []);
-
+    return NextResponse.json(data ?? []);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Erro desconhecido';
     return NextResponse.json({ error: message }, { status: 500 });
@@ -83,50 +99,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
     }
 
-    const { title, message, type, targetAudience } = await request.json();
+    const body = (await request.json()) as CreateAppNotificationBody;
+    const type = body.type;
+    const title = body.title?.trim();
+    const message = body.message?.trim();
+    const targetAudience = body.targetAudience ?? 'all';
+    const targetUserId = body.targetUserId ?? null;
 
-    if (!title || !message || !type || !targetAudience) {
+    if (!type || !title || !message) {
       return NextResponse.json({ error: 'Campos obrigatórios faltando' }, { status: 400 });
     }
 
     const adminClient = createAdminClient();
-
-    // Buscar todos os usuários internos (equipe Geolog)
-    const { data: internalUsers, error: usersError } = await adminClient
-      .from('user_roles')
-      .select('id')
-      .eq('tipo_usuario', 'interno')
-      .neq('id', user.id); // Não enviar para o próprio usuário que fez a ação
-
-    if (usersError) {
-      throw usersError;
-    }
-
-    // Criar notificações para todos os usuários internos
-    const notifications = internalUsers?.map(userId => ({
-      user_id: userId.id,
+    const { error } = await adminClient.from('app_notifications').insert({
+      type,
       title,
       message,
-      type,
-      read: false,
-      created_at: new Date().toISOString()
-    })) || [];
-
-    if (notifications.length > 0) {
-      const { error: insertError } = await adminClient
-        .from('notifications')
-        .insert(notifications);
-
-      if (insertError) {
-        throw insertError;
-      }
-    }
-
-    return NextResponse.json({ 
-      success: true, 
-      message: `Notificação enviada para ${notifications.length} usuários internos` 
+      target_audience: targetAudience,
+      target_user_id: targetUserId,
+      empresa_id: null
     });
 
+    if (error) {
+      throw error;
+    }
+
+    return NextResponse.json({ success: true });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Erro desconhecido';
     return NextResponse.json({ error: message }, { status: 500 });

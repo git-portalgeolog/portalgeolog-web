@@ -48,6 +48,14 @@ Sempre verifique o `package.json` antes de executar, mas prefira estes padrões:
 - **Async:** Nunca use `.then()`. Use sempre `async/await` com blocos `try/catch`.
 - **Explicicidade:** Funções exportadas devem ter tipos de retorno definidos.
 
+### Campos Obrigatórios com Asteriscos (PRIORIDADE ABSOLUTA)
+- **Componente:** `@/components/ui/RequiredAsterisk.tsx`
+- **Classe CSS:** `.required-asterisk` (definida em `globals.css`)
+- **OBRIGATÓRIO:** Sempre que asterisco for solicitado, usar `<RequiredAsterisk />`
+- **Estilo Padrão:** Vermelho claro (#fca5a5), tamanho base, alinhamento baseline
+- **Uso Correto:** `<label>Campo <RequiredAsterisk /></label>`
+- **PROIBIDO:** Asteriscos manuais (`*`, `<span>*</span>`, `className="text-red-500"`)
+
 ---
 
 ## 📊 10. Estilo Global de Tabelas (PRIORIDADE ABSOLUTA)

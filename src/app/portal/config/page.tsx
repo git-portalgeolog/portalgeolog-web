@@ -211,7 +211,7 @@ export default function ConfigPage() {
     type: string,
   ) => {
     try {
-      await fetch("/api/notifications", {
+      await fetch("/api/app-notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

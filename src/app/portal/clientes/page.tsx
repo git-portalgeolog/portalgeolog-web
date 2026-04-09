@@ -104,17 +104,21 @@ export default function ClientesPage() {
   };
 
   // Handlers for Centro de Custo
-  const handleCreateCentroCusto = (e: React.FormEvent) => {
+  const handleCreateCentroCusto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newCentroCusto.nome && selectedClienteId) {
-      if (editingCentroCusto) {
-        updateCentroCusto(editingCentroCusto.id, { nome: newCentroCusto.nome, clienteId: selectedClienteId });
-        setEditingCentroCusto(null);
-      } else {
-        addCentroCusto(newCentroCusto.nome, selectedClienteId);
+      try {
+        if (editingCentroCusto) {
+          updateCentroCusto(editingCentroCusto.id, { nome: newCentroCusto.nome, clienteId: selectedClienteId });
+          setEditingCentroCusto(null);
+        } else {
+          await addCentroCusto(newCentroCusto.nome, selectedClienteId);
+        }
+        setNewCentroCusto({ nome: '', clienteId: '' });
+        setIsCentroCustoModalOpen(false);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o centro de custo.');
       }
-      setNewCentroCusto({ nome: '', clienteId: '' });
-      setIsCentroCustoModalOpen(false);
     }
   };
 
@@ -144,7 +148,7 @@ export default function ClientesPage() {
   };
 
   // Handlers for Solicitante
-  const handleCreateSolicitante = (e: React.FormEvent) => {
+  const handleCreateSolicitante = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newSolicitante.nome && selectedClienteId) {
       const data = { 
@@ -152,14 +156,19 @@ export default function ClientesPage() {
         clienteId: selectedClienteId, 
         centroCustoId: newSolicitante.centroCustoId || undefined 
       };
-      if (editingSolicitante) {
-        updateSolicitante(editingSolicitante.id, { nome: data.nome, centroCustoId: data.centroCustoId });
-        setEditingSolicitante(null);
-      } else {
-        addSolicitante(data.nome, data.clienteId, data.centroCustoId);
+
+      try {
+        if (editingSolicitante) {
+          updateSolicitante(editingSolicitante.id, { nome: data.nome, centroCustoId: data.centroCustoId });
+          setEditingSolicitante(null);
+        } else {
+          await addSolicitante(data.nome, data.clienteId, data.centroCustoId);
+        }
+        setNewSolicitante({ nome: '', clienteId: '', centroCustoId: '' });
+        setIsSolicitanteModalOpen(false);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o solicitante.');
       }
-      setNewSolicitante({ nome: '', clienteId: '', centroCustoId: '' });
-      setIsSolicitanteModalOpen(false);
     }
   };
 
@@ -197,21 +206,26 @@ export default function ClientesPage() {
       <PageHeader
         title="Hierarquia Geolog"
         icon={<Building size={20} />}
-        buttonText="Nova Empresa"
-        onButtonClick={() => setIsClienteModalOpen(true)}
       />
 
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input 
-            type="text" 
+      <div className="flex gap-3 items-center">
+        <div className="relative group flex-1">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
+          <input
+            type="text"
             placeholder="Buscar por empresa..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+            className="w-full pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-2xl shadow-sm outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 font-bold text-sm transition-all"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
+        <button
+          onClick={() => setIsClienteModalOpen(true)}
+          className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-3.5 rounded-2xl font-bold hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer shadow-lg shadow-blue-900/20 whitespace-nowrap"
+        >
+          <Plus size={18} />
+          Nova Empresa
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

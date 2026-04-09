@@ -20,6 +20,9 @@ interface GeologSearchableSelectProps {
   compact?: boolean;
   required?: boolean;
   onQuickAdd?: () => void;
+  triggerClassName?: string;
+  className?: string;
+  disableSearch?: boolean;
 }
 
 export default function GeologSearchableSelect({
@@ -32,6 +35,9 @@ export default function GeologSearchableSelect({
   compact = false,
   required = false,
   onQuickAdd,
+  triggerClassName = "",
+  className = "",
+  disableSearch = false,
 }: GeologSearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -122,20 +128,22 @@ export default function GeologSearchableSelect({
         width: `${coords.width}px`,
       }}
     >
-      <div className="p-4 border-b-2 border-slate-50 relative bg-slate-50/50">
-        <Search
-          size={18}
-          className="absolute left-8 top-1/2 -translate-y-1/2 text-slate-400"
-        />
-        <input
-          autoFocus
-          type="text"
-          placeholder="Digite para filtrar..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-12 pr-4 py-3 bg-white rounded-xl text-sm font-bold text-slate-900 outline-none border-2 border-transparent focus:border-blue-500 shadow-sm"
-        />
-      </div>
+      {!disableSearch && (
+        <div className="p-4 border-b-2 border-slate-50 relative bg-slate-50/50">
+          <Search
+            size={18}
+            className="absolute left-8 top-1/2 -translate-y-1/2 text-slate-400"
+          />
+          <input
+            autoFocus
+            type="text"
+            placeholder="Digite para filtrar..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-12 pr-4 py-3 bg-white rounded-xl text-sm font-bold text-slate-900 outline-none border-2 border-transparent focus:border-blue-500 shadow-sm"
+          />
+        </div>
+      )}
 
       <div className="max-h-60 overflow-y-auto custom-scrollbar">
         {filteredOptions.length > 0 ? (
@@ -169,7 +177,7 @@ export default function GeologSearchableSelect({
   );
 
   return (
-    <div className="space-y-2 group relative" ref={wrapperRef}>
+    <div className={`group relative ${className}`} ref={wrapperRef}>
       <label
         className={`font-black uppercase text-slate-500 tracking-wider ml-1 ${compact ? "text-[10px]" : "text-sm"} flex items-center gap-1`}
       >
@@ -180,7 +188,7 @@ export default function GeologSearchableSelect({
       <div
         ref={triggerRef}
         onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`geolog-searchable-trigger w-full bg-slate-50 border-2 border-slate-200 rounded-xl flex items-center justify-between cursor-pointer transition-all hover:bg-white hover:border-blue-300 ${isOpen ? "ring-4 ring-blue-500/10 border-blue-500 bg-white" : ""} ${disabled ? "opacity-50 cursor-not-allowed" : ""} shadow-sm ${compact ? "px-4 py-3" : "px-5 py-4"}`}
+        className={`geolog-searchable-trigger w-full bg-slate-50 border-2 border-slate-200 rounded-xl flex items-center justify-between cursor-pointer transition-all hover:bg-white hover:border-blue-300 ${isOpen ? "ring-4 ring-blue-500/10 border-blue-500 bg-white" : ""} ${disabled ? "opacity-50 cursor-not-allowed" : ""} shadow-sm ${compact ? "px-4 py-3" : "px-5 py-4"} ${triggerClassName}`}
       >
         <span
           className={`font-bold ${selectedOption ? "text-slate-900" : "text-slate-400"} ${compact ? "text-base" : "text-lg"}`}

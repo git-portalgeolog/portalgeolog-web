@@ -3,7 +3,6 @@ import type {
   Cliente,
   CentroCusto,
   Solicitante,
-  Fornecedor,
   TipoServico,
   Passageiro,
   PassageiroEndereco,
@@ -17,10 +16,42 @@ const supabase = createClient();
 
 const trimText = (value?: string): string => value?.trim() ?? '';
 
+// Função para criar notificações
+export async function createNotification(
+  type: 'success' | 'info' | 'warning' | 'error',
+  title: string,
+  message: string,
+  targetAudience: 'interno' | 'gestor' | 'all' = 'all',
+  targetUserId?: string
+): Promise<void> {
+  try {
+    const response = await fetch('/api/app-notifications', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type,
+        title,
+        message,
+        targetAudience,
+        targetUserId: targetUserId || null,
+      }),
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      console.error('Erro ao criar notificação:', payload?.error || `HTTP ${response.status}`);
+    }
+  } catch (err) {
+    console.error('Erro ao criar notificação:', err);
+  }
+}
+
+
 type ClienteRow = { id: string; nome: string; contato: string | null };
 type CentroCustoRow = { id: string; nome: string; cliente_id: string };
 type SolicitanteRow = { id: string; nome: string; cliente_id: string; centro_custo_id: string | null };
-type FornecedorRow = { id: string; nome: string; tipo: string; telefone: string | null };
 type TipoServicoRow = { id: string; nome: string };
 type PassageiroRow = {
   id: string;
@@ -28,6 +59,8 @@ type PassageiroRow = {
   email: string | null;
   celular: string | null;
   cpf: string | null;
+  notificar: boolean | null;
+  genero: string | null;
 };
 type PassageiroEnderecoRow = {
   id: string;
@@ -227,37 +260,6 @@ export async function deleteSolicitanteFromDB(id: string): Promise<void> {
   if (error) throw error;
 }
 
-// ── Fornecedores ──────────────────────────────────────────
-
-export async function fetchFornecedores(): Promise<Fornecedor[]> {
-  const { data, error } = await supabase
-    .from('fornecedores')
-    .select('id, nome, tipo, telefone')
-    .order('nome');
-
-  if (error) throw error;
-  return ((data || []) as FornecedorRow[]).map((f) => ({
-    id: f.id,
-    nome: f.nome,
-    tipo: f.tipo,
-    telefone: f.telefone || undefined,
-  }));
-}
-
-export async function insertFornecedor(nome: string, tipo: string, telefone?: string): Promise<void> {
-  const { error } = await supabase.from('fornecedores').insert({
-    nome: trimText(nome),
-    tipo: trimText(tipo),
-    telefone: trimText(telefone) || null,
-  });
-  if (error) throw error;
-}
-
-export async function deleteFornecedor(id: string): Promise<void> {
-  const { error } = await supabase.from('fornecedores').delete().eq('id', id);
-  if (error) throw error;
-}
-
 // ── Tipos de Serviço ──────────────────────────────────────
 
 export async function fetchServicos(): Promise<TipoServico[]> {
@@ -313,7 +315,7 @@ export async function deleteServicoFromDB(id: string): Promise<void> {
 export async function fetchPassageiros(): Promise<Passageiro[]> {
   const { data: passRaw, error } = await supabase
     .from('passageiros')
-    .select('id, nome_completo, email, celular, cpf')
+    .select('id, nome_completo, email, celular, cpf, notificar, genero')
     .order('nome_completo');
 
   if (error) throw error;
@@ -328,9 +330,11 @@ export async function fetchPassageiros(): Promise<Passageiro[]> {
   return typedPassengers.map((p) => ({
     id: p.id,
     nomeCompleto: p.nome_completo,
-    email: p.email || '',
+    email: p.email || undefined,
     celular: p.celular || '',
-    cpf: p.cpf || '',
+    cpf: p.cpf || undefined,
+    notificar: p.notificar,
+    genero: p.genero,
     enderecos: typedAddresses
       .filter((e) => e.passageiro_id === p.id)
       .map((e) => ({
@@ -350,8 +354,10 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
       email: input.email ? trimText(input.email) : null,
       celular: trimText(input.celular),
       cpf: input.cpf ? trimText(input.cpf) : null,
+      notificar: input.notificar ?? false,
+      genero: input.genero || null,
     })
-    .select('id, nome_completo, email, celular, cpf')
+    .select('id, nome_completo, email, celular, cpf, notificar, genero')
     .single();
 
   if (passError) throw passError;
@@ -389,8 +395,136 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
     email: passRow.email || undefined,
     celular: passRow.celular || '',
     cpf: passRow.cpf || undefined,
+    notificar: passRow.notificar || undefined,
+    genero: passRow.genero || undefined,
     enderecos,
   };
+}
+
+export async function updatePassageiroInDB(id: string, input: NovoPassageiroInput): Promise<Passageiro> {
+  const { data: passRow, error: passError } = await supabase
+    .from('passageiros')
+    .update({
+      nome_completo: trimText(input.nomeCompleto),
+      email: input.email ? trimText(input.email) : null,
+      celular: trimText(input.celular),
+      cpf: input.cpf ? trimText(input.cpf) : null,
+      notificar: input.notificar ?? false,
+      genero: input.genero || null,
+    })
+    .eq('id', id)
+    .select('id, nome_completo, email, celular, cpf, notificar, genero')
+    .single();
+
+  if (passError) throw passError;
+
+  // Deletar endereços antigos
+  await supabase.from('passageiro_enderecos').delete().eq('passageiro_id', id);
+
+  // Inserir novos endereços
+  const enderecos: PassageiroEndereco[] = [];
+
+  if (input.enderecos.length > 0) {
+    const { data: endRows, error: endError } = await supabase
+      .from('passageiro_enderecos')
+      .insert(
+        input.enderecos.map((e) => ({
+          passageiro_id: id,
+          rotulo: trimText(e.rotulo) || 'Principal',
+          endereco_completo: trimText(e.enderecoCompleto),
+          referencia: trimText(e.referencia) || null,
+        }))
+      )
+      .select('id, rotulo, endereco_completo, referencia');
+
+    if (!endError && endRows) {
+      (endRows as PassageiroEnderecoRow[]).forEach((e) =>
+        enderecos.push({
+          id: e.id,
+          rotulo: e.rotulo,
+          enderecoCompleto: e.endereco_completo,
+          referencia: e.referencia || undefined,
+        })
+      );
+    }
+  }
+
+  return {
+    id: passRow.id,
+    nomeCompleto: passRow.nome_completo,
+    email: passRow.email || undefined,
+    celular: passRow.celular || '',
+    cpf: passRow.cpf || undefined,
+    notificar: passRow.notificar || undefined,
+    genero: passRow.genero || undefined,
+    enderecos,
+  };
+}
+
+export async function deletePassageiroFromDB(id: string): Promise<void> {
+  const { error } = await supabase.from('passageiros').delete().eq('id', id);
+
+  if (error) throw error;
+}
+
+// ── Veículos ───────────────────────────────────────────
+
+type VeiculoRow = {
+  id: string;
+  placa: string;
+  renavam: string;
+  modelo: string;
+  marca: string;
+  ano: number;
+  cor: string | null;
+  tipo: string;
+  status: string;
+  proprietario_tipo: string;
+  parceiro_id: string | null;
+  created_at: string;
+};
+
+export async function updateVeiculoInDB(id: string, input: Partial<Vehicle>): Promise<Vehicle> {
+  const { data: vehRow, error: vehError } = await supabase
+    .from('veiculos')
+    .update({
+      placa: input.placa?.trim().toUpperCase(),
+      renavam: input.renavam?.trim(),
+      modelo: input.modelo?.trim(),
+      marca: input.marca?.trim(),
+      ano: input.ano,
+      cor: input.cor?.trim() || null,
+      tipo: input.tipo,
+      status: input.status,
+      proprietario_tipo: input.proprietario_tipo,
+      parceiro_id: input.proprietario_tipo === 'parceiro' ? input.parceiro_id : null,
+    })
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (vehError) throw vehError;
+
+  return {
+    id: vehRow.id,
+    placa: vehRow.placa,
+    renavam: vehRow.renavam,
+    modelo: vehRow.modelo,
+    marca: vehRow.marca,
+    ano: vehRow.ano,
+    cor: vehRow.cor || undefined,
+    tipo: vehRow.tipo as Vehicle['tipo'],
+    status: vehRow.status as Vehicle['status'],
+    proprietario_tipo: vehRow.proprietario_tipo as Vehicle['proprietario_tipo'],
+    parceiro_id: vehRow.parceiro_id || undefined,
+    created_at: vehRow.created_at,
+  };
+}
+
+export async function deleteVeiculoFromDB(id: string): Promise<void> {
+  const { error } = await supabase.from('veiculos').delete().eq('id', id);
+
+  if (error) throw error;
 }
 
 // ── Ordens de Serviço ─────────────────────────────────────
@@ -716,6 +850,340 @@ export async function updateDriverInDB(id: string, driver: Partial<Driver>): Pro
 export async function deleteDriverFromDB(id: string): Promise<void> {
   const { error } = await supabase
     .from('drivers')
+    .delete()
+    .eq('id', id);
+
+  if (error) throw error;
+}
+
+// ── Parceiros de Serviço ─────────────────────────────────
+
+export interface ParceiroServico {
+  id: string;
+  pessoaTipo: 'fisica' | 'juridica';
+  documento: string;
+  razaoSocialOuNomeCompleto: string;
+  contatos: ParceiroContato[];
+  filiais: ParceiroFilial[];
+  searchIndex: string;
+}
+
+export interface ParceiroContato {
+  id: string;
+  setor: string;
+  celular: string;
+  email?: string;
+  responsavel: string;
+}
+
+export interface ParceiroFilial {
+  id: string;
+  rotulo: string;
+  enderecoCompleto: string;
+  referencia?: string;
+}
+
+export interface NovoParceiroInput {
+  pessoaTipo: 'fisica' | 'juridica';
+  documento: string;
+  razaoSocialOuNomeCompleto: string;
+  contatos: {
+    setor: string;
+    celular: string;
+    email?: string;
+    responsavel: string;
+  }[];
+  filiais: {
+    rotulo: string;
+    enderecoCompleto: string;
+    referencia?: string;
+  }[];
+}
+
+type ParceiroRow = {
+  id: string;
+  nome: string;
+  tipo: string;
+  pessoa_tipo: 'fisica' | 'juridica';
+  documento: string | null;
+  razao_social_ou_nome_completo: string | null;
+  telefone: string | null;
+  search_index: string;
+};
+
+type ParceiroContatoRow = {
+  id: string;
+  parceiro_id: string;
+  setor: string;
+  celular: string;
+  email: string | null;
+  responsavel: string;
+};
+
+type ParceiroFilialRow = {
+  id: string;
+  parceiro_id: string;
+  rotulo: string;
+  endereco_completo: string;
+  referencia: string | null;
+};
+
+const buildParceiroSearchIndex = (
+  parceiro: Omit<ParceiroServico, 'searchIndex'>,
+  contatos: ParceiroContato[],
+  filiais: ParceiroFilial[]
+): string => {
+  const tokens = [
+    parceiro.pessoaTipo,
+    parceiro.documento,
+    parceiro.razaoSocialOuNomeCompleto,
+    ...contatos.flatMap((contato) => [contato.setor, contato.celular, contato.email || '', contato.responsavel]),
+    ...filiais.flatMap((filial) => [filial.rotulo, filial.enderecoCompleto, filial.referencia || '']),
+  ];
+
+  return tokens.join(' ').toLowerCase();
+};
+
+const mapParceiroPayload = (
+  parceiro: ParceiroRow,
+  contatos: ParceiroContatoRow[],
+  filiais: ParceiroFilialRow[]
+): ParceiroServico => {
+  const mappedContatos = contatos.map((contato) => ({
+    id: contato.id,
+    setor: contato.setor,
+    celular: contato.celular,
+    email: contato.email || undefined,
+    responsavel: contato.responsavel,
+  }));
+
+  const mappedFiliais = filiais.map((filial) => ({
+    id: filial.id,
+    rotulo: filial.rotulo || 'Filial',
+    enderecoCompleto: filial.endereco_completo,
+    referencia: filial.referencia || undefined,
+  }));
+
+  const base = {
+    id: parceiro.id,
+    pessoaTipo: parceiro.pessoa_tipo,
+    documento: parceiro.documento || '',
+    razaoSocialOuNomeCompleto: parceiro.razao_social_ou_nome_completo || parceiro.nome || '',
+    contatos: mappedContatos,
+    filiais: mappedFiliais,
+  };
+
+  return {
+    ...base,
+    searchIndex: buildParceiroSearchIndex(base, mappedContatos, mappedFiliais),
+  };
+};
+
+const mapParceiroRow = (row: ParceiroRow): ParceiroServico => {
+  // Para compatibilidade temporária com dados existentes
+  return {
+    id: row.id,
+    pessoaTipo: row.pessoa_tipo,
+    documento: row.documento || '',
+    razaoSocialOuNomeCompleto: row.razao_social_ou_nome_completo || row.nome || '',
+    contatos: [],
+    filiais: [],
+    searchIndex: buildParceiroSearchIndex({
+      id: row.id,
+      pessoaTipo: row.pessoa_tipo,
+      documento: row.documento || '',
+      razaoSocialOuNomeCompleto: row.razao_social_ou_nome_completo || row.nome || '',
+      contatos: [],
+      filiais: [],
+    }, [], []),
+  };
+};
+
+export async function fetchParceiros(): Promise<ParceiroServico[]> {
+  const { data: parceirosData, error: parceirosError } = await supabase
+    .from('parceiros_servico')
+    .select('*')
+    .order('nome');
+
+  if (parceirosError) throw parceirosError;
+  const parceiros = parceirosData as ParceiroRow[];
+
+  // Buscar contatos e filiais para todos os parceiros
+  const parceirosIds = parceiros.map(p => p.id);
+  
+  let contatos: ParceiroContatoRow[] = [];
+  let filiais: ParceiroFilialRow[] = [];
+  
+  if (parceirosIds.length > 0) {
+    const { data: contatosData, error: contatosError } = await supabase
+      .from('parceiros_contatos')
+      .select('*')
+      .in('parceiro_id', parceirosIds);
+      
+    if (contatosError) throw contatosError;
+    contatos = contatosData as ParceiroContatoRow[];
+    
+    const { data: filiaisData, error: filiaisError } = await supabase
+      .from('parceiros_filiais')
+      .select('*')
+      .in('parceiro_id', parceirosIds);
+      
+    if (filiaisError) throw filiaisError;
+    filiais = filiaisData as ParceiroFilialRow[];
+  }
+
+  // Mapear dados completos
+  return parceiros.map(parceiro => {
+    const parceiroContatos = contatos.filter(c => c.parceiro_id === parceiro.id);
+    const parceiroFiliais = filiais.filter(f => f.parceiro_id === parceiro.id);
+    return mapParceiroPayload(parceiro, parceiroContatos, parceiroFiliais);
+  });
+}
+
+export async function fetchParceiroById(id: string): Promise<ParceiroServico> {
+  const { data: parceiroData, error: parceiroError } = await supabase
+    .from('parceiros_servico')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (parceiroError) throw parceiroError;
+  const parceiro = parceiroData as ParceiroRow;
+
+  // Buscar contatos
+  const { data: contatosData, error: contatosError } = await supabase
+    .from('parceiros_contatos')
+    .select('*')
+    .eq('parceiro_id', id);
+    
+  if (contatosError) throw contatosError;
+  const contatos = contatosData as ParceiroContatoRow[];
+  
+  // Buscar filiais
+  const { data: filiaisData, error: filiaisError } = await supabase
+    .from('parceiros_filiais')
+    .select('*')
+    .eq('parceiro_id', id);
+    
+  if (filiaisError) throw filiaisError;
+  const filiais = filiaisData as ParceiroFilialRow[];
+
+  return mapParceiroPayload(parceiro, contatos, filiais);
+}
+
+export async function insertParceiro(input: NovoParceiroInput): Promise<ParceiroServico> {
+  // Inserir parceiro principal
+  const { data: parceiroData, error: parceiroError } = await supabase
+    .from('parceiros_servico')
+    .insert({
+      nome: trimText(input.razaoSocialOuNomeCompleto),
+      tipo: 'Parceiro',
+      pessoa_tipo: input.pessoaTipo,
+      documento: trimText(input.documento),
+      razao_social_ou_nome_completo: trimText(input.razaoSocialOuNomeCompleto),
+    })
+    .select('*')
+    .single();
+
+  if (parceiroError) throw parceiroError;
+  const parceiro = parceiroData as ParceiroRow;
+
+  // Inserir contatos
+  const contatosToInsert = input.contatos.map((contato) => ({
+    parceiro_id: parceiro.id,
+    setor: trimText(contato.setor),
+    celular: trimText(contato.celular),
+    email: trimText(contato.email) || null,
+    responsavel: trimText(contato.responsavel),
+  }));
+
+  if (contatosToInsert.length > 0) {
+    const { error: contatosError } = await supabase
+      .from('parceiros_contatos')
+      .insert(contatosToInsert);
+
+    if (contatosError) throw contatosError;
+  }
+
+  // Inserir filiais
+  const filiaisToInsert = input.filiais.map((filial) => ({
+    parceiro_id: parceiro.id,
+    rotulo: trimText(filial.rotulo),
+    endereco_completo: trimText(filial.enderecoCompleto),
+    referencia: trimText(filial.referencia) || null,
+  }));
+
+  if (filiaisToInsert.length > 0) {
+    const { error: filiaisError } = await supabase
+      .from('parceiros_filiais')
+      .insert(filiaisToInsert);
+
+    if (filiaisError) throw filiaisError;
+  }
+
+  // Buscar dados completos para retornar
+  return fetchParceiroById(parceiro.id);
+}
+
+export async function updateParceiroInDB(id: string, input: NovoParceiroInput): Promise<ParceiroServico> {
+  // Atualizar parceiro principal
+  const { error: parceiroError } = await supabase
+    .from('parceiros_servico')
+    .update({
+      nome: trimText(input.razaoSocialOuNomeCompleto),
+      tipo: 'Parceiro',
+      pessoa_tipo: input.pessoaTipo,
+      documento: trimText(input.documento),
+      razao_social_ou_nome_completo: trimText(input.razaoSocialOuNomeCompleto),
+    })
+    .eq('id', id);
+
+  if (parceiroError) throw parceiroError;
+
+  // Remover contatos e filiais existentes
+  await supabase.from('parceiros_contatos').delete().eq('parceiro_id', id);
+  await supabase.from('parceiros_filiais').delete().eq('parceiro_id', id);
+
+  // Inserir novos contatos
+  const contatosToInsert = input.contatos.map((contato) => ({
+    parceiro_id: id,
+    setor: trimText(contato.setor),
+    celular: trimText(contato.celular),
+    email: trimText(contato.email) || null,
+    responsavel: trimText(contato.responsavel),
+  }));
+
+  if (contatosToInsert.length > 0) {
+    const { error: contatosError } = await supabase
+      .from('parceiros_contatos')
+      .insert(contatosToInsert);
+
+    if (contatosError) throw contatosError;
+  }
+
+  // Inserir novas filiais
+  const filiaisToInsert = input.filiais.map((filial) => ({
+    parceiro_id: id,
+    rotulo: trimText(filial.rotulo),
+    endereco_completo: trimText(filial.enderecoCompleto),
+    referencia: trimText(filial.referencia) || null,
+  }));
+
+  if (filiaisToInsert.length > 0) {
+    const { error: filiaisError } = await supabase
+      .from('parceiros_filiais')
+      .insert(filiaisToInsert);
+
+    if (filiaisError) throw filiaisError;
+  }
+
+  // Buscar dados completos para retornar
+  return fetchParceiroById(id);
+}
+
+export async function deleteParceiroFromDB(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('parceiros_servico')
     .delete()
     .eq('id', id);
 

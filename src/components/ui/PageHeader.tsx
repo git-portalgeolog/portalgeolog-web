@@ -6,17 +6,17 @@ import { Plus } from 'lucide-react';
 export interface PageHeaderProps {
   title: string;
   icon: React.ReactNode;
-  buttonText: string;
+  buttonText?: string;
   onButtonClick?: () => void;
   buttonIcon?: React.ReactNode;
 }
 
-export function PageHeader({ 
-  title, 
-  icon, 
-  buttonText, 
-  onButtonClick, 
-  buttonIcon = <Plus size={18} /> 
+export function PageHeader({
+  title,
+  icon,
+  buttonText,
+  onButtonClick,
+  buttonIcon = <Plus size={18} />
 }: PageHeaderProps) {
   return (
     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -28,13 +28,15 @@ export function PageHeader({
           <h1 className="text-2xl font-black text-[var(--color-geolog-blue)]">{title}</h1>
         </div>
       </div>
-      <button 
-        onClick={onButtonClick}
-        className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-2.5 rounded-xl font-bold hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer shadow-lg shadow-blue-900/20"
-      >
-        {buttonIcon}
-        {buttonText}
-      </button>
+      {buttonText && (
+        <button
+          onClick={onButtonClick}
+          className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-2.5 rounded-xl font-bold hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer shadow-lg shadow-blue-900/20"
+        >
+          {buttonIcon}
+          {buttonText}
+        </button>
+      )}
     </div>
   );
 }

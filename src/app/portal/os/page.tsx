@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import StandardModal from '@/components/StandardModal';
 import { 
   Plus, 
   Search, 
   Truck, 
   User,
+  UserPlus,
   Calendar,
   X,
   PlusCircle,
@@ -25,12 +27,17 @@ import {
   MessageCircle,
   Users,
   AlertTriangle,
-  ChevronDown
+  ChevronDown,
+  Phone,
+  IdCard,
+  Building2,
+  Handshake,
 } from 'lucide-react';
 import { useData, type OrderService } from '@/context/DataContext';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import { DataTable } from '@/components/ui/DataTable';
 import { toast } from 'sonner';
+import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
 
 type FormPassenger = { id: string; solicitanteId: string; nome: string; };
 type FormWaypoint = { label: string; lat: number | null; lng: number | null; passengers: FormPassenger[]; };
@@ -49,8 +56,90 @@ type OSFormData = {
   waypoints: FormWaypoint[];
 };
 
+type QuickAddDriverForm = {
+  name: string;
+  cpf: string;
+  cnh: string;
+  celular: string;
+  vehicle_id: string;
+  vinculo_tipo: 'interno' | 'parceiro';
+  parceiro_id: string;
+  tipo_documento: 'cpf' | 'passaporte';
+};
+
+type VehicleOption = {
+  id: string;
+  placa: string;
+  modelo: string;
+  marca: string;
+  proprietario_tipo: 'interno' | 'parceiro';
+  parceiro_id: string | null;
+};
+
+const initialQuickAddDriverForm: QuickAddDriverForm = {
+  name: '',
+  cpf: '',
+  cnh: '',
+  celular: '',
+  vehicle_id: '',
+  vinculo_tipo: 'parceiro',
+  parceiro_id: '',
+  tipo_documento: 'cpf'
+};
+
+const formatDriverDocument = (value: string, tipo: 'cpf' | 'passaporte'): string => {
+  if (tipo === 'cpf') {
+    const digits = value.replace(/\D/g, '').slice(0, 11);
+    return digits
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+  }
+
+  return value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 9);
+};
+
+const formatDriverCelular = (value: string): string => {
+  const digits = value.replace(/\D/g, '').slice(0, 11);
+
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+};
+
+const validateDriverCNH = (value: string): boolean => {
+  return value.replace(/\D/g, '').length === 11;
+};
+
+const validateDriverCPF = (value: string): boolean => {
+  return value.replace(/\D/g, '').length === 11;
+};
+
+const validateDriverCelular = (value: string): boolean => {
+  const digits = value.replace(/\D/g, '');
+  return digits.length === 11 && digits[2] === '9';
+};
+
+const getDriverDocumentLabel = (tipo: 'cpf' | 'passaporte'): string => {
+  return tipo === 'cpf' ? 'CPF' : 'Passaporte';
+};
+
+const getDriverDocumentPlaceholder = (tipo: 'cpf' | 'passaporte'): string => {
+  return tipo === 'cpf' ? '000.000.000-00' : 'AA1234567';
+};
+
+const tipoDocumentoOptions = [
+  { id: 'cpf', nome: 'CPF' },
+  { id: 'passaporte', nome: 'Passaporte' }
+];
+
+const normalizeTextValue = (value: string): string => value.trim().toLowerCase();
+const normalizeDigitsValue = (value: string): string => value.replace(/\D/g, '');
+
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, servicos, passageiros, drivers, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente, addCliente, addServico, addSolicitante, addCentroCusto, addDriver } = useData();
+  const { osList, clientes, solicitantes, servicos, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente, addCliente, addServico, addSolicitante, addCentroCusto } = useData();
+  const supabase = createClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQuickPassengerModalOpen, setIsQuickPassengerModalOpen] = useState(false);
   const [quickPassengerTarget, setQuickPassengerTarget] = useState<{ waypointIndex: number; passengerId: string } | null>(null);
@@ -65,6 +154,17 @@ export default function OSOperationalPage() {
   // Estados para cadastros rápidos
   const [quickAddModal, setQuickAddModal] = useState<'cliente' | 'servico' | 'motorista' | 'solicitante' | 'centroCusto' | null>(null);
   const [quickAddForm, setQuickAddForm] = useState({ nome: '' });
+  const [quickAddDriverForm, setQuickAddDriverForm] = useState<QuickAddDriverForm>(initialQuickAddDriverForm);
+  const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
+  const [vehiclesUnavailable, setVehiclesUnavailable] = useState(false);
+  const [quickAddedDriverOptions, setQuickAddedDriverOptions] = useState<{ id: string; nome: string }[]>([]);
+  const [quickAddedSolicitantes, setQuickAddedSolicitantes] = useState<Array<{ id: string; nome: string; clienteId: string }>>([]);
+  const [quickAddedCentrosCusto, setQuickAddedCentrosCusto] = useState<Array<{ id: string; nome: string; clienteId: string }>>([]);
+  const [quickAddedServicos, setQuickAddedServicos] = useState<Array<{ id: string; nome: string }>>([]);
+  const parceiroOptions = useMemo(
+    () => parceiros.map((parceiro) => ({ id: parceiro.id, nome: parceiro.razaoSocialOuNomeCompleto })),
+    [parceiros]
+  );
 
   const isAnyModalOpen = isModalOpen || isQuickPassengerModalOpen || Boolean(viewingOSId) || Boolean(cancelTargetId) || Boolean(quickAddModal);
 
@@ -77,6 +177,54 @@ export default function OSOperationalPage() {
     }
     return () => { document.body.style.overflow = 'unset'; };
   }, [isAnyModalOpen]);
+
+  useEffect(() => {
+    const fetchVehicles = async () => {
+      const { data, error } = await supabase
+        .from('veiculos')
+        .select('id, placa, modelo, marca, proprietario_tipo, parceiro_id')
+        .eq('status', 'ativo')
+        .order('marca', { ascending: true })
+        .order('modelo', { ascending: true });
+
+      if (error) {
+        const isMissingTable =
+          error.code === '42P01' ||
+          error.message?.toLowerCase().includes('veiculos') ||
+          error.message?.toLowerCase().includes('does not exist');
+
+        if (isMissingTable) {
+          setVehiclesUnavailable(true);
+          setVehicles([]);
+          return;
+        }
+
+        console.error('Erro ao buscar veículos:', error);
+        toast.error('Erro ao buscar veículos.');
+        return;
+      }
+
+      setVehiclesUnavailable(false);
+      setVehicles((data || []) as VehicleOption[]);
+    };
+
+    fetchVehicles();
+
+    const vehiclesChannel = supabase
+      .channel('os-quick-add-vehicles-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'veiculos' },
+        () => {
+          fetchVehicles();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(vehiclesChannel);
+    };
+  }, [supabase]);
 
   // Form State
   const initialForm: OSFormData = {
@@ -188,19 +336,29 @@ export default function OSOperationalPage() {
   const initialQuickPassengerForm = {
     nomeCompleto: '',
     celular: '',
-    rotulo: 'Residencial',
+    rotulo: 'RESIDENCIAL',
     referencia: '',
-    enderecoCompleto: ''
+    enderecoCompleto: '',
+    notificar: 'Sim'
   };
   const [quickPassengerForm, setQuickPassengerForm] = useState(initialQuickPassengerForm);
   const [quickPassengerErrors, setQuickPassengerErrors] = useState<{ celular?: string }>({});
-  const [isAddressExpanded, setIsAddressExpanded] = useState(true);
+  const [isAddressExpanded, setIsAddressExpanded] = useState(false);
   const driverOptions = useMemo(() => {
-    return drivers.filter(d => d.status !== 'inactive').map(d => ({
+    const baseOptions = drivers.filter(d => d.status !== 'inactive').map(d => ({
       id: d.name,
       nome: d.name
     }));
-  }, [drivers]);
+
+    const mergedOptions = [...quickAddedDriverOptions, ...baseOptions];
+    const seen = new Set<string>();
+
+    return mergedOptions.filter((option) => {
+      if (seen.has(option.id)) return false;
+      seen.add(option.id);
+      return true;
+    });
+  }, [drivers, quickAddedDriverOptions]);
 
   
   const formatPhone = (value: string) => {
@@ -353,7 +511,7 @@ export default function OSOperationalPage() {
     setQuickPassengerTarget({ waypointIndex, passengerId });
     setQuickPassengerForm(initialQuickPassengerForm);
     setQuickPassengerErrors({});
-    setIsAddressExpanded(true);
+    setIsAddressExpanded(false);
     setIsQuickPassengerModalOpen(true);
   };
 
@@ -365,6 +523,7 @@ export default function OSOperationalPage() {
   const handleQuickAddMotorista = () => {
     setQuickAddModal('motorista');
     setQuickAddForm({ nome: '' });
+    setQuickAddDriverForm(initialQuickAddDriverForm);
   };
 
   const handleQuickAddSolicitante = () => {
@@ -385,8 +544,16 @@ export default function OSOperationalPage() {
     setQuickAddForm({ nome: '' });
   };
 
+  const closeQuickAddModal = () => {
+    setQuickAddModal(null);
+    setQuickAddForm({ nome: '' });
+    setQuickAddDriverForm(initialQuickAddDriverForm);
+  };
+
   const handleQuickAddSubmit = async () => {
-    if (!quickAddModal || !quickAddForm.nome.trim()) return;
+    if (!quickAddModal) return;
+
+    if (quickAddModal !== 'motorista' && !quickAddForm.nome.trim()) return;
 
     try {
       switch (quickAddModal) {
@@ -400,37 +567,168 @@ export default function OSOperationalPage() {
         case 'servico': {
           const newServico = await addServico(quickAddForm.nome.trim());
           toast.success('Serviço cadastrado com sucesso!');
+          setQuickAddedServicos((prev) => {
+            if (prev.some((item) => item.id === newServico.id)) return prev;
+            return [...prev, { id: newServico.id, nome: newServico.nome }];
+          });
           // Selecionar automaticamente
           setFormData(prev => ({ ...prev, tipoServico: newServico.nome }));
           break;
         }
         case 'motorista': {
-          const newDriver = await addDriver(quickAddForm.nome.trim());
+          const name = quickAddDriverForm.name.trim();
+          const cnhDigits = quickAddDriverForm.cnh.replace(/\D/g, '');
+          const cpfDigits = quickAddDriverForm.cpf.replace(/\D/g, '');
+          const celularDigits = quickAddDriverForm.celular.replace(/\D/g, '');
+
+          if (!name) {
+            toast.error('Nome completo é obrigatório.');
+            return;
+          }
+
+          if (cnhDigits.length !== 11) {
+            toast.error(`CNH deve ter exatamente 11 dígitos numéricos. Você informou ${cnhDigits.length} dígitos.`);
+            return;
+          }
+
+          if (!validateDriverCPF(quickAddDriverForm.cpf)) {
+            toast.error(`CPF deve ter exatamente 11 dígitos. Você informou ${cpfDigits.length} dígitos.`);
+            return;
+          }
+
+          if (celularDigits.length !== 11) {
+            toast.error(`Celular deve ter exatamente 11 dígitos. Você informou ${celularDigits.length} dígitos.`);
+            return;
+          }
+
+          if (celularDigits[2] !== '9') {
+            toast.error('Celular deve iniciar com 9 após o DDD. Ex: (11) 91234-5678');
+            return;
+          }
+
+          if (quickAddDriverForm.vinculo_tipo === 'parceiro' && !quickAddDriverForm.parceiro_id) {
+            toast.error('Selecione o parceiro de serviço primeiro.');
+            return;
+          }
+
+          if (!quickAddDriverForm.vehicle_id) {
+            toast.error('Selecione um veículo para o motorista.');
+            return;
+          }
+
+          const duplicateName = drivers.some((driver) => normalizeTextValue(driver.name) === normalizeTextValue(name));
+          const duplicateCpf = drivers.some((driver) => normalizeDigitsValue(driver.cpf || '') === cpfDigits);
+          const duplicateCnh = drivers.some((driver) => normalizeDigitsValue(driver.cnh || '') === cnhDigits);
+          const duplicatePhone = drivers.some((driver) => normalizeDigitsValue(driver.phone || '') === celularDigits);
+
+          if (duplicateName) {
+            toast.error('Já existe um motorista com este nome.');
+            return;
+          }
+
+          if (duplicateCpf) {
+            toast.error('Já existe um motorista com este CPF.');
+            return;
+          }
+
+          if (duplicateCnh) {
+            toast.error('Já existe um motorista com esta CNH.');
+            return;
+          }
+
+          if (duplicatePhone) {
+            toast.error('Já existe um motorista com este celular.');
+            return;
+          }
+
+          const insertData: Record<string, unknown> = {
+            name,
+            cpf: cpfDigits,
+            cnh: cnhDigits,
+            phone: celularDigits,
+            vehicle_id: quickAddDriverForm.vehicle_id,
+            status: 'active',
+            vinculo_tipo: quickAddDriverForm.vinculo_tipo,
+          };
+
+          if (quickAddDriverForm.vinculo_tipo === 'parceiro') {
+            insertData.parceiro_id = quickAddDriverForm.parceiro_id;
+          }
+
+          const { error } = await supabase.from('drivers').insert([insertData]);
+
+          if (error) throw error;
+
           toast.success('Motorista cadastrado com sucesso!');
-          setFormData(prev => ({ ...prev, motorista: newDriver.name }));
+          setQuickAddedDriverOptions((prev) => {
+            if (prev.some((option) => option.id === name)) return prev;
+            return [...prev, { id: name, nome: name }];
+          });
+          setFormData(prev => ({ ...prev, motorista: name }));
           break;
         }
         case 'solicitante': {
-          const newSolicitante = await addSolicitante(quickAddForm.nome.trim(), formData.clienteId);
+          const cleanName = quickAddForm.nome.trim();
+          const duplicateSolicitante = availableSolicitantes.some(
+            (solicitante) => normalizeTextValue(solicitante.nome) === normalizeTextValue(cleanName)
+          );
+
+          if (duplicateSolicitante) {
+            toast.error('Já existe um solicitante com este nome para esta empresa.');
+            return;
+          }
+
+          const newSolicitante = await addSolicitante(cleanName, formData.clienteId);
           toast.success('Solicitante cadastrado com sucesso!');
+          setQuickAddedSolicitantes((prev) => {
+            if (prev.some((item) => item.id === newSolicitante.id)) return prev;
+            return [...prev, { id: newSolicitante.id, nome: newSolicitante.nome, clienteId: newSolicitante.clienteId }];
+          });
           // Selecionar automaticamente
           setFormData(prev => ({ ...prev, solicitante: newSolicitante.nome }));
           break;
         }
         case 'centroCusto': {
-          const newCentroCusto = await addCentroCusto(quickAddForm.nome.trim(), formData.clienteId);
+          const cleanName = quickAddForm.nome.trim();
+          const duplicateCentroCusto = availableCentrosCusto.some(
+            (centroCusto) => normalizeTextValue(centroCusto.nome) === normalizeTextValue(cleanName)
+          );
+
+          if (duplicateCentroCusto) {
+            toast.error('Já existe um centro de custo com este nome para esta empresa.');
+            return;
+          }
+
+          const newCentroCusto = await addCentroCusto(cleanName, formData.clienteId);
           toast.success('Centro de custo cadastrado com sucesso!');
+          setQuickAddedCentrosCusto((prev) => {
+            if (prev.some((item) => item.id === newCentroCusto.id)) return prev;
+            return [...prev, { id: newCentroCusto.id, nome: newCentroCusto.nome, clienteId: newCentroCusto.clienteId }];
+          });
           // Selecionar automaticamente
           setFormData(prev => ({ ...prev, centroCusto: newCentroCusto.id }));
           break;
         }
       }
-      setQuickAddModal(null);
-      setQuickAddForm({ nome: '' });
+      closeQuickAddModal();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erro ao cadastrar');
     }
   };
+
+  const filteredQuickAddVehicles = useMemo(() => {
+    if (quickAddDriverForm.vinculo_tipo === 'interno') {
+      return vehicles.filter((vehicle) => vehicle.proprietario_tipo === 'interno');
+    }
+
+    if (quickAddDriverForm.vinculo_tipo === 'parceiro' && quickAddDriverForm.parceiro_id) {
+      return vehicles.filter(
+        (vehicle) => vehicle.proprietario_tipo === 'parceiro' && vehicle.parceiro_id === quickAddDriverForm.parceiro_id
+      );
+    }
+
+    return [];
+  }, [vehicles, quickAddDriverForm.vinculo_tipo, quickAddDriverForm.parceiro_id]);
 
   const handleQuickPassengerSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -454,6 +752,7 @@ export default function OSOperationalPage() {
       const novoPassageiro = await addPassageiro({
         nomeCompleto: trimmedNome,
         celular: quickPassengerForm.celular.trim(),
+        notificar: quickPassengerForm.notificar === 'Sim',
         enderecos: [
           {
             rotulo: quickPassengerForm.rotulo.trim(),
@@ -526,15 +825,46 @@ export default function OSOperationalPage() {
   const currentImposto = formData.valorBruto * 0.15;
   const currentLucro = formData.valorBruto - currentImposto - formData.custo;
 
+  const mergedServicos = useMemo(() => {
+    const merged = [...servicos, ...quickAddedServicos];
+    const seenIds = new Set<string>();
+
+    return merged.filter((item) => {
+      if (seenIds.has(item.id)) return false;
+      seenIds.add(item.id);
+      return true;
+    });
+  }, [servicos, quickAddedServicos]);
+
   const availableSolicitantes = useMemo(() => {
     if (!formData.clienteId) return [];
-    return solicitantes.filter(s => s.clienteId === formData.clienteId);
-  }, [formData.clienteId, solicitantes]);
+    const mergedSolicitantes = [
+      ...solicitantes.filter((s) => s.clienteId === formData.clienteId),
+      ...quickAddedSolicitantes.filter((s) => s.clienteId === formData.clienteId),
+    ];
+    const seenIds = new Set<string>();
+
+    return mergedSolicitantes.filter((item) => {
+      if (seenIds.has(item.id)) return false;
+      seenIds.add(item.id);
+      return true;
+    });
+  }, [formData.clienteId, solicitantes, quickAddedSolicitantes]);
 
   const availableCentrosCusto = useMemo(() => {
     if (!formData.clienteId) return [];
-    return getCentrosCustoByCliente(formData.clienteId);
-  }, [formData.clienteId, getCentrosCustoByCliente]);
+    const mergedCentrosCusto = [
+      ...getCentrosCustoByCliente(formData.clienteId),
+      ...quickAddedCentrosCusto.filter((cc) => cc.clienteId === formData.clienteId),
+    ];
+    const seenIds = new Set<string>();
+
+    return mergedCentrosCusto.filter((item) => {
+      if (seenIds.has(item.id)) return false;
+      seenIds.add(item.id);
+      return true;
+    });
+  }, [formData.clienteId, getCentrosCustoByCliente, quickAddedCentrosCusto]);
 
   const handleClienteChange = (id: string) => {
     setFormData(prev => ({
@@ -635,14 +965,14 @@ export default function OSOperationalPage() {
 
   const getStatusConfig = (status: string) => {
     switch (status) {
-      case 'Pendente': 
+      case 'Pendente':
         return {
           icon: <Clock size={20} />,
-          bg: 'bg-orange-50/50',
-          border: 'border-orange-100',
-          accent: 'bg-orange-500',
-          shadow: 'shadow-orange-200',
-          text: 'text-orange-700',
+          bg: 'bg-slate-50/50',
+          border: 'border-slate-100',
+          accent: 'bg-slate-500',
+          shadow: 'shadow-slate-200',
+          text: 'text-slate-700',
           label: 'Pendente'
         };
       case 'Aguardando': 
@@ -702,36 +1032,23 @@ export default function OSOperationalPage() {
     <div className="space-y-6">
       {/* Operational Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <OpStatCard label="Pendentes" value={osList.filter(o => o.status.operacional === 'Pendente').length} icon={<Clock className="text-orange-500" size={24} />} />
+        <OpStatCard label="Pendentes" value={osList.filter(o => o.status.operacional === 'Pendente').length} icon={<Clock className="text-slate-500" size={24} />} />
         <OpStatCard label="Aguardando" value={osList.filter(o => o.status.operacional === 'Aguardando').length} icon={<Clock className="text-indigo-500" size={24} />} />
         <OpStatCard label="Em Rota" value={osList.filter(o => o.status.operacional === 'Em Rota').length} icon={<Navigation className="text-blue-500" size={24} />} />
         <OpStatCard label="Finalizados" value={osList.filter(o => o.status.operacional === 'Finalizado').length} icon={<CheckCircle2 className="text-emerald-500" size={24} />} />
       </div>
 
-      {/* Action Bar & Search */}
-      <div className="flex flex-col md:flex-row gap-4 items-center">
-        <div className="relative group flex-1 w-full">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
-          <input 
-            type="text" 
-            placeholder="Pesquisar por Motorista, Trecho ou OS..."
-            className="w-full pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-2xl shadow-sm outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 font-bold text-sm transition-all"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-
-        <button 
-          onClick={handleOpenCreateOSModal}
-          className="flex items-center justify-center gap-2 bg-[var(--color-geolog-blue)] text-white px-8 py-3.5 rounded-2xl font-black shadow-lg shadow-blue-900/10 hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest shrink-0 w-full md:w-auto cursor-pointer"
-        >
-          <Plus size={18} strokeWidth={3} />
-          Nova OS
-        </button>
-      </div>
-
       <DataTable
         data={filteredData}
+        actionButton={
+          <button 
+            onClick={handleOpenCreateOSModal}
+            className="flex items-center justify-center gap-2 bg-[var(--color-geolog-blue)] text-white px-8 py-3.5 rounded-2xl font-black shadow-lg shadow-blue-900/10 hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest shrink-0 w-full md:w-auto cursor-pointer whitespace-nowrap"
+          >
+            <Plus size={18} strokeWidth={3} />
+            Nova OS
+          </button>
+        }
         columns={[
           {
             key: 'protocolo',
@@ -986,7 +1303,7 @@ export default function OSOperationalPage() {
                                    placeholder="DD/MM/AAAA"
                                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
                                  />
-                                 <Calendar size={18} className="absolute right-5 top-1/2 text-slate-300 pointer-events-none" style={{ transform: 'translateY(-10%)' }} />
+                                 <Calendar size={18} className="absolute right-5 top-1/2 text-slate-300 pointer-events-none" style={{ transform: 'translateY(15%)' }} />
                               </div>
                               <div className="space-y-1.5">
                                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1 mt-2">Hora <span className="text-rose-300 text-base">*</span></label>
@@ -1001,7 +1318,7 @@ export default function OSOperationalPage() {
                                  />
                               </div>
                               <div className="space-y-1.5">
-                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2 mt-2">OS <span className="text-slate-400 text-xs font-normal normal-case tracking-normal">Opcional</span></label>
+                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2 mt-[10px]">OS <span className="text-slate-400 text-xs font-normal normal-case tracking-normal">Opcional</span></label>
                                  <input 
                                    type="text" 
                                    name="os" 
@@ -1020,6 +1337,7 @@ export default function OSOperationalPage() {
                              value={formData.clienteId} 
                              onChange={handleClienteChange} 
                              required
+                             className="mt-1"
                           />
                        </div>
                     </div>
@@ -1062,10 +1380,10 @@ export default function OSOperationalPage() {
                            required
                            onQuickAdd={handleQuickAddMotorista}
                         />
-                        <GeologSearchableSelect 
-                           label="Tipo de Serviço" 
-                           options={servicos.map(s => ({ id: s.id, nome: s.nome }))} 
-                           value={servicos.find(s => s.nome === formData.tipoServico)?.id || ''} 
+                        <GeologSearchableSelect
+                           label="Tipo de Serviço"
+                           options={mergedServicos.map(s => ({ id: s.id, nome: s.nome }))}
+                           value={mergedServicos.find(s => s.nome === formData.tipoServico)?.id || ''}
                            onChange={handleServicoChange} 
                            required
                            onQuickAdd={handleQuickAddServico}
@@ -1160,7 +1478,7 @@ export default function OSOperationalPage() {
                                     {waypoint.passengers && waypoint.passengers.length > 0 && (
                                        <div className="mt-4 border-t border-dashed border-slate-200">
                                           {waypoint.passengers.map((passenger, passengerIndex) => (
-                                             <div key={passenger.id} className={`relative flex items-center gap-4 group/pass ${passengerIndex === 0 ? 'mt-2' : 'mt-0.5'} ${passengerIndex === waypoint.passengers.length - 1 ? 'mb-6' : 'mb-1'}`}>
+                                             <div key={passenger.id} className={`relative flex items-center gap-4 group/pass ${passengerIndex === 0 ? 'mt-6' : 'mt-5'} ${passengerIndex === waypoint.passengers.length - 1 ? 'mb-10' : 'mb-5'}`}>
                                                 {/* Linha horizontal da trilha - começa na linha vertical */}
                                                 <div className="absolute -left-[1.125rem] top-1/2 -translate-y-1/2 w-12 h-0.5 bg-slate-300 z-10" />
                                                 
@@ -1188,7 +1506,7 @@ export default function OSOperationalPage() {
                                                             type="button"
                                                             onClick={() => openQuickPassengerModal(index, passenger.id)}
                                                             className="p-3 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all opacity-0 group-hover/pass:opacity-100 flex items-center justify-center shadow-sm border border-blue-200 cursor-pointer"
-                                                            style={{ marginBottom: '-15px' }}
+                                                            style={{ marginBottom: '-5px' }}
                                                             title="Cadastrar passageiro"
                                                           >
                                                             <PlusCircle size={18} />
@@ -1197,11 +1515,11 @@ export default function OSOperationalPage() {
                                                       </div>
                                                    </div>
                                                    <div className="flex items-center justify-center h-[56px]">
-                                                     <button 
-                                                        type="button" 
+                                                     <button
+                                                        type="button"
                                                         onClick={() => handleRemovePassenger(index, passenger.id)}
                                                         className="p-3 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover/pass:opacity-100 cursor-pointer"
-                                                        style={{ marginBottom: '-15px' }}
+                                                        style={{ marginBottom: '-5px' }}
                                                         title="Remover Passageiro"
                                                      >
                                                         <X size={18} />
@@ -1312,11 +1630,11 @@ export default function OSOperationalPage() {
           title="Novo Passageiro Rápido"
           subtitle="Cadastro sintetizado direto no atendimento"
           icon={<User size={24} />}
-          maxWidthClassName="max-w-4xl"
+          maxWidthClassName="max-w-5xl"
         >
           <form onSubmit={handleQuickPassengerSubmit} className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-25 gap-6">
-              <div className="space-y-2 md:col-span-18">
+              <div className="space-y-2 md:col-span-14">
                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Nome completo <span className="text-rose-300 text-base">*</span></label>
                 <input
                   required
@@ -1326,7 +1644,7 @@ export default function OSOperationalPage() {
                   placeholder="Ex: Lucas Vieira"
                 />
               </div>
-              <div className="space-y-2 md:col-span-7">
+              <div className="space-y-2 md:col-span-6">
                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Celular <span className="text-rose-300 text-base">*</span></label>
                 <input
                   required
@@ -1346,6 +1664,19 @@ export default function OSOperationalPage() {
                 {quickPassengerErrors.celular && (
                   <p className="text-xs font-semibold text-rose-400 ml-1">{quickPassengerErrors.celular}</p>
                 )}
+              </div>
+              <div className="space-y-2 md:col-span-5 mt-1">
+                <GeologSearchableSelect
+                  label="Notificar"
+                  options={[
+                    { id: 'Sim', nome: 'Sim' },
+                    { id: 'Não', nome: 'Não' }
+                  ]}
+                  value={quickPassengerForm.notificar}
+                  onChange={(value) => setQuickPassengerForm(prev => ({ ...prev, notificar: value }))}
+                  required
+                  disableSearch
+                />
               </div>
             </div>
 
@@ -1389,11 +1720,11 @@ export default function OSOperationalPage() {
                 <div className="space-y-6 animate-in slide-in-from-top-2 duration-200">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Rótulo</label>
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Rótulo <span className="text-rose-300 text-base">*</span></label>
                       <input 
                         value={quickPassengerForm.rotulo}
                         onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, rotulo: e.target.value }))}
-                        placeholder="Residencial, Base, Hotel..." 
+                        placeholder="RESIDENCIAL, BASE, HOTEL..." 
                         className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
                       />
                     </div>
@@ -1425,13 +1756,13 @@ export default function OSOperationalPage() {
               <button
                 type="button"
                 onClick={() => setIsQuickPassengerModalOpen(false)}
-                className="px-6 py-3 text-slate-500 font-black rounded-xl border border-slate-200 hover:bg-slate-50 transition-all uppercase tracking-widest text-xs cursor-pointer"
+                className="cursor-pointer px-6 py-3 text-slate-500 font-black rounded-xl border border-slate-200 hover:bg-slate-50 transition-all uppercase tracking-widest text-xs"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
-                className="px-8 py-3 bg-[var(--color-geolog-blue)] text-white font-black rounded-xl shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest text-xs"
+                className="cursor-pointer px-8 py-3 bg-emerald-600 text-white font-black rounded-xl shadow-lg shadow-emerald-900/20 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest text-xs"
               >
                 Salvar Passageiro
               </button>
@@ -1498,14 +1829,14 @@ export default function OSOperationalPage() {
                   </div>
 
                   <div className="flex items-start gap-4 rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                    <div className={`mt-0.5 w-10 h-10 rounded-2xl flex items-center justify-center ${driverFlow.accepted ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-600'}`}>
+                    <div className={`mt-0.5 w-10 h-10 rounded-2xl flex items-center justify-center ${driverFlow.accepted ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
                       <CheckCircle2 size={18} />
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-black text-slate-900 uppercase tracking-[0.12em]">Aceite do motorista</p>
                       <p className="text-sm text-slate-500">Considerado confirmado quando a OS sai de `Pendente` e entra em etapa operacional posterior.</p>
                     </div>
-                    <span className={`text-xs font-black uppercase tracking-[0.18em] ${driverFlow.accepted ? 'text-emerald-600' : 'text-orange-500'}`}>{driverFlow.accepted ? 'Confirmado' : 'Aguardando clique'}</span>
+                    <span className={`text-xs font-black uppercase tracking-[0.18em] ${driverFlow.accepted ? 'text-emerald-600' : 'text-slate-500'}`}>{driverFlow.accepted ? 'Confirmado' : 'Aguardando clique'}</span>
                   </div>
 
                   <div className="flex items-start gap-4 rounded-2xl bg-slate-50 border border-slate-100 p-4">
@@ -1575,7 +1906,7 @@ export default function OSOperationalPage() {
                           <p className="text-base font-black text-slate-900">{passenger.nome}</p>
                           <p className="text-sm font-semibold text-slate-500">Embarque relacionado: {passenger.waypointLabel}</p>
                         </div>
-                        <span className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.16em] ${viewingOS.status.operacional === 'Pendente' ? 'bg-orange-100 text-orange-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        <span className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.16em] ${viewingOS.status.operacional === 'Pendente' ? 'bg-slate-100 text-slate-700' : 'bg-emerald-100 text-emerald-700'}`}>
                           {viewingOS.status.operacional === 'Pendente' ? 'Aguardando contato' : 'Fluxo ativo'}
                         </span>
                       </div>
@@ -1597,7 +1928,7 @@ export default function OSOperationalPage() {
 
                       <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-3 flex items-center justify-between gap-3">
                         <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Interação do passageiro</p>
-                        <span className={`text-xs font-black uppercase tracking-[0.16em] ${viewingOS.status.operacional === 'Pendente' ? 'text-orange-500' : 'text-emerald-600'}`}>
+                        <span className={`text-xs font-black uppercase tracking-[0.16em] ${viewingOS.status.operacional === 'Pendente' ? 'text-slate-500' : 'text-emerald-600'}`}>
                           {viewingOS.status.operacional === 'Pendente' ? 'Mensagem aguardando ação' : 'Notificação considerada entregue no fluxo atual'}
                         </span>
                       </div>
@@ -1665,45 +1996,216 @@ export default function OSOperationalPage() {
       {/* Modal Cadastro Rápido */}
       {quickAddModal && (
         <StandardModal
-          onClose={() => setQuickAddModal(null)}
+          onClose={closeQuickAddModal}
           title={`Novo ${quickAddModal === 'cliente' ? 'Empresa' : quickAddModal === 'servico' ? 'Serviço' : quickAddModal === 'motorista' ? 'Motorista' : quickAddModal === 'solicitante' ? 'Solicitante' : 'Centro de Custo'}`}
           subtitle="Cadastro rápido direto no atendimento"
-          icon={<Plus size={24} />}
-          maxWidthClassName="max-w-2xl"
+          icon={quickAddModal === 'motorista' ? <UserPlus size={24} /> : <Plus size={24} />}
+          maxWidthClassName={quickAddModal === 'motorista' ? 'max-w-6xl' : 'max-w-2xl'}
+          bodyClassName={quickAddModal === 'motorista' ? 'p-6 md:p-10 pb-16 space-y-12' : undefined}
         >
-          <form onSubmit={(e) => { e.preventDefault(); handleQuickAddSubmit(); }} className="space-y-6">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-                  Nome <span className="text-rose-300 text-base">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={quickAddForm.nome}
-                  onChange={(e) => setQuickAddForm(prev => ({ ...prev, nome: e.target.value }))}
-                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                  placeholder={quickAddModal === 'cliente' ? 'Ex: Empresa ABC Ltda' : quickAddModal === 'servico' ? 'Ex: Transporte Executivo' : quickAddModal === 'motorista' ? 'Ex: João Silva' : quickAddModal === 'solicitante' ? 'Ex: Maria Santos' : 'Ex: Departamento Comercial'}
-                />
-              </div>
-            </div>
+          {quickAddModal === 'motorista' ? (
+            <form onSubmit={(e) => { e.preventDefault(); handleQuickAddSubmit(); }} className="space-y-12">
+              <section className="space-y-6">
+                <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
+                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                    <IdCard size={20} className="text-slate-500" /> Informações do Motorista
+                  </h3>
+                </div>
 
-            <div className="flex items-center justify-end gap-4 pt-4">
-              <button
-                type="button"
-                onClick={() => setQuickAddModal(null)}
-                className="px-6 py-3 text-slate-500 font-black rounded-xl border border-slate-200 hover:bg-white transition-all uppercase tracking-widest text-xs cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                className="px-8 py-3 bg-[var(--color-geolog-blue)] text-white font-black rounded-xl shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest text-xs cursor-pointer"
-              >
-                Salvar
-              </button>
-            </div>
-          </form>
+                <div className="grid grid-cols-1 gap-6">
+                  <div className="flex flex-col md:flex-row gap-6 items-start">
+                    <div className="space-y-2 flex-1">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        Nome completo <RequiredAsterisk />
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ex: João Silva da Rocha"
+                        value={quickAddDriverForm.name}
+                        onChange={(e) => setQuickAddDriverForm(prev => ({ ...prev, name: e.target.value }))}
+                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                      />
+                    </div>
+
+                    <div className="space-y-2 md:mt-7">
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setQuickAddDriverForm(prev => ({ ...prev, vinculo_tipo: 'interno', parceiro_id: '', vehicle_id: '', tipo_documento: 'cpf' }))}
+                          className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
+                            quickAddDriverForm.vinculo_tipo === 'interno'
+                              ? 'bg-blue-600 border-blue-600 text-white shadow-md'
+                              : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600'
+                          }`}
+                        >
+                          <Building2 size={16} /> Interno
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQuickAddDriverForm(prev => ({ ...prev, vinculo_tipo: 'parceiro', parceiro_id: '', vehicle_id: '', tipo_documento: 'cpf' }))}
+                          className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
+                            quickAddDriverForm.vinculo_tipo === 'parceiro'
+                              ? 'bg-teal-500 border-teal-500 text-white shadow-md'
+                              : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-teal-300 hover:text-teal-600'
+                          }`}
+                        >
+                          <Handshake size={16} /> Parceiro
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col md:flex-row gap-6 items-start">
+                    <div className="space-y-2 w-full md:w-56">
+                      <GeologSearchableSelect
+                        label="Tipo"
+                        options={tipoDocumentoOptions}
+                        value={quickAddDriverForm.tipo_documento}
+                        onChange={(value) => setQuickAddDriverForm(prev => ({
+                          ...prev,
+                          tipo_documento: value as 'cpf' | 'passaporte',
+                          cpf: formatDriverDocument(prev.cpf, value as 'cpf' | 'passaporte')
+                        }))}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2 w-full md:w-52">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        {getDriverDocumentLabel(quickAddDriverForm.tipo_documento)} <RequiredAsterisk />
+                      </label>
+                      <input
+                        required
+                        placeholder={getDriverDocumentPlaceholder(quickAddDriverForm.tipo_documento)}
+                        value={quickAddDriverForm.cpf}
+                        onChange={(e) => setQuickAddDriverForm(prev => ({ ...prev, cpf: formatDriverDocument(e.target.value, prev.tipo_documento) }))}
+                        className="w-full px-4 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                      />
+                    </div>
+
+                    <div className="space-y-2 w-full md:w-60">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        Celular <RequiredAsterisk />
+                      </label>
+                      <input
+                        required
+                        placeholder="(00) 9XXXX-XXXX"
+                        value={formatDriverCelular(quickAddDriverForm.celular)}
+                        onChange={(e) => {
+                          const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 11);
+                          setQuickAddDriverForm(prev => ({ ...prev, celular: digitsOnly }));
+                        }}
+                        className={`w-full px-4 py-4 bg-slate-50 border-2 rounded-xl font-bold text-base text-slate-900 outline-none focus:bg-white transition-all shadow-sm ${
+                          quickAddDriverForm.celular && !validateDriverCelular(quickAddDriverForm.celular)
+                            ? 'border-red-500 focus:border-red-500'
+                            : 'border-slate-200 focus:border-blue-600'
+                        }`}
+                      />
+                    </div>
+
+                    <div className="space-y-2 w-full md:w-52">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        CNH <RequiredAsterisk />
+                      </label>
+                      <input
+                        required
+                        placeholder="11 dígitos numéricos"
+                        value={quickAddDriverForm.cnh}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 11);
+                          setQuickAddDriverForm(prev => ({ ...prev, cnh: value }));
+                        }}
+                        className={`w-full px-4 py-4 bg-slate-50 border-2 rounded-xl font-bold text-base text-slate-900 outline-none focus:bg-white transition-all shadow-sm ${
+                          quickAddDriverForm.cnh && !validateDriverCNH(quickAddDriverForm.cnh)
+                            ? 'border-red-500 focus:border-red-500'
+                            : 'border-slate-200 focus:border-blue-600'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {quickAddDriverForm.vinculo_tipo === 'parceiro' && (
+                      <GeologSearchableSelect
+                        label="Parceiro de serviço"
+                        options={parceiroOptions}
+                        value={quickAddDriverForm.parceiro_id}
+                        onChange={(value) => setQuickAddDriverForm(prev => ({ ...prev, parceiro_id: value, vehicle_id: '' }))}
+                        placeholder="Selecione o parceiro..."
+                        required
+                      />
+                    )}
+
+                    <div className={quickAddDriverForm.vinculo_tipo === 'parceiro' ? '' : 'md:col-span-2'}>
+                      <GeologSearchableSelect
+                        label="Veículo"
+                        options={filteredQuickAddVehicles.map((vehicle) => ({
+                          id: vehicle.id,
+                          nome: `${vehicle.marca} ${vehicle.modelo} - ${vehicle.placa}`
+                        }))}
+                        value={quickAddDriverForm.vehicle_id}
+                        onChange={(value) => setQuickAddDriverForm(prev => ({ ...prev, vehicle_id: value }))}
+                        placeholder="Selecione o veículo..."
+                        required
+                        disabled={vehiclesUnavailable || filteredQuickAddVehicles.length === 0}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <div className="flex justify-end gap-4">
+                <button
+                  type="button"
+                  onClick={closeQuickAddModal}
+                  className="px-6 py-3 text-slate-500 font-black rounded-xl border border-slate-200 hover:bg-white transition-all uppercase tracking-widest text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-8 py-3 bg-green-600 text-white font-black rounded-xl shadow-lg shadow-green-900/20 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest text-xs cursor-pointer"
+                >
+                  Salvar motorista
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={(e) => { e.preventDefault(); handleQuickAddSubmit(); }} className="space-y-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                    Nome <span className="text-rose-300 text-base">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={quickAddForm.nome}
+                    onChange={(e) => setQuickAddForm(prev => ({ ...prev, nome: e.target.value }))}
+                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                    placeholder={quickAddModal === 'cliente' ? 'Ex: Empresa ABC Ltda' : quickAddModal === 'servico' ? 'Ex: Transporte Executivo' : quickAddModal === 'solicitante' ? 'Ex: Maria Santos' : 'Ex: Departamento Comercial'}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-4 pt-4">
+                <button
+                  type="button"
+                  onClick={closeQuickAddModal}
+                  className="px-6 py-3 text-slate-500 font-black rounded-xl border border-slate-200 hover:bg-white transition-all uppercase tracking-widest text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-8 py-3 bg-[var(--color-geolog-blue)] text-white font-black rounded-xl shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest text-xs cursor-pointer"
+                >
+                  Salvar
+                </button>
+              </div>
+            </form>
+          )}
         </StandardModal>
       )}
     </div>
