@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import StandardModal from '@/components/StandardModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useConfirm } from '@/hooks/useConfirm';
-import { motion } from 'framer-motion';
 import {
   UploadCloud,
   FileText,
@@ -42,12 +41,11 @@ interface DriverDocsModalProps {
   onClose: () => void;
 }
 
-export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsModalProps) {
+export default function DriverDocsModal({ driver, onClose }: DriverDocsModalProps) {
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [documents, setDocuments] = useState<DriverDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
@@ -64,7 +62,7 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
     { name: 'Curso de Direção Defensiva', icon: 'car', required: false },
   ];
 
-  const fetchDocs = async () => {
+  const fetchDocs = useCallback(async () => {
     const { data, error } = await supabase
       .from('driver_documents')
       .select('*')
@@ -78,7 +76,7 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
       setDocuments(data as DriverDoc[]);
     }
     setLoading(false);
-  };
+  }, [driverId, supabase]);
 
   useEffect(() => {
     fetchDocs();
@@ -103,7 +101,7 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [driverId, supabase]);
+  }, [driverId, supabase, fetchDocs]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -128,7 +126,6 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
     }
 
     setUploading(true);
-    setUploadProgress(10); // Start progress
     setError(null);
 
     try {
@@ -152,9 +149,7 @@ export default function DriverDocsModal({ driver, isOpen, onClose }: DriverDocsM
         throw new Error(message);
       }
 
-      setUploadProgress(100);
       setUploading(false);
-      setUploadProgress(0);
       if (fileInputRef.current) fileInputRef.current.value = '';
       await fetchDocs();
     } catch (err: unknown) {

@@ -74,8 +74,8 @@ export async function GET() {
     });
 
     return NextResponse.json(users);
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -98,8 +98,8 @@ export async function PATCH(request: Request) {
     }
 
     return NextResponse.json(data);
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
     const supabaseAdmin = createSupabaseAdminClient();
     const resend = createResendClient();
 
-    const { email, password, nome, tipo_usuario, categoria } = await request.json();
+    const { email, nome, tipo_usuario, categoria } = await request.json();
 
     // 1. Criar o usuário no Auth (Admin)
     const passwordDefault = '12345678';
@@ -188,8 +188,8 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: true, user: authData.user });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
@@ -220,7 +220,7 @@ export async function DELETE(request: Request) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

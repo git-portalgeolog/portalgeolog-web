@@ -2,9 +2,9 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { fetchClientes,
+import {
+  fetchClientes,
   fetchSolicitantes,
-  fetchServicos,
   fetchPassageiros,
   fetchOSList,
   fetchDrivers,
@@ -21,9 +21,6 @@ import { fetchClientes,
   insertCentroCusto,
   updateCentroCustoInDB,
   deleteCentroCustoFromDB,
-  insertServico,
-  updateServicoInDB,
-  deleteServicoFromDB,
   insertPassageiro,
   insertDriver,
   deleteDriverFromDB,
@@ -38,7 +35,7 @@ import { fetchClientes,
   type ParceiroServico,
   type ParceiroContato,
   type ParceiroFilial,
-  type NovoParceiroInput
+  type NovoParceiroInput,
 } from '@/lib/supabase/queries';
 import { toast } from 'sonner';
 import { useAuth } from './AuthContext';
@@ -65,11 +62,6 @@ export interface Solicitante {
   centroCustoId?: string;
 }
 
-export interface TipoServico {
-  id: string;
-  nome: string;
-}
-
 export interface Waypoint {
   label: string;
   lat: number | null;
@@ -92,7 +84,7 @@ export interface OrderService {
   solicitante: string;
   centroCustoId?: string;
   motorista: string;
-  tipoServico: string;
+  veiculoId?: string;
   valorBruto: number;
   custo: number;
   imposto: number;
@@ -220,7 +212,6 @@ const hasDuplicateRecord = <T extends { id: string }>(
 interface DataContextType {
   clientes: Cliente[];
   solicitantes: Solicitante[];
-  servicos: TipoServico[];
   passageiros: Passageiro[];
   osList: OrderService[];
   drivers: Driver[];
@@ -238,10 +229,11 @@ interface DataContextType {
   addPassageiro: (passageiro: NovoPassageiroInput) => Promise<Passageiro>;
   updatePassageiro: (id: string, passageiro: NovoPassageiroInput) => Promise<Passageiro>;
   deletePassageiro: (id: string) => void;
+
   addDriver: (name: string) => Promise<Driver>;
   updateVeiculo: (id: string, input: Partial<Vehicle>) => Promise<Vehicle>;
   deleteVeiculo: (id: string) => Promise<void>;
-  
+
   // Parceiros
   addParceiro: (parceiro: NovoParceiroInput) => Promise<ParceiroServico>;
   updateParceiro: (id: string, parceiro: NovoParceiroInput) => Promise<void>;
@@ -251,15 +243,11 @@ interface DataContextType {
   addCentroCusto: (nome: string, clienteId: string) => Promise<CentroCusto>;
   updateCentroCusto: (id: string, updates: Partial<CentroCusto>) => void;
   deleteCentroCusto: (id: string) => void;
-  
-  addServico: (nome: string) => Promise<TipoServico>;
-  updateServico: (id: string, updates: Partial<TipoServico>) => Promise<void>;
-  deleteServico: (id: string) => void;
-  
+
   addOS: (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => OrderService;
   updateOS: (id: string, osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => void;
   updateOSStatus: (id: string, updates: Partial<OSStatus>) => void;
-  
+
   refreshData: () => Promise<void>;
   getSolicitantesByCliente: (clienteId: string) => Solicitante[];
   getCentrosCustoByCliente: (clienteId: string) => CentroCusto[];
@@ -270,7 +258,6 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [solicitantes, setSolicitantes] = useState<Solicitante[]>([]);
-  const [servicos, setServicos] = useState<TipoServico[]>([]);
   const [passageiros, setPassageiros] = useState<Passageiro[]>([]);
   const [osList, setOsList] = useState<OrderService[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -282,51 +269,33 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   // Fetch functions wrapped for stability
   const dbFetchClientes = useCallback(async () => fetchClientes(), []);
   const dbFetchSolicitantes = useCallback(async () => fetchSolicitantes(), []);
-  const dbFetchServicos = useCallback(async () => fetchServicos(), []);
   const dbFetchPassageiros = useCallback(async () => fetchPassageiros(), []);
   const dbFetchParceiros = useCallback(async () => fetchParceiros(), []);
   const dbFetchOSList = useCallback(async () => fetchOSList(), []);
   const dbFetchDrivers = useCallback(async () => fetchDrivers(), []);
 
-
   const refreshData = useCallback(async () => {
     try {
-      // Executa cada query individualmente para identificar qual está falhando
-      const fetchAll = async () => {
-        const results = await Promise.allSettled([
-          dbFetchClientes(),
-          dbFetchSolicitantes(),
-          dbFetchServicos(),
-          dbFetchPassageiros(),
-          dbFetchOSList(),
-          dbFetchDrivers(),
-          dbFetchParceiros(),
-        ]);
+      const [clientesData, solicitantesData, passageirosData, parceirosData, osData, driversData] = await Promise.all([
+        dbFetchClientes(),
+        dbFetchSolicitantes(),
+        dbFetchPassageiros(),
+        dbFetchParceiros(),
+        dbFetchOSList(),
+        dbFetchDrivers(),
+      ]);
 
-        const [c, s, sv, p, os, d, pa] = results;
-
-        if (c.status === 'fulfilled') setClientes(c.value); else console.error('❌ Error fetching Clientes');
-        if (s.status === 'fulfilled') setSolicitantes(s.value); else console.error('❌ Error fetching Solicitantes');
-        if (sv.status === 'fulfilled') setServicos(sv.value); else console.error('❌ Error fetching Servicos');
-        if (p.status === 'fulfilled') setPassageiros(p.value); else console.error('❌ Error fetching Passageiros');
-        if (os.status === 'fulfilled') setOsList(os.value); else console.error('❌ Error fetching OS List');
-        if (d.status === 'fulfilled') setDrivers(d.value); else console.error('❌ Error fetching Drivers');
-        if (pa.status === 'fulfilled') setParceiros(pa.value); else console.error('❌ Error fetching Parceiros');
-
-        // Se pelo menos uma falhou criticamente (ex: erro de rede), Promise.allSettled lida bem,
-        // mas se quisermos lançar erro para o catch principal:
-        const failed = results.filter(r => r.status === 'rejected');
-        if (failed.length > 0) {
-          console.warn(`⚠️ ${failed.length} tabelas falharam ao carregar. Verifique o console.`);
-        }
-      };
-
-      await fetchAll();
+      setClientes(clientesData);
+      setSolicitantes(solicitantesData);
+      setPassageiros(passageirosData);
+      setParceiros(parceirosData);
+      setOsList(osData);
+      setDrivers(driversData);
     } catch (err) {
       console.error('🔥 CRITICAL: Error refreshing global data:', err);
       toast.error('Erro ao sincronizar dados. Tente atualizar a página.');
     }
-  }, [dbFetchClientes, dbFetchSolicitantes, dbFetchServicos, dbFetchPassageiros, dbFetchOSList, dbFetchDrivers, dbFetchParceiros]);
+  }, [dbFetchClientes, dbFetchSolicitantes, dbFetchPassageiros, dbFetchParceiros, dbFetchOSList, dbFetchDrivers]);
 
   useEffect(() => {
     if (!authLoading) {
@@ -354,27 +323,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'solicitantes' }, () => {
         dbFetchSolicitantes().then(setSolicitantes).catch(() => {});
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tipos_servico' }, () => {
-        dbFetchServicos().then(setServicos).catch(() => {});
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'centros_custo' }, () => {
-        dbFetchClientes().then(setClientes).catch(() => {}); // Centros de custo estao dentro de clientes no estado
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'app_notifications' }, (payload: { new: AppNotificationRecord }) => {
-        const notif = payload.new;
-        if (notif.type === 'success') toast.success(notif.title, { description: notif.message });
-        else if (notif.type === 'error') toast.error(notif.title, { description: notif.message });
-        else if (notif.type === 'warning') toast.warning(notif.title, { description: notif.message });
-        else toast.info(notif.title, { description: notif.message });
-      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'passageiros' }, () => {
         dbFetchPassageiros().then(setPassageiros).catch(() => {});
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, () => {
         dbFetchDrivers().then(setDrivers).catch(() => {});
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'parceiros_servico' }, () => {
-        dbFetchParceiros().then(setParceiros).catch(() => {});
       })
       .subscribe((status: string) => {
         if (status === 'SUBSCRIBED') {
@@ -392,9 +345,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     dbFetchDrivers,
     dbFetchOSList,
     dbFetchPassageiros,
-    dbFetchServicos,
     dbFetchSolicitantes,
-    dbFetchParceiros,
     supabase,
     user,
   ]);
@@ -489,75 +440,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setSolicitantes((prev) => [...prev, result].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')));
     void refreshData();
     return result;
-  };
-
-  const addCentroCusto = async (nome: string, clienteId: string): Promise<CentroCusto> => {
-    const cleanNome = nome.trim();
-
-    if (!cleanNome) {
-      throw new Error('Informe o nome do centro de custo.');
-    }
-
-    const centrosDoCliente = getCentrosCustoByCliente(clienteId);
-
-    if (hasDuplicateRecord(centrosDoCliente, cleanNome, (centroCusto) => centroCusto.nome, normalizeTextValue)) {
-      throw new Error('Já existe um centro de custo com este nome para esta empresa.');
-    }
-
-    const result = await insertCentroCusto(cleanNome, clienteId);
-    setClientes((prev) => prev.map((cliente) => {
-      if (cliente.id !== clienteId) return cliente;
-
-      const centrosCusto = [...cliente.centrosCusto, result].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
-      return {
-        ...cliente,
-        centrosCusto,
-      };
-    }));
-    void refreshData();
-    return result;
-  };
-
-  const updateCentroCusto = (id: string, updates: Partial<CentroCusto>) => {
-    updateCentroCustoInDB(id, updates)
-      .then(() => {
-        setClientes((prev) => prev.map((cliente) => {
-          const currentCentro = cliente.centrosCusto.find((centroCusto) => centroCusto.id === id);
-
-          if (!currentCentro) return cliente;
-
-          const nextClienteId = updates.clienteId ?? currentCentro.clienteId;
-          const nextCentro = {
-            id,
-            nome: updates.nome !== undefined ? updates.nome.trim() : currentCentro.nome,
-            clienteId: nextClienteId,
-          };
-
-          const centrosCusto = cliente.centrosCusto.filter((centroCusto) => centroCusto.id !== id);
-          if (cliente.id === nextClienteId) {
-            centrosCusto.push(nextCentro);
-          }
-
-          return {
-            ...cliente,
-            centrosCusto: centrosCusto.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
-          };
-        }));
-        void refreshData();
-      })
-      .catch(err => console.error('Error updateCentroCustoInDB:', err));
-  };
-
-  const deleteCentroCusto = (id: string) => {
-    deleteCentroCustoFromDB(id)
-      .then(() => {
-        setClientes((prev) => prev.map((cliente) => ({
-          ...cliente,
-          centrosCusto: cliente.centrosCusto.filter((centroCusto) => centroCusto.id !== id),
-        })));
-        void refreshData();
-      })
-      .catch(err => console.error('Error deleteCentroCustoFromDB:', err));
   };
 
   const updateSolicitante = (id: string, updates: Partial<Solicitante>) => {
@@ -747,20 +629,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       });
   };
 
-  const updateVeiculo = async (id: string, input: Partial<Vehicle>): Promise<Vehicle> => {
-    const real = await updateVeiculoInDB(id, input);
-    return real;
-  };
-
-  const deleteVeiculo = async (id: string): Promise<void> => {
-    try {
-      await deleteVeiculoFromDB(id);
-    } catch (error) {
-      console.error('Error deleteVeiculoFromDB:', error);
-      throw error;
-    }
-  };
-
   const addDriver = async (name: string): Promise<Driver> => {
     const cleanName = name.trim();
 
@@ -792,71 +660,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const addServico = async (nome: string): Promise<TipoServico> => {
-    const cleanNome = nome.trim();
-
-    if (!cleanNome) {
-      throw new Error('Informe o nome do serviço.');
-    }
-
-    if (hasDuplicateRecord(servicos, cleanNome, (item) => item.nome, normalizeTextValue)) {
-      throw new Error('Já existe um serviço com este nome.');
-    }
-
-    try {
-      const result = await insertServico(cleanNome);
-      setServicos((prev) => [...prev, result].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')));
-      void refreshData();
-      return result;
-    } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        throw new Error('Já existe um serviço com este nome.');
-      }
-
-      throw error instanceof Error ? error : new Error('Não foi possível salvar o serviço.');
-    }
+  const updateVeiculo = async (id: string, input: Partial<Vehicle>): Promise<Vehicle> => {
+    const currentVehicle = await updateVeiculoInDB(id, input);
+    void refreshData();
+    return currentVehicle;
   };
 
-  const updateServico = async (id: string, updates: Partial<TipoServico>): Promise<void> => {
-    if (updates.nome !== undefined) {
-      const cleanNome = updates.nome.trim();
-
-      if (!cleanNome) {
-        throw new Error('Informe o nome do serviço.');
-      }
-
-      if (hasDuplicateRecord(servicos, cleanNome, (item) => item.nome, normalizeTextValue, id)) {
-        throw new Error('Já existe um serviço com este nome.');
-      }
-    }
-
-    try {
-      await updateServicoInDB(id, updates);
-      setServicos((prev) => prev.map((servico) => {
-        if (servico.id !== id) return servico;
-
-        return {
-          ...servico,
-          nome: updates.nome !== undefined ? updates.nome.trim() : servico.nome,
-        };
-      }));
-      void refreshData();
-    } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        throw new Error('Já existe um serviço com este nome.');
-      }
-
-      throw error instanceof Error ? error : new Error('Não foi possível atualizar o serviço.');
-    }
-  };
-
-  const deleteServico = (id: string) => {
-    deleteServicoFromDB(id)
-      .then(() => {
-        setServicos((prev) => prev.filter((servico) => servico.id !== id));
-        void refreshData();
-      })
-      .catch(err => console.error('Error deleteServicoFromDB:', err));
+  const deleteVeiculo = async (id: string): Promise<void> => {
+    await deleteVeiculoFromDB(id);
+    void refreshData();
   };
 
   const addOS = (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>): OrderService => {
@@ -934,71 +746,66 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [solicitantes]);
 
   const getCentrosCustoByCliente = useCallback((clienteId: string) => {
-    const cliente = clientes.find((c) => c.id === clienteId);
+    const cliente = clientes.find(c => c.id === clienteId);
     return cliente?.centrosCusto || [];
   }, [clientes]);
 
-  // Parceiros CRUD
-  const addParceiro = async (input: NovoParceiroInput): Promise<ParceiroServico> => {
-    const cleanNome = input.razaoSocialOuNomeCompleto.trim();
-    if (!cleanNome) {
-      throw new Error('Informe a razão social ou nome completo do parceiro.');
-    }
-
-    if (hasDuplicateRecord(parceiros, cleanNome, (p) => p.razaoSocialOuNomeCompleto, normalizeTextValue)) {
-      throw new Error('Já existe um parceiro com esta razão social/nome.');
-    }
-
-    try {
-      const result = await insertParceiro(input);
-      setParceiros((prev) => [...prev, result].sort((a, b) => a.razaoSocialOuNomeCompleto.localeCompare(b.razaoSocialOuNomeCompleto, 'pt-BR')));
-      createNotification('success', 'Parceiro cadastrado', `"${cleanNome}" foi adicionado como parceiro de serviço.`, 'interno');
-      void refreshData();
-      return result;
-    } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        throw new Error('Já existe um parceiro com este documento.');
-      }
-      throw error instanceof Error ? error : new Error('Não foi possível salvar o parceiro.');
-    }
+  // Funções de Parceiros
+  const addParceiro = async (parceiro: NovoParceiroInput): Promise<ParceiroServico> => {
+    const result = await insertParceiro(parceiro);
+    setParceiros(prev => [...prev, result].sort((a, b) => a.razaoSocialOuNomeCompleto.localeCompare(b.razaoSocialOuNomeCompleto, 'pt-BR')));
+    void refreshData();
+    return result;
   };
 
-  const updateParceiro = async (id: string, input: NovoParceiroInput): Promise<void> => {
-    const cleanNome = input.razaoSocialOuNomeCompleto.trim();
-    if (!cleanNome) {
-      throw new Error('Informe a razão social ou nome completo do parceiro.');
-    }
-
-    if (hasDuplicateRecord(parceiros, cleanNome, (p) => p.razaoSocialOuNomeCompleto, normalizeTextValue, id)) {
-      throw new Error('Já existe um parceiro com esta razão social/nome.');
-    }
-
-    try {
-      await updateParceiroInDB(id, input);
-      setParceiros((prev) => prev.map((parceiro) => (parceiro.id === id ? {
-        ...parceiro,
-        ...input,
-        razaoSocialOuNomeCompleto: cleanNome,
-      } : parceiro)).sort((a, b) => a.razaoSocialOuNomeCompleto.localeCompare(b.razaoSocialOuNomeCompleto, 'pt-BR')));
-      void refreshData();
-      createNotification('info', 'Parceiro atualizado', `Os dados de "${cleanNome}" foram atualizados.`, 'interno');
-    } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        throw new Error('Já existe um parceiro com este documento.');
-      }
-      throw error instanceof Error ? error : new Error('Não foi possível atualizar o parceiro.');
-    }
+  const updateParceiro = async (id: string, parceiro: NovoParceiroInput): Promise<void> => {
+    const updatedParceiro = await updateParceiroInDB(id, parceiro);
+    setParceiros(prev => prev.map(p => p.id === id ? updatedParceiro : p));
+    void refreshData();
   };
 
   const deleteParceiro = (id: string) => {
-    const parceiro = parceiros.find((p) => p.id === id);
-    deleteParceiroFromDB(id).then(() => {
-      setParceiros((prev) => prev.filter((p) => p.id !== id));
-      if (parceiro) {
-        createNotification('warning', 'Parceiro excluído', `"${parceiro.razaoSocialOuNomeCompleto}" foi removido do sistema.`, 'interno');
-      }
-      void refreshData();
-    }).catch(err => console.error('Error deleteParceiroFromDB:', err));
+    deleteParceiroFromDB(id)
+      .then(() => {
+        setParceiros(prev => prev.filter(p => p.id !== id));
+        void refreshData();
+      })
+      .catch(err => console.error('Error deleteParceiroFromDB:', err));
+  };
+
+  // Funções de Centros de Custo
+  const addCentroCusto = async (nome: string, clienteId: string): Promise<CentroCusto> => {
+    const result = await insertCentroCusto(nome, clienteId);
+    setClientes(prev => prev.map(c => c.id === clienteId 
+      ? { ...c, centrosCusto: [...c.centrosCusto, result].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')) }
+      : c
+    ));
+    void refreshData();
+    return result;
+  };
+
+  const updateCentroCusto = (id: string, updates: Partial<CentroCusto>) => {
+    updateCentroCustoInDB(id, updates)
+      .then(() => {
+        setClientes(prev => prev.map(c => ({
+          ...c,
+          centrosCusto: c.centrosCusto.map(cc => cc.id === id ? { ...cc, ...updates } : cc)
+        })));
+        void refreshData();
+      })
+      .catch(err => console.error('Error updateCentroCustoInDB:', err));
+  };
+
+  const deleteCentroCusto = (id: string) => {
+    deleteCentroCustoFromDB(id)
+      .then(() => {
+        setClientes(prev => prev.map(c => ({
+          ...c,
+          centrosCusto: c.centrosCusto.filter(cc => cc.id !== id)
+        })));
+        void refreshData();
+      })
+      .catch(err => console.error('Error deleteCentroCustoFromDB:', err));
   };
 
   return (
@@ -1006,7 +813,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       value={{
         clientes,
         solicitantes,
-        servicos,
         passageiros,
         osList,
         drivers,
@@ -1018,9 +824,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         addSolicitante,
         updateSolicitante,
         deleteSolicitante,
-        addCentroCusto,
-        updateCentroCusto,
-        deleteCentroCusto,
         addPassageiro,
         updatePassageiro,
         deletePassageiro,
@@ -1030,9 +833,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         addParceiro,
         updateParceiro,
         deleteParceiro,
-        addServico,
-        updateServico,
-        deleteServico,
+        addCentroCusto,
+        updateCentroCusto,
+        deleteCentroCusto,
         addOS,
         updateOS,
         updateOSStatus,

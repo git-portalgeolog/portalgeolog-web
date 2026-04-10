@@ -3,13 +3,13 @@ import type {
   Cliente,
   CentroCusto,
   Solicitante,
-  TipoServico,
   Passageiro,
   PassageiroEndereco,
   OrderService,
   NovoPassageiroInput,
   Waypoint,
-  Driver
+  Driver,
+  Vehicle
 } from '@/context/DataContext';
 
 const supabase = createClient();
@@ -52,7 +52,6 @@ export async function createNotification(
 type ClienteRow = { id: string; nome: string; contato: string | null };
 type CentroCustoRow = { id: string; nome: string; cliente_id: string };
 type SolicitanteRow = { id: string; nome: string; cliente_id: string; centro_custo_id: string | null };
-type TipoServicoRow = { id: string; nome: string };
 type PassageiroRow = {
   id: string;
   nome_completo: string;
@@ -82,6 +81,7 @@ type OSRow = {
   tipo_servico: string | null;
   trecho: string | null;
   motorista: string | null;
+  veiculo_id?: string | null;
   valor_bruto: number | string;
   imposto: number | string;
   custo: number | string;
@@ -260,56 +260,6 @@ export async function deleteSolicitanteFromDB(id: string): Promise<void> {
   if (error) throw error;
 }
 
-// ── Tipos de Serviço ──────────────────────────────────────
-
-export async function fetchServicos(): Promise<TipoServico[]> {
-  const { data, error } = await supabase
-    .from('tipos_servico')
-    .select('id, nome')
-    .order('nome');
-
-  if (error) throw error;
-  return ((data || []) as TipoServicoRow[]).map((s) => ({
-    id: s.id,
-    nome: s.nome,
-  }));
-}
-
-export async function insertServico(nome: string): Promise<TipoServico> {
-  const { data, error } = await supabase
-    .from('tipos_servico')
-    .insert({ nome: trimText(nome) })
-    .select('id, nome')
-    .single();
-
-  if (error) throw error;
-  return { id: data.id, nome: data.nome };
-}
-
-export async function updateServicoInDB(id: string, updates: Partial<TipoServico>): Promise<void> {
-  const payload: { nome?: string } = {};
-
-  if (updates.nome !== undefined) {
-    payload.nome = trimText(updates.nome);
-  }
-
-  const { error } = await supabase
-    .from('tipos_servico')
-    .update(payload)
-    .eq('id', id);
-
-  if (error) throw error;
-}
-
-export async function deleteServicoFromDB(id: string): Promise<void> {
-  const { error } = await supabase
-    .from('tipos_servico')
-    .delete()
-    .eq('id', id);
-
-  if (error) throw error;
-}
-
 // ── Passageiros ───────────────────────────────────────────
 
 export async function fetchPassageiros(): Promise<Passageiro[]> {
@@ -333,8 +283,8 @@ export async function fetchPassageiros(): Promise<Passageiro[]> {
     email: p.email || undefined,
     celular: p.celular || '',
     cpf: p.cpf || undefined,
-    notificar: p.notificar,
-    genero: p.genero,
+    notificar: p.notificar ?? undefined,
+    genero: p.genero ?? undefined,
     enderecos: typedAddresses
       .filter((e) => e.passageiro_id === p.id)
       .map((e) => ({
@@ -469,21 +419,6 @@ export async function deletePassageiroFromDB(id: string): Promise<void> {
 
 // ── Veículos ───────────────────────────────────────────
 
-type VeiculoRow = {
-  id: string;
-  placa: string;
-  renavam: string;
-  modelo: string;
-  marca: string;
-  ano: number;
-  cor: string | null;
-  tipo: string;
-  status: string;
-  proprietario_tipo: string;
-  parceiro_id: string | null;
-  created_at: string;
-};
-
 export async function updateVeiculoInDB(id: string, input: Partial<Vehicle>): Promise<Vehicle> {
   const { data: vehRow, error: vehError } = await supabase
     .from('veiculos')
@@ -496,8 +431,6 @@ export async function updateVeiculoInDB(id: string, input: Partial<Vehicle>): Pr
       cor: input.cor?.trim() || null,
       tipo: input.tipo,
       status: input.status,
-      proprietario_tipo: input.proprietario_tipo,
-      parceiro_id: input.proprietario_tipo === 'parceiro' ? input.parceiro_id : null,
     })
     .eq('id', id)
     .select('*')
@@ -588,9 +521,9 @@ export async function fetchOSList(): Promise<OrderService[]> {
       clienteId: o.cliente_id || '',
       solicitante: o.solicitante || '',
       centroCustoId: o.centro_custo_id || '',
-      tipoServico: o.tipo_servico || '',
       trecho: o.trecho || '',
       motorista: o.motorista || '',
+      veiculoId: o.veiculo_id || undefined,
       valorBruto: Number(o.valor_bruto),
       imposto: Number(o.imposto),
       custo: Number(o.custo),
@@ -623,9 +556,9 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
       cliente_id: osData.clienteId || null,
       solicitante: osData.solicitante || '',
       centro_custo: centroCusto,
-      tipo_servico: osData.tipoServico || '',
       trecho: osData.trecho || '',
       motorista: osData.motorista || '',
+      veiculo_id: (osData as OSInput & { veiculoId?: string }).veiculoId || null,
       valor_bruto: osData.valorBruto,
       imposto,
       custo: osData.custo,
@@ -702,9 +635,9 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
     clienteId: osRow.cliente_id || '',
     solicitante: osRow.solicitante || '',
     centroCustoId: osRow.centro_custo || '',
-    tipoServico: osRow.tipo_servico || '',
     trecho: osRow.trecho || '',
     motorista: osRow.motorista || '',
+    veiculoId: osRow.veiculo_id || undefined,
     valorBruto: Number(osRow.valor_bruto),
     imposto: Number(osRow.imposto),
     custo: Number(osRow.custo),
@@ -735,9 +668,9 @@ export async function updateOSInDB(
       cliente_id: osData.clienteId || null,
       solicitante: osData.solicitante || '',
       centro_custo: centroCusto,
-      tipo_servico: osData.tipoServico || '',
       trecho: osData.trecho || '',
       motorista: osData.motorista || '',
+      veiculo_id: (osData as OSInput & { veiculoId?: string }).veiculoId || null,
       valor_bruto: osData.valorBruto,
       imposto,
       custo: osData.custo,
@@ -976,26 +909,6 @@ const mapParceiroPayload = (
   return {
     ...base,
     searchIndex: buildParceiroSearchIndex(base, mappedContatos, mappedFiliais),
-  };
-};
-
-const mapParceiroRow = (row: ParceiroRow): ParceiroServico => {
-  // Para compatibilidade temporária com dados existentes
-  return {
-    id: row.id,
-    pessoaTipo: row.pessoa_tipo,
-    documento: row.documento || '',
-    razaoSocialOuNomeCompleto: row.razao_social_ou_nome_completo || row.nome || '',
-    contatos: [],
-    filiais: [],
-    searchIndex: buildParceiroSearchIndex({
-      id: row.id,
-      pessoaTipo: row.pessoa_tipo,
-      documento: row.documento || '',
-      razaoSocialOuNomeCompleto: row.razao_social_ou_nome_completo || row.nome || '',
-      contatos: [],
-      filiais: [],
-    }, [], []),
   };
 };
 

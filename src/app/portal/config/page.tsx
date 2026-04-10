@@ -2,26 +2,25 @@
 
 import React, { useState, useEffect } from "react";
 import { useAuth, UserProfile } from "@/context/AuthContext";
+
+interface UserWithAuth extends UserProfile {
+  email: string;
+}
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useConfirm } from "@/hooks/useConfirm";
 import { toast } from "sonner";
 import {
   Shield,
-  UserCog,
   Mail,
   User,
   History,
-  Settings,
   ChevronRight,
   Clock,
-  AlertCircle,
   LogOut,
   Fingerprint,
   ShieldCheck,
   Briefcase,
   Plus,
-  Lock,
-  Building,
   Trash2,
   Check,
   X,
@@ -36,10 +35,10 @@ import { AvatarUploader } from "@/components/ui/AvatarUploader";
 type TabType = "acesso" | "perfil" | "historico";
 
 export default function ConfigPage() {
-  const { user, profile, logout, loading } = useAuth();
+  const { user, profile, logout } = useAuth();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [activeTab, setActiveTab] = useState<TabType>("acesso");
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<UserWithAuth[]>([]);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -67,8 +66,8 @@ export default function ConfigPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao buscar usuários");
       setUsers(data);
-    } catch (err: any) {
-      toast.error("Erro ao carregar usuários: " + err.message);
+    } catch (err: unknown) {
+      toast.error("Erro ao carregar usuários: " + (err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -94,8 +93,8 @@ export default function ConfigPage() {
       }
 
       toast.success("Permissão atualizada com sucesso!");
-    } catch (err: any) {
-      toast.error("Erro ao atualizar permissão: " + err.message);
+    } catch (err: unknown) {
+      toast.error("Erro ao atualizar permissão: " + (err instanceof Error ? err.message : String(err)));
       fetchUsers();
     }
   };
@@ -129,8 +128,8 @@ export default function ConfigPage() {
         categoria: "operador",
       });
       fetchUsers();
-    } catch (err: any) {
-      toast.error("Erro ao criar login: " + err.message);
+    } catch (err: unknown) {
+      toast.error("Erro ao criar login: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsCreatingUser(false);
     }
@@ -161,8 +160,8 @@ export default function ConfigPage() {
       }
       toast.success("Acesso removido com sucesso.");
       fetchUsers();
-    } catch (err: any) {
-      toast.error("Erro ao excluir: " + err.message);
+    } catch (err: unknown) {
+      toast.error("Erro ao excluir: " + (err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -198,8 +197,8 @@ export default function ConfigPage() {
       toast.success("Nome atualizado com sucesso!");
       setIsEditingName(false);
       setEditingName("");
-    } catch (err: any) {
-      toast.error("Erro ao atualizar nome: " + err.message);
+    } catch (err: unknown) {
+      toast.error("Erro ao atualizar nome: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsUpdatingName(false);
     }

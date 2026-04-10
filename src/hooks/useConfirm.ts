@@ -42,7 +42,7 @@ export function useConfirm() {
   const handleConfirm = useCallback(() => {
     confirmState.onConfirm?.();
     closeConfirm();
-  }, [confirmState.onConfirm, closeConfirm]);
+  }, [confirmState, closeConfirm]);
 
   return {
     confirm,

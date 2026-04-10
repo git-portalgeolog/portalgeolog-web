@@ -2,8 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Truck, Lock, Mail, ArrowRight, Loader2 } from 'lucide-react';
-import Image from 'next/image';
+import { Lock, Mail, ArrowRight, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
 
@@ -28,7 +27,7 @@ export default function Login() {
       } else {
         setError('E-mail ou senha inválidos. Tente novamente.');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       setError('Ocorreu um erro ao tentar fazer login.');
     } finally {
@@ -42,6 +41,7 @@ export default function Login() {
       <div className="hidden lg:flex flex-1 flex-col justify-between bg-[var(--color-geolog-blue)] p-16 text-white relative overflow-hidden text-left border-r border-white/5">
          <div className="z-10">
            <div className="flex items-center gap-4 mb-20">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
              <img src="/logo.png" alt="Geolog Logo" className="h-14 w-auto brightness-110 drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]" />
              <span className="text-2xl font-black tracking-tighter text-white uppercase">Portal Geolog</span>
            </div>
@@ -78,7 +78,8 @@ export default function Login() {
         >
           <div className="text-center lg:text-left flex flex-col items-center lg:items-start">
              <div className="lg:hidden flex items-center gap-4 mb-10">
-               <img src="/logo.png" alt="Geolog Logo" className="h-12 w-auto brightness-110" />
+               {/* eslint-disable-next-line @next/next/no-img-element */}
+               <img src="/logo.png" alt="Geolog Logo" className="h-12 w-auto" />
                <span className="text-2xl font-black tracking-tighter text-white uppercase">Portal Geolog</span>
              </div>
              <h3 className="text-5xl font-black text-white tracking-tight">Login corporativo</h3>

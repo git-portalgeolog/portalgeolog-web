@@ -12,6 +12,25 @@ interface Suggestion {
   lon: number;
 }
 
+interface NominatimAddress {
+  road?: string;
+  suburb?: string;
+  neighbourhood?: string;
+  city_district?: string;
+  city?: string;
+  town?: string;
+  municipality?: string;
+  state?: string;
+}
+
+interface NominatimResult {
+  place_id: string | number;
+  display_name: string;
+  lat: string;
+  lon: string;
+  address?: NominatimAddress;
+}
+
 interface GeologAddressInputProps {
   label: string;
   value: string;
@@ -58,7 +77,7 @@ export default function GeologAddressInput({
       );
       const data = await response.json();
       
-      const formattedSuggestions = (data || []).map((item: any) => {
+      const formattedSuggestions = (data || []).map((item: NominatimResult) => {
         const addr = item.address || {};
         
         // Let's identify the most specific name (Street or Neighborhood)

@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { ParceiroServico, ParceiroContato, ParceiroFilial, NovoParceiroInput, useData } from '@/context/DataContext';
+import { ParceiroServico, NovoParceiroInput, useData } from '@/context/DataContext';
 import StandardModal from '@/components/StandardModal';
-import { Building2, Edit2, Eye, Handshake, Mail, MapPin, Phone, PlusCircle, ShieldCheck, Trash2, Users, Briefcase, Plus } from 'lucide-react';
+import { Building2, Edit2, Eye, Handshake, Mail, MapPin, Phone, PlusCircle, Trash2, Users, Briefcase, Plus } from 'lucide-react';
 import { DataTable } from '@/components/ui/DataTable';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
@@ -14,14 +14,6 @@ import { PageHeader } from '@/components/ui/PageHeader';
 const PESSOA_TIPO_OPTIONS = [
   { id: 'juridica', nome: 'Pessoa jurídica' },
   { id: 'fisica', nome: 'Pessoa física' },
-];
-
-const TIPO_PARCEIRO_OPTIONS = [
-  { id: 'Transportadora', nome: 'Transportadora' },
-  { id: 'Freelance', nome: 'Freelance' },
-  { id: 'Cooperativa', nome: 'Cooperativa' },
-  { id: 'Agência', nome: 'Agência' },
-  { id: 'Fornecedor Local', nome: 'Fornecedor Local' },
 ];
 
 const formatDocument = (value: string, pessoaTipo: 'fisica' | 'juridica'): string => {

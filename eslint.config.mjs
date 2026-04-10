@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Additional ignores to prevent memory issues:
+    "cloudflare-output/**",
+    ".windsurf/**",
+    "supabase/**",
+    "enable_realtime.js",
   ]),
 ]);
 

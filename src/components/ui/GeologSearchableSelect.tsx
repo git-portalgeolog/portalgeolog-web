@@ -48,14 +48,13 @@ export default function GeologSearchableSelect({
     bottom: 0,
     openUpwards: false,
   });
-  const [mounted, setMounted] = useState(false);
+  const mounted = true;
   const wrapperRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
 
   const selectedOption = options.find((opt) => opt.id === value);
 
   useEffect(() => {
-    setMounted(true);
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as Node;
       const isInsideWrapper = wrapperRef.current?.contains(target);

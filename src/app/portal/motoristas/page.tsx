@@ -3,15 +3,24 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import StandardModal from '@/components/StandardModal';
-import { UserPlus, Phone, IdCard, Loader2, Truck, FileText, Building2, Handshake, Eye, Edit2, Trash2, User } from 'lucide-react';
+import { UserPlus, Phone, IdCard, Loader2, Truck, FileText, Building2, Handshake, Eye, Edit2, Trash2, User, PlusCircle, CreditCard, Car, Plus, Users, MapPin, Briefcase } from 'lucide-react';
 import DriverDocsModal from '@/components/DriverDocsModal';
 import { DataTable } from '@/components/ui/DataTable';
 import { PageHeader } from '@/components/ui/PageHeader';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
+import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useConfirm } from '@/hooks/useConfirm';
 import { toast } from 'sonner';
-import { useData, type ParceiroServico } from '@/context/DataContext';
+import { useData, type ParceiroServico, type NovoParceiroInput } from '@/context/DataContext';
+
+interface DriverVehicle {
+  id: string;
+  driver_id: string;
+  vehicle_id: string;
+  created_at: string;
+  vehicle?: VehicleOption;
+}
 
 interface Driver {
   id: string;
@@ -20,12 +29,13 @@ interface Driver {
   cnh: string;
   phone: string;
   email?: string;
-  vehicle_id: string;
+  vehicle_id: string; // Mantido para compatibilidade
   status: 'active' | 'inactive';
   vinculo_tipo: 'interno' | 'parceiro';
   parceiro_id?: string;
   parceiro?: ParceiroServico;
   created_at: string;
+  driver_vehicles?: DriverVehicle[];
 }
 
 interface VehicleOption {
@@ -33,9 +43,124 @@ interface VehicleOption {
   placa: string;
   modelo: string;
   marca: string;
-  proprietario_tipo: 'interno' | 'parceiro';
-  parceiro_id: string | null;
 }
+
+const MARCAS_VEICULOS = [
+  { id: 'Acura', nome: 'Acura' }, { id: 'Alfa Romeo', nome: 'Alfa Romeo' }, { id: 'Aston Martin', nome: 'Aston Martin' },
+  { id: 'Audi', nome: 'Audi' }, { id: 'Bentley', nome: 'Bentley' }, { id: 'BMW', nome: 'BMW' }, { id: 'BYD', nome: 'BYD' },
+  { id: 'Caoa Chery', nome: 'Caoa Chery' }, { id: 'Chevrolet', nome: 'Chevrolet' }, { id: 'Chrysler', nome: 'Chrysler' },
+  { id: 'Citroën', nome: 'Citroën' }, { id: 'Dodge', nome: 'Dodge' }, { id: 'Ferrari', nome: 'Ferrari' },
+  { id: 'Fiat', nome: 'Fiat' }, { id: 'Ford', nome: 'Ford' }, { id: 'GWM', nome: 'GWM' }, { id: 'Honda', nome: 'Honda' },
+  { id: 'Hyundai', nome: 'Hyundai' }, { id: 'Jac', nome: 'Jac' }, { id: 'Jaguar', nome: 'Jaguar' }, { id: 'Jeep', nome: 'Jeep' },
+  { id: 'Kia', nome: 'Kia' }, { id: 'Lamborghini', nome: 'Lamborghini' }, { id: 'Land Rover', nome: 'Land Rover' },
+  { id: 'Lexus', nome: 'Lexus' }, { id: 'Lifan', nome: 'Lifan' }, { id: 'Maserati', nome: 'Maserati' },
+  { id: 'McLaren', nome: 'McLaren' }, { id: 'Mercedes-Benz', nome: 'Mercedes-Benz' }, { id: 'Mini', nome: 'Mini' },
+  { id: 'Mitsubishi', nome: 'Mitsubishi' }, { id: 'Nissan', nome: 'Nissan' }, { id: 'Peugeot', nome: 'Peugeot' },
+  { id: 'Porsche', nome: 'Porsche' }, { id: 'Ram', nome: 'Ram' }, { id: 'Renault', nome: 'Renault' },
+  { id: 'Rolls-Royce', nome: 'Rolls-Royce' }, { id: 'Seat', nome: 'Seat' }, { id: 'Smart', nome: 'Smart' },
+  { id: 'Subaru', nome: 'Subaru' }, { id: 'Suzuki', nome: 'Suzuki' }, { id: 'Tesla', nome: 'Tesla' },
+  { id: 'Toyota', nome: 'Toyota' }, { id: 'Troller', nome: 'Troller' }, { id: 'Volkswagen', nome: 'Volkswagen' },
+  { id: 'Volvo', nome: 'Volvo' }, { id: 'Outra', nome: 'Outra' },
+];
+
+const TIPOS_VEICULO = [
+  { id: 'carro', nome: 'Carro' }, { id: 'van', nome: 'Van' }, { id: 'onibus', nome: 'Ônibus' },
+  { id: 'moto', nome: 'Moto' }, { id: 'caminhao', nome: 'Caminhão' }, { id: 'outro', nome: 'Outro' },
+];
+
+const formatarPlacaQuick = (value: string): string => {
+  const cleaned = value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 7);
+  if (cleaned.length >= 5 && /[A-Z]/.test(cleaned[4])) return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
+  if (cleaned.length >= 4) return `${cleaned.slice(0, 3)}-${cleaned.slice(3)}`;
+  return cleaned;
+};
+
+const validarPlacaQuick = (placa: string): boolean => {
+  const c = placa.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  return /^[A-Z]{3}[0-9]{4}$/.test(c) || /^[A-Z]{3}[0-9]{1}[A-Z]{1}[0-9]{2}$/.test(c) || /^[A-Z]{3}[0-9]{2}[A-Z]{1}[0-9]{1}$/.test(c);
+};
+
+// Funções de validação de parceiro
+const PESSOA_TIPO_OPTIONS = [
+  { id: 'juridica', nome: 'Pessoa jurídica' },
+  { id: 'fisica', nome: 'Pessoa física' },
+];
+
+const formatDocumentParceiro = (value: string, pessoaTipo: 'fisica' | 'juridica'): string => {
+  const digits = value.replace(/\D/g, '').slice(0, pessoaTipo === 'juridica' ? 14 : 11);
+  if (pessoaTipo === 'juridica') {
+    return digits
+      .replace(/(\d{2})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d)/, '$1/$2')
+      .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+  }
+  return digits
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+};
+
+const formatPhoneParceiro = (value: string): string => {
+  const digits = value.replace(/\D/g, '').slice(0, 11);
+  if (digits.length <= 10) {
+    return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3').trim();
+  }
+  return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').trim();
+};
+
+const validateCPF = (cpf: string): boolean => {
+  const cpfClean = cpf.replace(/\D/g, '');
+  if (cpfClean.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(cpfClean)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += parseInt(cpfClean.charAt(i)) * (10 - i);
+  }
+  let remainder = (sum * 10) % 11;
+  if (remainder === 10 || remainder === 11) remainder = 0;
+  if (remainder !== parseInt(cpfClean.charAt(9))) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i++) {
+    sum += parseInt(cpfClean.charAt(i)) * (11 - i);
+  }
+  remainder = (sum * 10) % 11;
+  if (remainder === 10 || remainder === 11) remainder = 0;
+  if (remainder !== parseInt(cpfClean.charAt(10))) return false;
+  return true;
+};
+
+const validateCNPJ = (cnpj: string): boolean => {
+  const cnpjClean = cnpj.replace(/\D/g, '');
+  if (cnpjClean.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(cnpjClean)) return false;
+  const weightsFirst = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  const weightsSecond = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(cnpjClean.charAt(i)) * weightsFirst[i];
+  }
+  let remainder = sum % 11;
+  const firstDigit = remainder < 2 ? 0 : 11 - remainder;
+  if (firstDigit !== parseInt(cnpjClean.charAt(12))) return false;
+  sum = 0;
+  for (let i = 0; i < 13; i++) {
+    sum += parseInt(cnpjClean.charAt(i)) * weightsSecond[i];
+  }
+  remainder = sum % 11;
+  const secondDigit = remainder < 2 ? 0 : 11 - remainder;
+  if (secondDigit !== parseInt(cnpjClean.charAt(13))) return false;
+  return true;
+};
+
+const validateCelular = (celular: string): boolean => {
+  const celularClean = celular.replace(/\D/g, '');
+  if (celularClean.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(celularClean)) return false;
+  const ddd = celularClean.substring(0, 2);
+  if (ddd < '11' || ddd > '99') return false;
+  return true;
+};
 
 export default function MotoristasPage() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -47,7 +172,7 @@ export default function MotoristasPage() {
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const supabase = createClient();
-  const { parceiros, refreshData } = useData();
+  const { parceiros, refreshData, addParceiro } = useData();
 
   // Form state
   const [formData, setFormData] = useState({
@@ -56,33 +181,295 @@ export default function MotoristasPage() {
     cnh: '',
     email: '',
     celular: '',
-    vehicle_id: '',
     vinculo_tipo: 'parceiro' as 'interno' | 'parceiro',
     parceiro_id: '',
     tipo_documento: 'cpf' as 'cpf' | 'passaporte',
+    vehicle_ids: [] as string[], // Múltiplos veículos
   });
 
-  const parceiroOptions = parceiros.map(p => ({ id: p.id, nome: p.razaoSocialOuNomeCompleto }));
+  const parceiroOptions = parceiros.map((p: ParceiroServico) => ({ id: p.id, nome: p.razaoSocialOuNomeCompleto }));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [vehiclesUnavailable, setVehiclesUnavailable] = useState(false);
+
+  // Modal rápido de veículo
+  type QuickVehicleMode = { mode: 'create'; rowIndex: number } | { mode: 'edit'; rowIndex: number; vehicleId: string };
+  const [quickVehicleModal, setQuickVehicleModal] = useState<QuickVehicleMode | null>(null);
+  const [isSubmittingVehicle, setIsSubmittingVehicle] = useState(false);
+  const [vehicleQuickForm, setVehicleQuickForm] = useState({
+    placa: '', modelo: '', marca: '',
+    tipo: 'carro' as 'carro' | 'van' | 'onibus' | 'moto' | 'caminhao' | 'outro',
+  });
+
+  // Modal rápido de parceiro
+  type ParceiroFormContato = {
+    setor: string;
+    celular: string;
+    email?: string;
+    responsavel: string;
+  };
+  type ParceiroFormFilial = {
+    rotulo: string;
+    enderecoCompleto: string;
+    referencia?: string;
+  };
+  type ParceiroFormData = {
+    pessoaTipo: 'fisica' | 'juridica';
+    documento: string;
+    razaoSocialOuNomeCompleto: string;
+    contatos: ParceiroFormContato[];
+    filiais: ParceiroFormFilial[];
+  };
+  const [isQuickParceiroModalOpen, setIsQuickParceiroModalOpen] = useState(false);
+  const [isSubmittingParceiro, setIsSubmittingParceiro] = useState(false);
+  const [parceiroQuickForm, setParceiroQuickForm] = useState<ParceiroFormData>({
+    pessoaTipo: 'juridica',
+    documento: '',
+    razaoSocialOuNomeCompleto: '',
+    contatos: [{ setor: '', celular: '', email: '', responsavel: '' }],
+    filiais: [{ rotulo: '', enderecoCompleto: '', referencia: '' }],
+  });
 
   // Reset form when modal opens
   useEffect(() => {
     if (isModalOpen) {
-      setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vehicle_id: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf' });
+      setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf', vehicle_ids: [] });
     }
   }, [isModalOpen]);
 
   const filteredVehicles = useMemo(() => {
-    if (formData.vinculo_tipo === 'interno') {
-      return vehicles.filter((v) => v.proprietario_tipo === 'interno');
+    return vehicles;
+  }, [vehicles]);
+
+  // Filtrar veículos já selecionados para não aparecerem no select
+  const availableVehicles = useMemo(() => {
+    return filteredVehicles.filter(v => !formData.vehicle_ids.includes(v.id));
+  }, [filteredVehicles, formData.vehicle_ids]);
+
+  // Handlers para múltiplos veículos
+  const handleAddVehicle = () => {
+    if (availableVehicles.length === 0) return;
+    setFormData(prev => ({
+      ...prev,
+      vehicle_ids: [...prev.vehicle_ids, availableVehicles[0].id]
+    }));
+  };
+
+  const handleRemoveVehicle = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      vehicle_ids: prev.vehicle_ids.filter((_, idx) => idx !== index)
+    }));
+  };
+
+  const handleVehicleChange = (index: number, vehicleId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      vehicle_ids: prev.vehicle_ids.map((id, idx) => idx === index ? vehicleId : id)
+    }));
+  };
+
+  const hasDuplicatePlateQuick = (placa: string, excludeId?: string): boolean => {
+    const n = placa.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    return vehicles.some(v => v.id !== excludeId && v.placa.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === n);
+  };
+
+  const handleQuickVehicleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickVehicleModal) return;
+    setIsSubmittingVehicle(true);
+    try {
+      if (!validarPlacaQuick(vehicleQuickForm.placa)) {
+        throw new Error('Formato de placa inválido. Use ABC-1234 ou Mercosul ABC-1D23.');
+      }
+      if (quickVehicleModal.mode === 'create') {
+        if (hasDuplicatePlateQuick(vehicleQuickForm.placa)) throw new Error('Já existe um veículo com esta placa.');
+        const { data, error } = await supabase.from('veiculos').insert([{
+          placa: vehicleQuickForm.placa.trim().toUpperCase(),
+          modelo: vehicleQuickForm.modelo.trim(),
+          marca: vehicleQuickForm.marca.trim(),
+          tipo: vehicleQuickForm.tipo,
+          status: 'ativo',
+          ano: new Date().getFullYear(),
+          renavam: '',
+        }]).select('id, placa, modelo, marca').single();
+        if (error) throw error;
+        const newV = data as VehicleOption;
+        setVehicles(prev => [...prev, newV].sort((a, b) => a.marca.localeCompare(b.marca, 'pt-BR') || a.modelo.localeCompare(b.modelo, 'pt-BR')));
+        setFormData(prev => ({
+          ...prev,
+          vehicle_ids: prev.vehicle_ids.map((id, idx) => idx === quickVehicleModal.rowIndex ? newV.id : id),
+        }));
+        toast.success('Veículo cadastrado e selecionado!');
+      } else {
+        const { vehicleId } = quickVehicleModal;
+        if (hasDuplicatePlateQuick(vehicleQuickForm.placa, vehicleId)) throw new Error('Já existe um veículo com esta placa.');
+        const { data, error } = await supabase.from('veiculos').update({
+          placa: vehicleQuickForm.placa.trim().toUpperCase(),
+          modelo: vehicleQuickForm.modelo.trim(),
+          marca: vehicleQuickForm.marca.trim(),
+          tipo: vehicleQuickForm.tipo,
+        }).eq('id', vehicleId).select('id, placa, modelo, marca').single();
+        if (error) throw error;
+        setVehicles(prev => prev.map(v => v.id === vehicleId ? (data as VehicleOption) : v));
+        toast.success('Veículo atualizado!');
+      }
+      setQuickVehicleModal(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao salvar veículo.');
+    } finally {
+      setIsSubmittingVehicle(false);
     }
-    if (formData.vinculo_tipo === 'parceiro' && formData.parceiro_id) {
-      return vehicles.filter((v) => v.proprietario_tipo === 'parceiro' && v.parceiro_id === formData.parceiro_id);
+  };
+
+  // Handlers para modal rápido de parceiro
+  const handleQuickParceiroOpen = () => {
+    setParceiroQuickForm({
+      pessoaTipo: 'juridica',
+      documento: '',
+      razaoSocialOuNomeCompleto: '',
+      contatos: [{ setor: '', celular: '', email: '', responsavel: '' }],
+      filiais: [{ rotulo: '', enderecoCompleto: '', referencia: '' }],
+    });
+    setIsQuickParceiroModalOpen(true);
+  };
+
+  const handleParceiroInputChange = (field: keyof Omit<ParceiroFormData, 'contatos' | 'filiais'>, value: string) => {
+    if (field === 'documento') {
+      setParceiroQuickForm(prev => ({
+        ...prev,
+        documento: formatDocumentParceiro(value, prev.pessoaTipo),
+      }));
+      return;
     }
-    return [];
-  }, [vehicles, formData.vinculo_tipo, formData.parceiro_id]);
+    setParceiroQuickForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleParceiroPessoaTipoChange = (pessoaTipo: 'fisica' | 'juridica') => {
+    setParceiroQuickForm(prev => ({
+      ...prev,
+      pessoaTipo,
+      documento: formatDocumentParceiro(prev.documento, pessoaTipo),
+      razaoSocialOuNomeCompleto: '',
+    }));
+  };
+
+  const handleParceiroContatoChange = (index: number, field: keyof ParceiroFormContato, value: string) => {
+    const formattedValue = field === 'celular' ? formatPhoneParceiro(value) : value;
+    setParceiroQuickForm(prev => ({
+      ...prev,
+      contatos: prev.contatos.map((c, idx) => (idx === index ? { ...c, [field]: formattedValue } : c)),
+    }));
+  };
+
+  const handleParceiroFilialChange = (index: number, field: keyof ParceiroFormFilial, value: string) => {
+    setParceiroQuickForm(prev => ({
+      ...prev,
+      filiais: prev.filiais.map((f, idx) => (idx === index ? { ...f, [field]: value } : f)),
+    }));
+  };
+
+  const handleParceiroAddContato = () => {
+    setParceiroQuickForm(prev => ({ ...prev, contatos: [...prev.contatos, { setor: '', celular: '', email: '', responsavel: '' }] }));
+  };
+
+  const handleParceiroRemoveContato = (index: number) => {
+    setParceiroQuickForm(prev => ({ ...prev, contatos: prev.contatos.length > 1 ? prev.contatos.filter((_, idx) => idx !== index) : prev.contatos }));
+  };
+
+  const handleParceiroAddFilial = () => {
+    setParceiroQuickForm(prev => ({ ...prev, filiais: [...prev.filiais, { rotulo: '', enderecoCompleto: '', referencia: '' }] }));
+  };
+
+  const handleParceiroRemoveFilial = (index: number) => {
+    setParceiroQuickForm(prev => ({ ...prev, filiais: prev.filiais.length > 1 ? prev.filiais.filter((_, idx) => idx !== index) : prev.filiais }));
+  };
+
+  const validateParceiroForm = (): string | null => {
+    if (!parceiroQuickForm.razaoSocialOuNomeCompleto.trim()) {
+      return 'Razão Social/Nome completo é obrigatório';
+    }
+    if (!parceiroQuickForm.documento.trim()) {
+      return 'CNPJ/CPF é obrigatório';
+    }
+    const documentoLimpo = parceiroQuickForm.documento.replace(/\D/g, '');
+    if (parceiroQuickForm.pessoaTipo === 'juridica') {
+      if (documentoLimpo.length !== 14) {
+        return 'CNPJ deve ter 14 dígitos completos';
+      }
+      if (!validateCNPJ(parceiroQuickForm.documento)) {
+        return 'CNPJ inválido';
+      }
+    } else {
+      if (documentoLimpo.length !== 11) {
+        return 'CPF deve ter 11 dígitos completos';
+      }
+      if (!validateCPF(parceiroQuickForm.documento)) {
+        return 'CPF inválido';
+      }
+    }
+    const primeiroContato = parceiroQuickForm.contatos[0];
+    if (!primeiroContato.setor.trim()) {
+      return 'Setor do primeiro contato é obrigatório';
+    }
+    if (!primeiroContato.celular.trim()) {
+      return 'Celular do primeiro contato é obrigatório';
+    }
+    if (!primeiroContato.responsavel.trim()) {
+      return 'Responsável do primeiro contato é obrigatório';
+    }
+    const celularLimpo = primeiroContato.celular.replace(/\D/g, '');
+    if (celularLimpo.length !== 11) {
+      return 'Celular deve ter 11 dígitos completos: (00) 00000-0000';
+    }
+    if (!validateCelular(primeiroContato.celular)) {
+      return 'Celular inválido';
+    }
+    if (primeiroContato.email && primeiroContato.email.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(primeiroContato.email.trim())) {
+        return 'E-mail inválido';
+      }
+    }
+    return null;
+  };
+
+  const handleQuickParceiroSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const validationError = validateParceiroForm();
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+    setIsSubmittingParceiro(true);
+    try {
+      const cleanForm: NovoParceiroInput = {
+        pessoaTipo: parceiroQuickForm.pessoaTipo,
+        documento: parceiroQuickForm.documento.trim(),
+        razaoSocialOuNomeCompleto: parceiroQuickForm.razaoSocialOuNomeCompleto.trim(),
+        contatos: parceiroQuickForm.contatos.map(c => ({
+          setor: c.setor.trim(),
+          celular: c.celular.trim(),
+          email: c.email?.trim() || '',
+          responsavel: c.responsavel.trim(),
+        })),
+        filiais: parceiroQuickForm.filiais.map(f => ({
+          rotulo: f.rotulo.trim(),
+          enderecoCompleto: f.enderecoCompleto.trim(),
+          referencia: f.referencia?.trim() || '',
+        })),
+      };
+      await addParceiro(cleanForm);
+      await refreshData();
+      toast.success('Parceiro cadastrado com sucesso!');
+      setIsQuickParceiroModalOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao salvar parceiro.');
+    } finally {
+      setIsSubmittingParceiro(false);
+    }
+  };
 
   const formatDocumento = (value: string, tipo: 'cpf' | 'passaporte'): string => {
     if (tipo === 'cpf') {
@@ -110,11 +497,6 @@ export default function MotoristasPage() {
   };
 
   const validateCNH = (value: string): boolean => {
-    const digits = value.replace(/\D/g, '');
-    return digits.length === 11;
-  };
-
-  const validateCPF = (value: string): boolean => {
     const digits = value.replace(/\D/g, '');
     return digits.length === 11;
   };
@@ -197,7 +579,7 @@ export default function MotoristasPage() {
     const fetchDrivers = async () => {
       const { data, error } = await supabase
         .from('drivers')
-        .select('*')
+        .select(`*, driver_vehicles(id, vehicle_id, vehicle:veiculos(id, placa, modelo, marca))`)
         .order('name', { ascending: true });
       
       if (error) {
@@ -211,7 +593,7 @@ export default function MotoristasPage() {
     const fetchVehicles = async () => {
       const { data, error } = await supabase
         .from('veiculos')
-        .select('id, placa, modelo, marca, proprietario_tipo, parceiro_id')
+        .select('id, placa, modelo, marca')
         .eq('status', 'ativo')
         .order('marca', { ascending: true })
         .order('modelo', { ascending: true });
@@ -280,12 +662,6 @@ export default function MotoristasPage() {
         return;
       }
 
-      const cnhDigits = formData.cnh.replace(/\D/g, '');
-      if (cnhDigits.length !== 11) {
-        toast.error(`CNH deve ter exatamente 11 dígitos numéricos. Você informou ${cnhDigits.length} dígitos.`);
-        setIsSubmitting(false);
-        return;
-      }
 
       const cpfDigits = formData.cpf.replace(/\D/g, '');
       if (cpfDigits.length !== 11) {
@@ -312,8 +688,8 @@ export default function MotoristasPage() {
         return;
       }
 
-      if (!formData.vehicle_id) {
-        toast.error('Selecione um veículo para o motorista.');
+      if (formData.vehicle_ids.length === 0) {
+        toast.error('Adicione pelo menos um veículo ao motorista.');
         setIsSubmitting(false);
         return;
       }
@@ -331,7 +707,7 @@ export default function MotoristasPage() {
         cpf: formData.cpf.replace(/\D/g, '').trim(),
         cnh: formData.cnh.replace(/\D/g, '').trim(),
         phone: formData.celular.replace(/\D/g, '').trim(),
-        vehicle_id: formData.vehicle_id,
+        vehicle_id: formData.vehicle_ids[0],
         status: 'active',
         vinculo_tipo: formData.vinculo_tipo,
       };
@@ -354,13 +730,31 @@ export default function MotoristasPage() {
 
       if (error) throw error;
 
-      if (data) {
+      // Inserir veículos vinculados
+      if (data && formData.vehicle_ids.length > 0) {
+        const driverVehicles = formData.vehicle_ids.map(vehicleId => ({
+          driver_id: data.id,
+          vehicle_id: vehicleId,
+        }));
+        
+        const { error: vehiclesError } = await supabase
+          .from('driver_vehicles')
+          .insert(driverVehicles);
+        
+        if (vehiclesError) {
+          console.error('Erro ao vincular veículos:', vehiclesError);
+          toast.error('Motorista criado, mas houve erro ao vincular veículos.');
+        }
+        
+        setDrivers((prev) => [...prev, data as Driver].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')));
+        void refreshData();
+      } else if (data) {
         setDrivers((prev) => [...prev, data as Driver].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')));
         void refreshData();
       }
 
       setIsModalOpen(false);
-      setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vehicle_id: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf' });
+      setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf', vehicle_ids: [] });
     } catch (error) {
       console.error('Erro ao salvar motorista:', error);
 
@@ -378,16 +772,20 @@ export default function MotoristasPage() {
 
   const handleOpenEditModal = (driver: Driver) => {
     setEditingDriver(driver);
+    // Extrair vehicle_ids do driver_vehicles (se existir) ou do vehicle_id legado
+    const vehicleIds = driver.driver_vehicles?.map(dv => dv.vehicle_id) || 
+                      (driver.vehicle_id ? [driver.vehicle_id] : []);
+    
     setFormData({
       name: driver.name || '',
       cpf: formatDocumento(driver.cpf || '', 'cpf'),
       cnh: driver.cnh || '',
       email: driver.email || '',
       celular: driver.phone || '',
-      vehicle_id: driver.vehicle_id || '',
       vinculo_tipo: driver.vinculo_tipo || 'parceiro',
       parceiro_id: driver.parceiro_id || '',
       tipo_documento: 'cpf',
+      vehicle_ids: vehicleIds,
     });
   };
 
@@ -403,12 +801,6 @@ export default function MotoristasPage() {
         return;
       }
 
-      const cnhDigits = formData.cnh.replace(/\D/g, '');
-      if (cnhDigits.length !== 11) {
-        toast.error(`CNH deve ter exatamente 11 dígitos numéricos. Você informou ${cnhDigits.length} dígitos.`);
-        setIsSubmitting(false);
-        return;
-      }
 
       const cpfDigits = formData.cpf.replace(/\D/g, '');
       if (cpfDigits.length !== 11) {
@@ -435,8 +827,8 @@ export default function MotoristasPage() {
         return;
       }
 
-      if (!formData.vehicle_id) {
-        toast.error('Selecione um veículo para o motorista.');
+      if (formData.vehicle_ids.length === 0) {
+        toast.error('Adicione pelo menos um veículo ao motorista.');
         setIsSubmitting(false);
         return;
       }
@@ -454,7 +846,7 @@ export default function MotoristasPage() {
         cpf: formData.cpf.replace(/\D/g, '').trim(),
         cnh: formData.cnh.replace(/\D/g, '').trim(),
         phone: formData.celular.replace(/\D/g, '').trim(),
-        vehicle_id: formData.vehicle_id,
+        vehicle_id: formData.vehicle_ids[0],
         vinculo_tipo: formData.vinculo_tipo,
         parceiro_id: formData.vinculo_tipo === 'parceiro' ? formData.parceiro_id : null,
       };
@@ -471,14 +863,38 @@ export default function MotoristasPage() {
 
       if (error) throw error;
 
+      // Atualizar veículos vinculados: deletar existentes e inserir novos
       if (data) {
+        // Deletar veículos antigos
+        await supabase
+          .from('driver_vehicles')
+          .delete()
+          .eq('driver_id', editingDriver.id);
+
+        // Inserir novos veículos
+        if (formData.vehicle_ids.length > 0) {
+          const driverVehicles = formData.vehicle_ids.map(vehicleId => ({
+            driver_id: editingDriver.id,
+            vehicle_id: vehicleId,
+          }));
+          
+          const { error: vehiclesError } = await supabase
+            .from('driver_vehicles')
+            .insert(driverVehicles);
+          
+          if (vehiclesError) {
+            console.error('Erro ao vincular veículos:', vehiclesError);
+            toast.error('Motorista atualizado, mas houve erro ao vincular veículos.');
+          }
+        }
+
         setDrivers((prev) => prev.map((driver) => (driver.id === editingDriver.id ? (data as Driver) : driver)));
         void refreshData();
       }
 
       toast.success('Motorista atualizado com sucesso!');
       setEditingDriver(null);
-      setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vehicle_id: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf' });
+      setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf', vehicle_ids: [] });
     } catch (error) {
       console.error('Erro ao atualizar motorista:', error);
 
@@ -542,7 +958,7 @@ export default function MotoristasPage() {
         actionButton={
           <button
             onClick={() => {
-              setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vehicle_id: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf' });
+              setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf', vehicle_ids: [] });
               setIsModalOpen(true);
             }}
             className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-5 py-3.5 rounded-2xl font-bold hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer shadow-lg shadow-blue-900/20 whitespace-nowrap"
@@ -569,12 +985,14 @@ export default function MotoristasPage() {
           },
           {
             key: 'veiculo',
-            title: 'Veículo',
+            title: 'Veículos',
             render: (value: unknown, item: Driver) => {
               void value;
-              const vehicle = vehicles.find((option) => option.id === item.vehicle_id);
+              const vehicleCount = item.driver_vehicles?.length || 0;
+              const firstVehicle = item.driver_vehicles?.[0]?.vehicle || 
+                                   vehicles.find(v => v.id === item.vehicle_id);
               
-              if (!vehicle) {
+              if (vehicleCount === 0) {
                 return (
                   <span className="inline-flex items-center px-3 py-1 rounded-lg bg-red-100 text-red-700 font-black text-sm border border-red-200">
                     Sem Veículo
@@ -584,8 +1002,22 @@ export default function MotoristasPage() {
 
               return (
                 <div className="space-y-1">
-                  <p className="font-black text-base text-slate-800 tracking-tight">{vehicle.modelo}</p>
-                  <p className="text-sm font-semibold text-slate-400">{vehicle.placa} • {vehicle.marca}</p>
+                  <p className="font-black text-base text-slate-800 tracking-tight">
+                    {firstVehicle?.modelo || 'Veículo'}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-slate-400">
+                      {firstVehicle?.placa || '—'} • {firstVehicle?.marca || '—'}
+                    </p>
+                    {vehicleCount > 1 && (
+                      <span
+                        onClick={() => setViewingDriver(item)}
+                        className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 text-xs font-black border border-blue-200 cursor-pointer hover:bg-blue-200 hover:text-blue-800 transition-colors"
+                      >
+                        +{vehicleCount - 1}
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             }
@@ -678,7 +1110,7 @@ export default function MotoristasPage() {
         <StandardModal 
           onClose={() => {
             setIsModalOpen(false);
-            setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vehicle_id: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf' });
+            setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf', vehicle_ids: [] });
           }}
           title="Novo Motorista" 
           subtitle="Cadastro de condutor para a frota Geolog"
@@ -695,7 +1127,7 @@ export default function MotoristasPage() {
               </div>
               <div className="grid grid-cols-1 gap-6">
                 <div className="flex flex-col md:flex-row gap-6 items-start">
-                  <div className="space-y-2 w-full md:w-[48%]">
+                  <div className="space-y-2 w-full md:w-[45%]">
                     <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome completo <span className="text-rose-300 text-base">*</span></label>
                     <input
                       required
@@ -706,51 +1138,6 @@ export default function MotoristasPage() {
                     />
                   </div>
                   <div className="space-y-2 w-full md:w-48">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">CNH <span className="text-rose-300 text-base">*</span></label>
-                    <input
-                      required
-                      placeholder="11 dígitos numéricos"
-                      value={formData.cnh}
-                      onChange={e => {
-                        const value = e.target.value.replace(/\D/g, '').slice(0, 11);
-                        setFormData({...formData, cnh: value});
-                      }}
-                      className={`w-full px-4 py-4 bg-slate-50 border-2 rounded-xl font-bold text-base text-slate-900 outline-none focus:bg-white transition-all shadow-sm ${
-                        formData.cnh && !validateCNH(formData.cnh) 
-                          ? 'border-red-500 focus:border-red-500' 
-                          : 'border-slate-200 focus:border-blue-600'
-                      }`}
-                    />
-                  </div>
-                  <div className="space-y-2 w-full md:w-auto">
-                    <div className="flex gap-3 mt-7">
-                      <button
-                        type="button"
-                        onClick={() => setFormData({...formData, vinculo_tipo: 'interno', parceiro_id: '', vehicle_id: '', tipo_documento: 'cpf'})}
-                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
-                          formData.vinculo_tipo === 'interno'
-                            ? 'bg-blue-600 border-blue-600 text-white shadow-md'
-                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600'
-                        }`}
-                      >
-                        <Building2 size={16} /> Interno
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFormData({...formData, vinculo_tipo: 'parceiro', parceiro_id: '', vehicle_id: '', tipo_documento: 'cpf'})}
-                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
-                          formData.vinculo_tipo === 'parceiro'
-                            ? 'bg-teal-500 border-teal-500 text-white shadow-md'
-                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-teal-300 hover:text-teal-600'
-                        }`}
-                      >
-                        <Handshake size={16} /> Parceiro
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-col md:flex-row gap-6 items-start">
-                  <div className="space-y-2 w-full md:w-44">
                     <GeologSearchableSelect
                       label="Tipo"
                       options={tipoDocumentoOptions}
@@ -759,7 +1146,7 @@ export default function MotoristasPage() {
                       required
                     />
                   </div>
-                  <div className="space-y-2 w-full md:w-44">
+                  <div className="space-y-2 w-full md:w-40">
                     <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">{getDocumentoLabel(formData.tipo_documento)} <span className="text-rose-300 text-base">*</span></label>
                     <input
                       required
@@ -769,17 +1156,7 @@ export default function MotoristasPage() {
                       className="w-full px-4 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
-                  <div className="space-y-2 flex-1">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail</label>
-                    <input
-                      type="email"
-                      placeholder="exemplo@email.com"
-                      value={formData.email}
-                      onChange={e => setFormData({...formData, email: e.target.value.toLowerCase()})}
-                      className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-2 w-full md:w-56">
+                  <div className="space-y-2 w-full md:w-44">
                     <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <span className="text-rose-300 text-base">*</span></label>
                     <input
                       required
@@ -797,31 +1174,175 @@ export default function MotoristasPage() {
                     />
                   </div>
                 </div>
+                <div className="flex flex-col md:flex-row gap-6 items-start">
+                  <div className="space-y-2 w-full md:w-48">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">CNH</label>
+                    <input
+                      placeholder="11 dígitos"
+                      value={formData.cnh}
+                      onChange={e => {
+                        const value = e.target.value.replace(/\D/g, '').slice(0, 11);
+                        setFormData({...formData, cnh: value});
+                      }}
+                      className={`w-full px-4 py-4 bg-slate-50 border-2 rounded-xl font-bold text-base text-slate-900 outline-none focus:bg-white transition-all shadow-sm ${
+                        formData.cnh && !validateCNH(formData.cnh) 
+                          ? 'border-red-500 focus:border-red-500' 
+                          : 'border-slate-200 focus:border-blue-600'
+                      }`}
+                    />
+                  </div>
+                  <div className="space-y-2 flex-1">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail</label>
+                    <input
+                      type="email"
+                      placeholder="exemplo@email.com"
+                      value={formData.email}
+                      onChange={e => setFormData({...formData, email: e.target.value.toLowerCase()})}
+                      className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                    />
+                  </div>
+                  <div className="space-y-2 w-full md:w-auto">
+                    <div className="flex gap-3 mt-7">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({...formData, vinculo_tipo: 'interno', parceiro_id: '', tipo_documento: 'cpf'})}
+                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
+                          formData.vinculo_tipo === 'interno'
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-md'
+                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600'
+                        }`}
+                      >
+                        <Building2 size={16} /> Interno
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({...formData, vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf'})}
+                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
+                          formData.vinculo_tipo === 'parceiro'
+                            ? 'bg-teal-500 border-teal-500 text-white shadow-md'
+                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-teal-300 hover:text-teal-600'
+                        }`}
+                      >
+                        <Handshake size={16} /> Parceiro
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {formData.vinculo_tipo === 'parceiro' && (
                     <GeologSearchableSelect
                       label="Parceiro de serviço"
                       options={parceiroOptions}
                       value={formData.parceiro_id}
-                      onChange={(value) => setFormData({...formData, parceiro_id: value, vehicle_id: ''})}
+                      onChange={(value) => setFormData({...formData, parceiro_id: value, vehicle_ids: []})}
                       placeholder="Selecione o parceiro..."
                       required
+                      onQuickAdd={handleQuickParceiroOpen}
                     />
                   )}
-                  <div className={formData.vinculo_tipo === 'parceiro' ? '' : 'md:col-span-2'}>
-                    <GeologSearchableSelect
-                      label="Veículo"
-                      options={filteredVehicles.map(vehicle => ({ 
-                        id: vehicle.id, 
-                        nome: `${vehicle.marca} ${vehicle.modelo} - ${vehicle.placa}` 
-                      }))}
-                      value={formData.vehicle_id}
-                      onChange={(value) => setFormData({...formData, vehicle_id: value})}
-                      placeholder="Selecione o veículo..."
-                      required
-                      disabled={filteredVehicles.length === 0}
-                    />
-                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Seção de Veículos Vinculados */}
+            <section className="space-y-6">
+              <div className="flex items-center justify-between border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
+                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                  <Truck size={20} className="text-slate-500" /> Veículos Vinculados
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleAddVehicle}
+                  disabled={availableVehicles.length === 0}
+                  className="flex items-center gap-3 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <PlusCircle size={14} /> Adicionar veículo
+                </button>
+              </div>
+
+              <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="hidden md:grid grid-cols-[2fr_2fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                  <span>Veículo</span>
+                  <span className="ml-8">Placa</span>
+                  <span className="text-right">Ações</span>
+                </div>
+                <div className="divide-y divide-slate-100 max-h-[30vh] overflow-y-auto custom-scrollbar">
+                  {formData.vehicle_ids.length === 0 && (
+                    <div className="px-6 py-8 text-center text-slate-400 text-sm">
+                      Nenhum veículo vinculado. Clique em &quot;Adicionar veículo&quot; acima.
+                    </div>
+                  )}
+                  {formData.vehicle_ids.map((vehicleId, index) => {
+                    const vehicle = vehicles.find(v => v.id === vehicleId);
+                    const availableVehiclesForThisRow = filteredVehicles.filter(v =>
+                      v.id === vehicleId || !formData.vehicle_ids.includes(v.id)
+                    );
+                    return (
+                      <div key={index} className="grid grid-cols-1 md:grid-cols-[2fr_2fr_auto] gap-4 items-center px-6 py-4">
+                        <div className="space-y-2">
+                          <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Veículo</label>
+                          <GeologSearchableSelect
+                            label=""
+                            options={availableVehiclesForThisRow.map(v => ({
+                              id: v.id,
+                              nome: `${v.marca} ${v.modelo}`,
+                              sublabel: v.placa
+                            }))}
+                            value={vehicleId}
+                            onChange={(value) => handleVehicleChange(index, value)}
+                            placeholder="Selecione o veículo..."
+                          />
+                        </div>
+                        <div className="space-y-1 ml-5">
+                          <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Placa</label>
+                          <div className="w-[120px] bg-white border-2 border-slate-400 rounded-md overflow-hidden shadow-sm flex flex-col items-center">
+                            <div className="w-full bg-blue-600 h-1" />
+                            <div className="py-3 px-4 flex items-center justify-center">
+                              <span className="text-[15px] font-black text-slate-900 uppercase tracking-widest leading-none">{vehicle?.placa || '—'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!vehicleId) return;
+                              const v = vehicles.find(veh => veh.id === vehicleId);
+                              if (!v) return;
+                              setVehicleQuickForm({ placa: v.placa, modelo: v.modelo, marca: v.marca, tipo: 'carro' });
+                              setQuickVehicleModal({ mode: 'edit', rowIndex: index, vehicleId: v.id });
+                            }}
+                            disabled={!vehicleId}
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                            aria-label="Editar veículo"
+                            title="Editar veículo"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVehicleQuickForm({ placa: '', modelo: '', marca: '', tipo: 'carro' });
+                              setQuickVehicleModal({ mode: 'create', rowIndex: index });
+                            }}
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-xl transition-all cursor-pointer"
+                            aria-label="Cadastrar novo veículo"
+                            title="Cadastrar novo veículo"
+                          >
+                            <Car size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveVehicle(index)}
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                            aria-label="Remover veículo"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </section>
@@ -879,22 +1400,56 @@ export default function MotoristasPage() {
 
           <div className="space-y-6">
             <h3 className="text-[13px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-              <Truck size={14} className="text-blue-500" /> Veículo & Vínculo
+              <Truck size={14} className="text-blue-500" /> Veículos Vinculados
             </h3>
             <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
               <div className="divide-y divide-slate-100">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 px-6 py-4">
+                {(() => {
+                  const driverVehicles = viewingDriver.driver_vehicles || [];
+                  const legacyVehicleId = viewingDriver.vehicle_id;
+                  const allVehicles = driverVehicles.length > 0 
+                    ? driverVehicles.map(dv => dv.vehicle || vehicles.find(v => v.id === dv.vehicle_id)).filter(Boolean)
+                    : (legacyVehicleId ? [vehicles.find(v => v.id === legacyVehicleId)] : []);
+                  
+                  if (allVehicles.length === 0) {
+                    return (
+                      <div className="px-6 py-4">
+                        <p className="text-base font-bold text-slate-400">Sem veículos vinculados</p>
+                      </div>
+                    );
+                  }
+                  
+                  return allVehicles.map((vehicle, index) => (
+                    <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-4 px-6 py-4">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Veículo {index + 1}</p>
+                        <p className="text-base font-bold text-slate-800">{vehicle?.marca} {vehicle?.modelo}</p>
+                      </div>
+                      <div className="ml-5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Placa</p>
+                        <div className="w-[120px] bg-white border-2 border-slate-400 rounded-md overflow-hidden shadow-sm flex flex-col items-center">
+                          <div className="w-full bg-blue-600 h-1" />
+                          <div className="py-3 px-4 flex items-center justify-center">
+                            <span className="text-[15px] font-black text-slate-900 uppercase tracking-widest leading-none">{vehicle?.placa || '—'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <h3 className="text-[13px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+              <Handshake size={14} className="text-blue-500" /> Vínculo
+            </h3>
+            <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div className="divide-y divide-slate-100">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-6 py-4">
                   <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Veículo</p>
-                    {(() => {
-                      const vehicle = vehicles.find(v => v.id === viewingDriver.vehicle_id);
-                      return vehicle 
-                        ? <p className="text-base font-bold text-slate-800">{vehicle.marca} {vehicle.modelo} — {vehicle.placa}</p>
-                        : <p className="text-base font-bold text-slate-400">Sem veículo</p>;
-                    })()}
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Vínculo</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Tipo de Vínculo</p>
                     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wide border ${
                       viewingDriver.vinculo_tipo === 'interno'
                         ? 'bg-blue-50 text-blue-700 border-blue-200'
@@ -908,7 +1463,7 @@ export default function MotoristasPage() {
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Parceiro</p>
                       <p className="text-base font-bold text-slate-800">
-                        {parceiros.find(p => p.id === viewingDriver.parceiro_id)?.razaoSocialOuNomeCompleto || '—'}
+                        {parceiros.find((p: ParceiroServico) => p.id === viewingDriver.parceiro_id)?.razaoSocialOuNomeCompleto || '—'}
                       </p>
                     </div>
                   )}
@@ -938,10 +1493,10 @@ export default function MotoristasPage() {
 
       {/* Modal de Edição */}
       {editingDriver && (
-        <StandardModal 
+        <StandardModal
           onClose={() => {
             setEditingDriver(null);
-            setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vehicle_id: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf' });
+            setFormData({ name: '', cpf: '', cnh: '', email: '', celular: '', vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf', vehicle_ids: [] });
           }}
           title="Editar Motorista" 
           subtitle={`Editando: ${editingDriver.name}`}
@@ -958,7 +1513,7 @@ export default function MotoristasPage() {
               </div>
               <div className="grid grid-cols-1 gap-6">
                 <div className="flex flex-col md:flex-row gap-6 items-start">
-                  <div className="space-y-2 w-full md:w-[48%]">
+                  <div className="space-y-2 w-full md:w-[45%]">
                     <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome completo <span className="text-rose-300 text-base">*</span></label>
                     <input
                       required
@@ -969,51 +1524,6 @@ export default function MotoristasPage() {
                     />
                   </div>
                   <div className="space-y-2 w-full md:w-48">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">CNH <span className="text-rose-300 text-base">*</span></label>
-                    <input
-                      required
-                      placeholder="11 dígitos numéricos"
-                      value={formData.cnh}
-                      onChange={e => {
-                        const value = e.target.value.replace(/\D/g, '').slice(0, 11);
-                        setFormData({...formData, cnh: value});
-                      }}
-                      className={`w-full px-4 py-4 bg-slate-50 border-2 rounded-xl font-bold text-base text-slate-900 outline-none focus:bg-white transition-all shadow-sm ${
-                        formData.cnh && !validateCNH(formData.cnh) 
-                          ? 'border-red-500 focus:border-red-500' 
-                          : 'border-slate-200 focus:border-blue-600'
-                      }`}
-                    />
-                  </div>
-                  <div className="space-y-2 w-full md:w-auto">
-                    <div className="flex gap-3 mt-7">
-                      <button
-                        type="button"
-                        onClick={() => setFormData({...formData, vinculo_tipo: 'interno', parceiro_id: '', vehicle_id: '', tipo_documento: 'cpf'})}
-                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
-                          formData.vinculo_tipo === 'interno'
-                            ? 'bg-blue-600 border-blue-600 text-white shadow-md'
-                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600'
-                        }`}
-                      >
-                        <Building2 size={16} /> Interno
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFormData({...formData, vinculo_tipo: 'parceiro', parceiro_id: '', vehicle_id: '', tipo_documento: 'cpf'})}
-                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
-                          formData.vinculo_tipo === 'parceiro'
-                            ? 'bg-teal-500 border-teal-500 text-white shadow-md'
-                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-teal-300 hover:text-teal-600'
-                        }`}
-                      >
-                        <Handshake size={16} /> Parceiro
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-col md:flex-row gap-6 items-start">
-                  <div className="space-y-2 w-full md:w-44">
                     <GeologSearchableSelect
                       label="Tipo"
                       options={tipoDocumentoOptions}
@@ -1022,7 +1532,7 @@ export default function MotoristasPage() {
                       required
                     />
                   </div>
-                  <div className="space-y-2 w-full md:w-44">
+                  <div className="space-y-2 w-full md:w-40">
                     <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">{getDocumentoLabel(formData.tipo_documento)} <span className="text-rose-300 text-base">*</span></label>
                     <input
                       required
@@ -1032,17 +1542,7 @@ export default function MotoristasPage() {
                       className="w-full px-4 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
-                  <div className="space-y-2 flex-1">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail</label>
-                    <input
-                      type="email"
-                      placeholder="exemplo@email.com"
-                      value={formData.email}
-                      onChange={e => setFormData({...formData, email: e.target.value.toLowerCase()})}
-                      className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-2 w-full md:w-56">
+                  <div className="space-y-2 w-full md:w-44">
                     <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <span className="text-rose-300 text-base">*</span></label>
                     <input
                       required
@@ -1060,31 +1560,175 @@ export default function MotoristasPage() {
                     />
                   </div>
                 </div>
+                <div className="flex flex-col md:flex-row gap-6 items-start">
+                  <div className="space-y-2 w-full md:w-48">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">CNH</label>
+                    <input
+                      placeholder="11 dígitos"
+                      value={formData.cnh}
+                      onChange={e => {
+                        const value = e.target.value.replace(/\D/g, '').slice(0, 11);
+                        setFormData({...formData, cnh: value});
+                      }}
+                      className={`w-full px-4 py-4 bg-slate-50 border-2 rounded-xl font-bold text-base text-slate-900 outline-none focus:bg-white transition-all shadow-sm ${
+                        formData.cnh && !validateCNH(formData.cnh) 
+                          ? 'border-red-500 focus:border-red-500' 
+                          : 'border-slate-200 focus:border-blue-600'
+                      }`}
+                    />
+                  </div>
+                  <div className="space-y-2 flex-1">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail</label>
+                    <input
+                      type="email"
+                      placeholder="exemplo@email.com"
+                      value={formData.email}
+                      onChange={e => setFormData({...formData, email: e.target.value.toLowerCase()})}
+                      className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                    />
+                  </div>
+                  <div className="space-y-2 w-full md:w-auto">
+                    <div className="flex gap-3 mt-7">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({...formData, vinculo_tipo: 'interno', parceiro_id: '', tipo_documento: 'cpf'})}
+                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
+                          formData.vinculo_tipo === 'interno'
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-md'
+                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600'
+                        }`}
+                      >
+                        <Building2 size={16} /> Interno
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({...formData, vinculo_tipo: 'parceiro', parceiro_id: '', tipo_documento: 'cpf'})}
+                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
+                          formData.vinculo_tipo === 'parceiro'
+                            ? 'bg-teal-500 border-teal-500 text-white shadow-md'
+                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-teal-300 hover:text-teal-600'
+                        }`}
+                      >
+                        <Handshake size={16} /> Parceiro
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {formData.vinculo_tipo === 'parceiro' && (
                     <GeologSearchableSelect
                       label="Parceiro de serviço"
                       options={parceiroOptions}
                       value={formData.parceiro_id}
-                      onChange={(value) => setFormData({...formData, parceiro_id: value, vehicle_id: ''})}
+                      onChange={(value) => setFormData({...formData, parceiro_id: value, vehicle_ids: []})}
                       placeholder="Selecione o parceiro..."
                       required
+                      onQuickAdd={handleQuickParceiroOpen}
                     />
                   )}
-                  <div className={formData.vinculo_tipo === 'parceiro' ? '' : 'md:col-span-2'}>
-                    <GeologSearchableSelect
-                      label="Veículo"
-                      options={filteredVehicles.map(vehicle => ({ 
-                        id: vehicle.id, 
-                        nome: `${vehicle.marca} ${vehicle.modelo} - ${vehicle.placa}` 
-                      }))}
-                      value={formData.vehicle_id}
-                      onChange={(value) => setFormData({...formData, vehicle_id: value})}
-                      placeholder="Selecione o veículo..."
-                      required
-                      disabled={filteredVehicles.length === 0}
-                    />
-                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Seção de Veículos Vinculados */}
+            <section className="space-y-6">
+              <div className="flex items-center justify-between border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
+                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                  <Truck size={20} className="text-slate-500" /> Veículos Vinculados
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleAddVehicle}
+                  disabled={availableVehicles.length === 0}
+                  className="flex items-center gap-3 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <PlusCircle size={14} /> Adicionar veículo
+                </button>
+              </div>
+
+              <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="hidden md:grid grid-cols-[2fr_2fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                  <span>Veículo</span>
+                  <span className="ml-8">Placa</span>
+                  <span className="text-right">Ações</span>
+                </div>
+                <div className="divide-y divide-slate-100 max-h-[30vh] overflow-y-auto custom-scrollbar">
+                  {formData.vehicle_ids.length === 0 && (
+                    <div className="px-6 py-8 text-center text-slate-400 text-sm">
+                      Nenhum veículo vinculado. Clique em &quot;Adicionar veículo&quot; acima.
+                    </div>
+                  )}
+                  {formData.vehicle_ids.map((vehicleId, index) => {
+                    const vehicle = vehicles.find(v => v.id === vehicleId);
+                    const availableVehiclesForThisRow = filteredVehicles.filter(v =>
+                      v.id === vehicleId || !formData.vehicle_ids.includes(v.id)
+                    );
+                    return (
+                      <div key={index} className="grid grid-cols-1 md:grid-cols-[2fr_2fr_auto] gap-4 items-center px-6 py-4">
+                        <div className="space-y-2">
+                          <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Veículo</label>
+                          <GeologSearchableSelect
+                            label=""
+                            options={availableVehiclesForThisRow.map(v => ({
+                              id: v.id,
+                              nome: `${v.marca} ${v.modelo}`,
+                              sublabel: v.placa
+                            }))}
+                            value={vehicleId}
+                            onChange={(value) => handleVehicleChange(index, value)}
+                            placeholder="Selecione o veículo..."
+                          />
+                        </div>
+                        <div className="space-y-1 ml-5">
+                          <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Placa</label>
+                          <div className="w-[120px] bg-white border-2 border-slate-400 rounded-md overflow-hidden shadow-sm flex flex-col items-center">
+                            <div className="w-full bg-blue-600 h-1" />
+                            <div className="py-3 px-4 flex items-center justify-center">
+                              <span className="text-[15px] font-black text-slate-900 uppercase tracking-widest leading-none">{vehicle?.placa || '—'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!vehicleId) return;
+                              const v = vehicles.find(veh => veh.id === vehicleId);
+                              if (!v) return;
+                              setVehicleQuickForm({ placa: v.placa, modelo: v.modelo, marca: v.marca, tipo: 'carro' });
+                              setQuickVehicleModal({ mode: 'edit', rowIndex: index, vehicleId: v.id });
+                            }}
+                            disabled={!vehicleId}
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                            aria-label="Editar veículo"
+                            title="Editar veículo"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVehicleQuickForm({ placa: '', modelo: '', marca: '', tipo: 'carro' });
+                              setQuickVehicleModal({ mode: 'create', rowIndex: index });
+                            }}
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-xl transition-all cursor-pointer"
+                            aria-label="Cadastrar novo veículo"
+                            title="Cadastrar novo veículo"
+                          >
+                            <Car size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveVehicle(index)}
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                            aria-label="Remover veículo"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </section>
@@ -1096,6 +1740,315 @@ export default function MotoristasPage() {
                 className="px-12 py-4 bg-blue-600 text-white font-black rounded-xl shadow-xl shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
               >
                 {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Atualizar motorista'}
+              </button>
+            </div>
+          </form>
+        </StandardModal>
+      )}
+
+      {quickVehicleModal && (
+        <StandardModal
+          onClose={() => setQuickVehicleModal(null)}
+          title={quickVehicleModal.mode === 'create' ? 'Cadastrar Veículo' : 'Editar Veículo'}
+          subtitle={quickVehicleModal.mode === 'create' ? 'Cadastro rápido de novo veículo' : 'Editar informações do veículo'}
+          icon={<Car size={24} />}
+          maxWidthClassName="max-w-6xl"
+        >
+          <form onSubmit={handleQuickVehicleSave} className="space-y-6">
+            <div className="flex flex-wrap gap-3">
+              <div className="w-[140px] space-y-2 flex-shrink-0">
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Placa <RequiredAsterisk /></label>
+                <input
+                  required
+                  value={vehicleQuickForm.placa}
+                  onChange={e => setVehicleQuickForm({ ...vehicleQuickForm, placa: formatarPlacaQuick(e.target.value) })}
+                  className="max-w-[140px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
+                  placeholder="ABC-1234"
+                  maxLength={8}
+                />
+              </div>
+              <div className="w-[220px] space-y-2 flex-shrink-0">
+                <GeologSearchableSelect
+                  label="Marca"
+                  options={MARCAS_VEICULOS}
+                  value={vehicleQuickForm.marca}
+                  onChange={value => setVehicleQuickForm({ ...vehicleQuickForm, marca: value })}
+                  required
+                  triggerClassName="mt-[9px] h-[60px]"
+                />
+              </div>
+              <div className="flex-1 space-y-2 min-w-[150px]">
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Modelo <RequiredAsterisk /></label>
+                <input
+                  required
+                  value={vehicleQuickForm.modelo}
+                  onChange={e => setVehicleQuickForm({ ...vehicleQuickForm, modelo: e.target.value })}
+                  className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
+                  placeholder="Ex: Corolla"
+                />
+              </div>
+              <div className="w-[180px] space-y-2 flex-shrink-0">
+                <GeologSearchableSelect
+                  label="Tipo"
+                  options={TIPOS_VEICULO}
+                  value={vehicleQuickForm.tipo}
+                  onChange={value => setVehicleQuickForm({ ...vehicleQuickForm, tipo: value as typeof vehicleQuickForm.tipo })}
+                  required
+                  disableSearch
+                  triggerClassName="mt-[9px] h-[60px]"
+                />
+              </div>
+            </div>
+            <div className="flex gap-4 pt-2">
+              <button
+                type="button"
+                onClick={() => setQuickVehicleModal(null)}
+                className="flex-1 py-4 border-2 border-slate-200 text-slate-500 font-black rounded-2xl hover:bg-slate-50 transition-all uppercase tracking-widest text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmittingVehicle}
+                className="flex-1 py-4 bg-green-600 text-white font-black rounded-2xl hover:bg-green-500 shadow-lg shadow-green-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50 uppercase tracking-widest text-xs cursor-pointer"
+              >
+                {isSubmittingVehicle ? <Loader2 className="animate-spin" size={18} /> : (quickVehicleModal.mode === 'create' ? 'Cadastrar' : 'Salvar')}
+              </button>
+            </div>
+          </form>
+        </StandardModal>
+      )}
+
+      {isQuickParceiroModalOpen && (
+        <StandardModal
+          onClose={() => setIsQuickParceiroModalOpen(false)}
+          title="Novo Parceiro"
+          subtitle="Cadastro rápido de parceiro de serviço"
+          icon={<Handshake size={24} />}
+          maxWidthClassName="max-w-6xl"
+          bodyClassName="p-6 md:p-10 pb-16 space-y-8"
+        >
+          <form onSubmit={handleQuickParceiroSave} className="space-y-8">
+            <section className="space-y-6">
+              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
+                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                  <Building2 size={20} className="text-slate-500" /> Dados principais
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-[0.7fr_1.6fr_0.6fr] gap-6">
+                <div className="space-y-2">
+                  <GeologSearchableSelect
+                    label="Tipo de pessoa"
+                    options={PESSOA_TIPO_OPTIONS}
+                    value={parceiroQuickForm.pessoaTipo}
+                    onChange={(value) => handleParceiroPessoaTipoChange(value as 'fisica' | 'juridica')}
+                    triggerClassName="px-5 py-3.5 !bg-slate-50 border-2 !border-slate-200 mt-[5px]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">
+                    {parceiroQuickForm.pessoaTipo === 'juridica' ? 'Razão social' : 'Nome completo'} <RequiredAsterisk />
+                  </label>
+                  <input
+                    required
+                    value={parceiroQuickForm.razaoSocialOuNomeCompleto}
+                    onChange={(event) => handleParceiroInputChange('razaoSocialOuNomeCompleto', event.target.value)}
+                    placeholder={parceiroQuickForm.pessoaTipo === 'juridica' ? 'Ex: Silva Logística LTDA' : 'Ex: João da Silva'}
+                    className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[2px]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">{parceiroQuickForm.pessoaTipo === 'juridica' ? 'CNPJ' : 'CPF'} <RequiredAsterisk /></label>
+                  <input
+                    required
+                    value={parceiroQuickForm.documento}
+                    onChange={(event) => handleParceiroInputChange('documento', event.target.value)}
+                    placeholder={parceiroQuickForm.pessoaTipo === 'juridica' ? '00.000.000/0001-00' : '000.000.000-00'}
+                    className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                  />
+                </div>
+              </div>
+            </section>
+
+            <div className="border-b-2 border-slate-100 my-10"></div>
+
+            <section className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                    <Users size={20} className="text-blue-600" /> Contatos por unidade
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleParceiroAddContato}
+                  className="flex items-center gap-3 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer"
+                >
+                  <PlusCircle size={14} /> Novo cadastro
+                </button>
+              </div>
+
+              <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="hidden md:grid grid-cols-[1.2fr_0.8fr_1.2fr_1.1fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                  <span>Setor</span>
+                  <span>Celular</span>
+                  <span>E-mail</span>
+                  <span>Responsável</span>
+                  <span className="text-right">Ações</span>
+                </div>
+                <div className="divide-y divide-slate-100 max-h-[40vh] overflow-y-auto custom-scrollbar">
+                  {parceiroQuickForm.contatos.map((contato, index) => (
+                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr_1.2fr_1.1fr_auto] gap-4 items-start px-6 py-5">
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Setor</label>
+                        <input
+                          required
+                          placeholder="Financeiro, Operação, Compras..."
+                          value={contato.setor}
+                          onChange={(event) => handleParceiroContatoChange(index, 'setor', event.target.value.toUpperCase())}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Celular</label>
+                        <input
+                          required
+                          placeholder="(00) 00000-0000"
+                          value={contato.celular}
+                          onChange={(event) => handleParceiroContatoChange(index, 'celular', event.target.value)}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">E-mail</label>
+                        <input
+                          type="email"
+                          placeholder="contato@empresa.com"
+                          value={contato.email || ''}
+                          onChange={(event) => handleParceiroContatoChange(index, 'email', event.target.value.toLowerCase())}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Responsável</label>
+                        <input
+                          required
+                          placeholder="Nome do responsável"
+                          value={contato.responsavel}
+                          onChange={(event) => handleParceiroContatoChange(index, 'responsavel', event.target.value.toUpperCase())}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="flex md:pt-1 justify-end">
+                        {parceiroQuickForm.contatos.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => handleParceiroRemoveContato(index)}
+                            className="inline-flex items-center justify-center p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                            aria-label="Remover contato"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 pt-3">Principal</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <div className="border-b-2 border-slate-100 my-10"></div>
+
+            <section className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                    <MapPin size={20} className="text-blue-600" /> Filiais / endereços
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleParceiroAddFilial}
+                  className="flex items-center gap-3 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer"
+                >
+                  <PlusCircle size={14} /> Nova filial
+                </button>
+              </div>
+
+              <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="hidden md:grid grid-cols-[1.2fr_2fr_1fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                  <span>Rótulo</span>
+                  <span>Endereço completo</span>
+                  <span>Referência</span>
+                  <span className="text-right">Ações</span>
+                </div>
+                <div className="divide-y divide-slate-100 max-h-[40vh] overflow-y-auto custom-scrollbar">
+                  {parceiroQuickForm.filiais.map((filial, index) => (
+                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1.2fr_2fr_1fr_auto] gap-4 items-start px-6 py-5">
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Rótulo</label>
+                        <input
+                          placeholder="Matriz, Filial Centro, Depósito..."
+                          value={filial.rotulo}
+                          onChange={(event) => handleParceiroFilialChange(index, 'rotulo', event.target.value.toUpperCase())}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Endereço completo</label>
+                        <input
+                          placeholder="Rua, número, bairro, cidade - UF"
+                          value={filial.enderecoCompleto}
+                          onChange={(event) => handleParceiroFilialChange(index, 'enderecoCompleto', event.target.value)}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Referência</label>
+                        <input
+                          placeholder="Portão azul, bloco B..."
+                          value={filial.referencia || ''}
+                          onChange={(event) => handleParceiroFilialChange(index, 'referencia', event.target.value)}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="flex md:pt-1 justify-end">
+                        {parceiroQuickForm.filiais.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => handleParceiroRemoveFilial(index)}
+                            className="inline-flex items-center justify-center p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                            aria-label="Remover filial"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 pt-3">Principal</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsQuickParceiroModalOpen(false)}
+                className="px-8 py-4 bg-slate-100 text-slate-700 font-black rounded-xl hover:bg-slate-200 transition-all text-sm uppercase tracking-widest cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmittingParceiro}
+                className="px-12 py-4 bg-[var(--color-geolog-blue)] text-white font-black rounded-xl shadow-xl shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest cursor-pointer disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSubmittingParceiro ? <Loader2 className="animate-spin" size={18} /> : 'Salvar parceiro'}
               </button>
             </div>
           </form>

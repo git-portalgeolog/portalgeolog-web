@@ -1,8 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { User } from '@supabase/supabase-js';
+import { User, Session } from '@supabase/supabase-js';
 
 import { toast } from 'sonner';
 
@@ -38,7 +38,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const supabase = createClient();
 
   // Buscar perfil inicial
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = useCallback(async (userId: string) => {
     try {
       // Usar a rota de API ou garantir que a tabela existe via check silencioso
       const { data, error } = await supabase.from('user_roles').select('*').eq('id', userId).single();
@@ -58,7 +58,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase]);
 
   useEffect(() => {
     const initializeAuth = async () => {
@@ -77,7 +77,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     initializeAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event: string, session: any) => {
+      (event: string, session: Session | null) => {
         if (session) {
           setUser(session.user);
           fetchProfile(session.user.id);
@@ -92,7 +92,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, [supabase, fetchProfile]);
 
   // Listener Realtime para remoções ou rebaixamentos de cargo "ao vivo"
   useEffect(() => {
@@ -105,8 +105,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         schema: 'public', 
         table: 'user_roles',
         filter: `id=eq.${user.id}`
-      }, (payload: any) => {
-         const newProfile = payload.new as UserProfile;
+      }, (payload: unknown) => {
+         const newProfile = (payload as { new: UserProfile }).new;
          
          if (profile && profile.categoria !== newProfile.categoria) {
             toast.warning(`Seu nível de acesso foi alterado pelo administrador para: ${newProfile.categoria.toUpperCase()}`);
@@ -128,6 +128,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => {
       supabase.removeChannel(channel);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, profile, supabase]);
 
   const login = async (email: string, password: string) => {

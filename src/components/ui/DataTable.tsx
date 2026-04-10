@@ -106,7 +106,7 @@ export function DataTable<T extends { id?: string | number }>({
           {showHeader && (
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200">
-                {columns.map((column, index) => (
+                {columns.map((column) => (
                   <th
                     key={String(column.key)}
                     className={`${getPaddingClass()} text-[12px] font-black uppercase tracking-widest text-slate-600 ${getAlignmentClass(column.align)} ${column.className}`}

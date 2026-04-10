@@ -1,6 +1,7 @@
 import { createBrowserClient } from '@supabase/ssr'
+import { SupabaseClient } from '@supabase/supabase-js'
 
-let client: any;
+let client: SupabaseClient | null = null;
 
 export function createClient() {
   if (client) return client;

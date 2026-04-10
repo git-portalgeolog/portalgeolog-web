@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Truck, User, Calendar, MapPin, Clock, CheckCircle2, Navigation, ArrowRightLeft, Building, AlertTriangle } from 'lucide-react';
+import { Truck, User, Calendar, Clock, Building } from 'lucide-react';
 import { type OrderService } from '@/context/DataContext';
 
 interface OSCardProps {

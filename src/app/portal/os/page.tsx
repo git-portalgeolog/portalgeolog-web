@@ -5,7 +5,6 @@ import { createClient } from '@/lib/supabase/client';
 import StandardModal from '@/components/StandardModal';
 import { 
   Plus, 
-  Search, 
   Truck, 
   User,
   UserPlus,
@@ -28,12 +27,13 @@ import {
   Users,
   AlertTriangle,
   ChevronDown,
-  Phone,
   IdCard,
   Building2,
   Handshake,
+  Car,
+  Loader2,
 } from 'lucide-react';
-import { useData, type OrderService } from '@/context/DataContext';
+import { useData, type OrderService, type ParceiroServico } from '@/context/DataContext';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import { DataTable } from '@/components/ui/DataTable';
 import { toast } from 'sonner';
@@ -48,8 +48,8 @@ type OSFormData = {
   os: string;
   clienteId: string;
   solicitante: string;
-  tipoServico: string;
   motorista: string;
+  veiculoId: string;
   centroCusto: string;
   valorBruto: number;
   custo: number;
@@ -72,8 +72,6 @@ type VehicleOption = {
   placa: string;
   modelo: string;
   marca: string;
-  proprietario_tipo: 'interno' | 'parceiro';
-  parceiro_id: string | null;
 };
 
 const initialQuickAddDriverForm: QuickAddDriverForm = {
@@ -137,8 +135,43 @@ const tipoDocumentoOptions = [
 const normalizeTextValue = (value: string): string => value.trim().toLowerCase();
 const normalizeDigitsValue = (value: string): string => value.replace(/\D/g, '');
 
+const MARCAS_VEICULOS = [
+  { id: 'Acura', nome: 'Acura' }, { id: 'Alfa Romeo', nome: 'Alfa Romeo' }, { id: 'Aston Martin', nome: 'Aston Martin' },
+  { id: 'Audi', nome: 'Audi' }, { id: 'Bentley', nome: 'Bentley' }, { id: 'BMW', nome: 'BMW' }, { id: 'BYD', nome: 'BYD' },
+  { id: 'Caoa Chery', nome: 'Caoa Chery' }, { id: 'Chevrolet', nome: 'Chevrolet' }, { id: 'Chrysler', nome: 'Chrysler' },
+  { id: 'Citroën', nome: 'Citroën' }, { id: 'Dodge', nome: 'Dodge' }, { id: 'Ferrari', nome: 'Ferrari' },
+  { id: 'Fiat', nome: 'Fiat' }, { id: 'Ford', nome: 'Ford' }, { id: 'GWM', nome: 'GWM' }, { id: 'Honda', nome: 'Honda' },
+  { id: 'Hyundai', nome: 'Hyundai' }, { id: 'Jac', nome: 'Jac' }, { id: 'Jaguar', nome: 'Jaguar' }, { id: 'Jeep', nome: 'Jeep' },
+  { id: 'Kia', nome: 'Kia' }, { id: 'Lamborghini', nome: 'Lamborghini' }, { id: 'Land Rover', nome: 'Land Rover' },
+  { id: 'Lexus', nome: 'Lexus' }, { id: 'Lifan', nome: 'Lifan' }, { id: 'Maserati', nome: 'Maserati' },
+  { id: 'McLaren', nome: 'McLaren' }, { id: 'Mercedes-Benz', nome: 'Mercedes-Benz' }, { id: 'Mini', nome: 'Mini' },
+  { id: 'Mitsubishi', nome: 'Mitsubishi' }, { id: 'Nissan', nome: 'Nissan' }, { id: 'Peugeot', nome: 'Peugeot' },
+  { id: 'Porsche', nome: 'Porsche' }, { id: 'Ram', nome: 'Ram' }, { id: 'Renault', nome: 'Renault' },
+  { id: 'Rolls-Royce', nome: 'Rolls-Royce' }, { id: 'Seat', nome: 'Seat' }, { id: 'Smart', nome: 'Smart' },
+  { id: 'Subaru', nome: 'Subaru' }, { id: 'Suzuki', nome: 'Suzuki' }, { id: 'Tesla', nome: 'Tesla' },
+  { id: 'Toyota', nome: 'Toyota' }, { id: 'Troller', nome: 'Troller' }, { id: 'Volkswagen', nome: 'Volkswagen' },
+  { id: 'Volvo', nome: 'Volvo' }, { id: 'Outra', nome: 'Outra' },
+];
+
+const TIPOS_VEICULO_OS = [
+  { id: 'carro', nome: 'Carro' }, { id: 'van', nome: 'Van' }, { id: 'onibus', nome: 'Ônibus' },
+  { id: 'moto', nome: 'Moto' }, { id: 'caminhao', nome: 'Caminhão' }, { id: 'outro', nome: 'Outro' },
+];
+
+const formatarPlacaOS = (value: string): string => {
+  const cleaned = value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 7);
+  if (cleaned.length >= 5 && /[A-Z]/.test(cleaned[4])) return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
+  if (cleaned.length >= 4) return `${cleaned.slice(0, 3)}-${cleaned.slice(3)}`;
+  return cleaned;
+};
+
+const validarPlacaOS = (placa: string): boolean => {
+  const c = placa.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  return /^[A-Z]{3}[0-9]{4}$/.test(c) || /^[A-Z]{3}[0-9]{1}[A-Z]{1}[0-9]{2}$/.test(c) || /^[A-Z]{3}[0-9]{2}[A-Z]{1}[0-9]{1}$/.test(c);
+};
+
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, servicos, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente, addCliente, addServico, addSolicitante, addCentroCusto, refreshData } = useData();
+  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, refreshData } = useData();
   const supabase = createClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQuickPassengerModalOpen, setIsQuickPassengerModalOpen] = useState(false);
@@ -152,21 +185,27 @@ export default function OSOperationalPage() {
   const passengerDraftIdRef = useRef(0);
   
   // Estados para cadastros rápidos
-  const [quickAddModal, setQuickAddModal] = useState<'cliente' | 'servico' | 'motorista' | 'solicitante' | 'centroCusto' | null>(null);
+  const [quickAddModal, setQuickAddModal] = useState<'cliente' | 'motorista' | 'solicitante' | 'centroCusto' | null>(null);
   const [quickAddForm, setQuickAddForm] = useState({ nome: '' });
   const [quickAddDriverForm, setQuickAddDriverForm] = useState<QuickAddDriverForm>(initialQuickAddDriverForm);
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
   const [vehiclesUnavailable, setVehiclesUnavailable] = useState(false);
   const [quickAddedDriverOptions, setQuickAddedDriverOptions] = useState<{ id: string; nome: string }[]>([]);
+  const [driverVehiclesAssoc, setDriverVehiclesAssoc] = useState<{ driver_id: string; vehicle_id: string }[]>([]);
+  const [isOsVehicleQuickModalOpen, setIsOsVehicleQuickModalOpen] = useState(false);
+  const [isSubmittingOsVehicle, setIsSubmittingOsVehicle] = useState(false);
+  const [osVehicleQuickForm, setOsVehicleQuickForm] = useState({
+    placa: '', modelo: '', marca: '',
+    tipo: 'carro' as 'carro' | 'van' | 'onibus' | 'moto' | 'caminhao' | 'outro',
+  });
   const [quickAddedSolicitantes, setQuickAddedSolicitantes] = useState<Array<{ id: string; nome: string; clienteId: string }>>([]);
   const [quickAddedCentrosCusto, setQuickAddedCentrosCusto] = useState<Array<{ id: string; nome: string; clienteId: string }>>([]);
-  const [quickAddedServicos, setQuickAddedServicos] = useState<Array<{ id: string; nome: string }>>([]);
   const parceiroOptions = useMemo(
-    () => parceiros.map((parceiro) => ({ id: parceiro.id, nome: parceiro.razaoSocialOuNomeCompleto })),
+    () => parceiros.map((parceiro: ParceiroServico) => ({ id: parceiro.id, nome: parceiro.razaoSocialOuNomeCompleto })),
     [parceiros]
   );
 
-  const isAnyModalOpen = isModalOpen || isQuickPassengerModalOpen || Boolean(viewingOSId) || Boolean(cancelTargetId) || Boolean(quickAddModal);
+  const isAnyModalOpen = isModalOpen || isQuickPassengerModalOpen || Boolean(viewingOSId) || Boolean(cancelTargetId) || Boolean(quickAddModal) || isOsVehicleQuickModalOpen;
 
   // Lock body scroll when modal is open
   useEffect(() => {
@@ -182,7 +221,7 @@ export default function OSOperationalPage() {
     const fetchVehicles = async () => {
       const { data, error } = await supabase
         .from('veiculos')
-        .select('id, placa, modelo, marca, proprietario_tipo, parceiro_id')
+        .select('id, placa, modelo, marca')
         .eq('status', 'ativo')
         .order('marca', { ascending: true })
         .order('modelo', { ascending: true });
@@ -208,16 +247,27 @@ export default function OSOperationalPage() {
       setVehicles((data || []) as VehicleOption[]);
     };
 
+    const fetchDriverVehicles = async () => {
+      const { data } = await supabase
+        .from('driver_vehicles')
+        .select('driver_id, vehicle_id');
+      if (data) setDriverVehiclesAssoc(data as { driver_id: string; vehicle_id: string }[]);
+    };
+
     fetchVehicles();
+    fetchDriverVehicles();
 
     const vehiclesChannel = supabase
       .channel('os-quick-add-vehicles-changes')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'veiculos' },
-        () => {
-          fetchVehicles();
-        }
+        () => { fetchVehicles(); }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'driver_vehicles' },
+        () => { fetchDriverVehicles(); }
       )
       .subscribe();
 
@@ -234,8 +284,8 @@ export default function OSOperationalPage() {
     os: '',
     clienteId: '',
     solicitante: '',
-    tipoServico: '',
     motorista: '',
+    veiculoId: '',
     centroCusto: '',
     valorBruto: 0,
     custo: 0,
@@ -265,8 +315,8 @@ export default function OSOperationalPage() {
       os: osItem.os,
       clienteId: osItem.clienteId,
       solicitante: osItem.solicitante,
-      tipoServico: osItem.tipoServico,
       motorista: osItem.motorista,
+      veiculoId: osItem.veiculoId || '',
       centroCusto: osItem.centroCustoId || '',
       valorBruto: osItem.valorBruto,
       custo: osItem.custo,
@@ -360,7 +410,6 @@ export default function OSOperationalPage() {
     });
   }, [drivers, quickAddedDriverOptions]);
 
-  
   const formatPhone = (value: string) => {
     const digits = value.replace(/\D/g, '').slice(0, 11);
     const part1 = digits.slice(0, 2);
@@ -515,11 +564,7 @@ export default function OSOperationalPage() {
     setIsQuickPassengerModalOpen(true);
   };
 
-  const handleQuickAddServico = () => {
-    setQuickAddModal('servico');
-    setQuickAddForm({ nome: '' });
-  };
-
+  
   const handleQuickAddMotorista = () => {
     setQuickAddModal('motorista');
     setQuickAddForm({ nome: '' });
@@ -544,6 +589,61 @@ export default function OSOperationalPage() {
     setQuickAddForm({ nome: '' });
   };
 
+  const handleQuickAddVeiculo = () => {
+    if (!formData.motorista) {
+      toast.error('Selecione primeiro o motorista.');
+      return;
+    }
+    setOsVehicleQuickForm({ placa: '', modelo: '', marca: '', tipo: 'carro' });
+    setIsOsVehicleQuickModalOpen(true);
+  };
+
+  const handleOsVehicleQuickSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const driver = drivers.find(d => d.name === formData.motorista);
+    if (!driver) {
+      toast.error('Motorista não encontrado no sistema.');
+      return;
+    }
+    setIsSubmittingOsVehicle(true);
+    try {
+      if (!validarPlacaOS(osVehicleQuickForm.placa)) {
+        throw new Error('Formato de placa inválido. Use ABC-1234 ou Mercosul ABC-1D23.');
+      }
+      const plateNorm = osVehicleQuickForm.placa.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (vehicles.some(v => v.placa.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === plateNorm)) {
+        throw new Error('Já existe um veículo com esta placa.');
+      }
+      const { data: newV, error: vehicleError } = await supabase
+        .from('veiculos')
+        .insert([{
+          placa: osVehicleQuickForm.placa.trim().toUpperCase(),
+          modelo: osVehicleQuickForm.modelo.trim(),
+          marca: osVehicleQuickForm.marca.trim(),
+          tipo: osVehicleQuickForm.tipo,
+          status: 'ativo',
+          ano: new Date().getFullYear(),
+          renavam: '',
+        }])
+        .select('id, placa, modelo, marca')
+        .single();
+      if (vehicleError) throw vehicleError;
+      const { error: linkError } = await supabase
+        .from('driver_vehicles')
+        .insert([{ driver_id: driver.id, vehicle_id: newV.id }]);
+      if (linkError) throw linkError;
+      setVehicles(prev => [...prev, { ...newV }]);
+      setDriverVehiclesAssoc(prev => [...prev, { driver_id: driver.id, vehicle_id: newV.id }]);
+      setFormData(prev => ({ ...prev, veiculoId: newV.id }));
+      toast.success('Veículo cadastrado e vinculado ao motorista!');
+      setIsOsVehicleQuickModalOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao salvar veículo.');
+    } finally {
+      setIsSubmittingOsVehicle(false);
+    }
+  };
+
   const closeQuickAddModal = () => {
     setQuickAddModal(null);
     setQuickAddForm({ nome: '' });
@@ -564,18 +664,7 @@ export default function OSOperationalPage() {
           setFormData(prev => ({ ...prev, clienteId: newCliente.id, solicitante: '', centroCusto: '' }));
           break;
         }
-        case 'servico': {
-          const newServico = await addServico(quickAddForm.nome.trim());
-          toast.success('Serviço cadastrado com sucesso!');
-          setQuickAddedServicos((prev) => {
-            if (prev.some((item) => item.id === newServico.id)) return prev;
-            return [...prev, { id: newServico.id, nome: newServico.nome }];
-          });
-          // Selecionar automaticamente
-          setFormData(prev => ({ ...prev, tipoServico: newServico.nome }));
-          break;
-        }
-        case 'motorista': {
+                case 'motorista': {
           const name = quickAddDriverForm.name.trim();
           const cnhDigits = quickAddDriverForm.cnh.replace(/\D/g, '');
           const cpfDigits = quickAddDriverForm.cpf.replace(/\D/g, '');
@@ -724,18 +813,9 @@ export default function OSOperationalPage() {
   };
 
   const filteredQuickAddVehicles = useMemo(() => {
-    if (quickAddDriverForm.vinculo_tipo === 'interno') {
-      return vehicles.filter((vehicle) => vehicle.proprietario_tipo === 'interno');
-    }
-
-    if (quickAddDriverForm.vinculo_tipo === 'parceiro' && quickAddDriverForm.parceiro_id) {
-      return vehicles.filter(
-        (vehicle) => vehicle.proprietario_tipo === 'parceiro' && vehicle.parceiro_id === quickAddDriverForm.parceiro_id
-      );
-    }
-
-    return [];
-  }, [vehicles, quickAddDriverForm.vinculo_tipo, quickAddDriverForm.parceiro_id]);
+    // Como não há coluna proprietario_tipo, mostrar todos os veículos ativos
+    return vehicles;
+  }, [vehicles]);
 
   const handleQuickPassengerSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -790,8 +870,8 @@ export default function OSOperationalPage() {
     e.preventDefault();
     
     // Validação dos campos obrigatórios
-    if (!formData.data || !formData.clienteId || !formData.motorista || 
-        !formData.tipoServico || !formData.valorBruto || formData.custo === undefined) {
+    if (!formData.data || !formData.clienteId || !formData.motorista || !formData.veiculoId ||
+        !formData.valorBruto || formData.custo === undefined) {
       toast.error('Preencha todos os campos obrigatórios.');
       return;
     }
@@ -832,17 +912,6 @@ export default function OSOperationalPage() {
   const currentImposto = formData.valorBruto * 0.15;
   const currentLucro = formData.valorBruto - currentImposto - formData.custo;
 
-  const mergedServicos = useMemo(() => {
-    const merged = [...servicos, ...quickAddedServicos];
-    const seenIds = new Set<string>();
-
-    return merged.filter((item) => {
-      if (seenIds.has(item.id)) return false;
-      seenIds.add(item.id);
-      return true;
-    });
-  }, [servicos, quickAddedServicos]);
-
   const availableSolicitantes = useMemo(() => {
     if (!formData.clienteId) return [];
     const mergedSolicitantes = [
@@ -857,6 +926,20 @@ export default function OSOperationalPage() {
       return true;
     });
   }, [formData.clienteId, solicitantes, quickAddedSolicitantes]);
+
+  const selectedDriverVehicleOptions = useMemo(() => {
+    if (!formData.motorista) return [];
+    const driver = drivers.find(d => d.name === formData.motorista);
+    if (!driver) return [];
+    const vehicleIds = new Set(
+      driverVehiclesAssoc
+        .filter(dv => dv.driver_id === driver.id)
+        .map(dv => dv.vehicle_id)
+    );
+    return vehicles
+      .filter(v => vehicleIds.has(v.id))
+      .map(v => ({ id: v.id, nome: `${v.marca} ${v.modelo} - ${v.placa}` }));
+  }, [drivers, formData.motorista, driverVehiclesAssoc, vehicles]);
 
   const availableCentrosCusto = useMemo(() => {
     if (!formData.clienteId) return [];
@@ -879,15 +962,6 @@ export default function OSOperationalPage() {
       clienteId: id,
       solicitante: '',
       centroCusto: ''
-    }));
-  };
-
-  const handleServicoChange = (id: string) => {
-    const servico = servicos.find(s => s.id === id);
-    setFormData(prev => ({
-      ...prev,
-      tipoServico: servico?.nome || '',
-      valorBruto: 0
     }));
   };
 
@@ -1097,7 +1171,6 @@ export default function OSOperationalPage() {
                 </div>
                 <div>
                   <p className="font-bold text-sm text-slate-700">{clienteNome}</p>
-                  <p className="text-sm text-slate-400 uppercase tracking-wide">{String(item.tipoServico).split('-')[0].trim()}</p>
                 </div>
               </div>
               );
@@ -1207,44 +1280,48 @@ export default function OSOperationalPage() {
                 >
                   <MoreVertical size={18} />
                 </button>
-                {openActionMenuId === item.id && (
-                  <div 
-                    className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
-                    style={{
-                      top: actionMenuRefs.current[item.id]?.getBoundingClientRect().bottom + 8,
-                      right: window.innerWidth - actionMenuRefs.current[item.id]?.getBoundingClientRect().right
-                    }}
-                  >
-                    <button
-                      onClick={() => handleViewOS(item.id)}
-                      className="w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-3 cursor-pointer"
+                {openActionMenuId === item.id && (() => {
+                  const rect = actionMenuRefs.current[item.id]?.getBoundingClientRect();
+                  if (!rect) return null;
+                  return (
+                    <div 
+                      className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
+                      style={{
+                        top: rect.bottom + 8,
+                        right: window.innerWidth - rect.right
+                      }}
                     >
-                      <Eye size={16} className="text-slate-400" />
-                      Visualizar
-                    </button>
-                    <button
-                      onClick={() => handleEditOS(item.id)}
-                      className="w-full px-4 py-2 text-left text-sm font-bold text-blue-600 rounded-xl hover:bg-blue-50 flex items-center gap-3 cursor-pointer"
-                    >
-                      <Pencil size={16} className="text-blue-400" />
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleReopenOS(item.id)}
-                      className="w-full px-4 py-2 text-left text-sm font-bold text-emerald-600 rounded-xl hover:bg-emerald-50 flex items-center gap-3 cursor-pointer"
-                    >
-                      <RotateCcw size={16} className="text-emerald-400" />
-                      Reabrir
-                    </button>
-                    <button
-                      onClick={() => handleCancelOS(item.id)}
-                      className="w-full px-4 py-2 text-left text-sm font-bold text-rose-600 rounded-xl hover:bg-rose-50 flex items-center gap-3 cursor-pointer"
-                    >
-                      <XOctagon size={16} className="text-rose-400" />
-                      Cancelar
-                    </button>
-                  </div>
-                )}
+                      <button
+                        onClick={() => handleViewOS(item.id)}
+                        className="w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-3 cursor-pointer"
+                      >
+                        <Eye size={16} className="text-slate-400" />
+                        Visualizar
+                      </button>
+                      <button
+                        onClick={() => handleEditOS(item.id)}
+                        className="w-full px-4 py-2 text-left text-sm font-bold text-blue-600 rounded-xl hover:bg-blue-50 flex items-center gap-3 cursor-pointer"
+                      >
+                        <Pencil size={16} className="text-blue-400" />
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => handleReopenOS(item.id)}
+                        className="w-full px-4 py-2 text-left text-sm font-bold text-emerald-600 rounded-xl hover:bg-emerald-50 flex items-center gap-3 cursor-pointer"
+                      >
+                        <RotateCcw size={16} className="text-emerald-400" />
+                        Reabrir
+                      </button>
+                      <button
+                        onClick={() => handleCancelOS(item.id)}
+                        className="w-full px-4 py-2 text-left text-sm font-bold text-rose-600 rounded-xl hover:bg-rose-50 flex items-center gap-3 cursor-pointer"
+                      >
+                        <XOctagon size={16} className="text-rose-400" />
+                        Cancelar
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
               );
             }
@@ -1382,19 +1459,22 @@ export default function OSOperationalPage() {
                            value={formData.motorista || ''} 
                            onChange={(id) => { 
                              const opt = driverOptions.find(m => m.id === id); 
-                             setFormData(prev => ({ ...prev, motorista: opt?.nome || '' })); 
+                             setFormData(prev => ({ ...prev, motorista: opt?.nome || '', veiculoId: '' })); 
                            }} 
                            required
                            onQuickAdd={handleQuickAddMotorista}
                         />
                         <GeologSearchableSelect
-                           label="Tipo de Serviço"
-                           options={mergedServicos.map(s => ({ id: s.id, nome: s.nome }))}
-                           value={mergedServicos.find(s => s.nome === formData.tipoServico)?.id || ''}
-                           onChange={handleServicoChange} 
+                           label="Veículo de Uso"
+                           options={selectedDriverVehicleOptions}
+                           value={formData.veiculoId}
+                           onChange={(id) => setFormData(prev => ({ ...prev, veiculoId: id }))}
                            required
-                           onQuickAdd={handleQuickAddServico}
+                           disabled={!formData.motorista}
+                           onQuickAdd={handleQuickAddVeiculo}
                         />
+                     </div>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                      </div>
                   </div>
 
@@ -2004,7 +2084,7 @@ export default function OSOperationalPage() {
       {quickAddModal && (
         <StandardModal
           onClose={closeQuickAddModal}
-          title={`Novo ${quickAddModal === 'cliente' ? 'Empresa' : quickAddModal === 'servico' ? 'Serviço' : quickAddModal === 'motorista' ? 'Motorista' : quickAddModal === 'solicitante' ? 'Solicitante' : 'Centro de Custo'}`}
+          title={`Novo ${quickAddModal === 'cliente' ? 'Empresa' : quickAddModal === 'motorista' ? 'Motorista' : quickAddModal === 'solicitante' ? 'Solicitante' : 'Centro de Custo'}`}
           subtitle="Cadastro rápido direto no atendimento"
           icon={quickAddModal === 'motorista' ? <UserPlus size={24} /> : <Plus size={24} />}
           maxWidthClassName={quickAddModal === 'motorista' ? 'max-w-6xl' : 'max-w-2xl'}
@@ -2191,7 +2271,7 @@ export default function OSOperationalPage() {
                     value={quickAddForm.nome}
                     onChange={(e) => setQuickAddForm(prev => ({ ...prev, nome: e.target.value }))}
                     className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                    placeholder={quickAddModal === 'cliente' ? 'Ex: Empresa ABC Ltda' : quickAddModal === 'servico' ? 'Ex: Transporte Executivo' : quickAddModal === 'solicitante' ? 'Ex: Maria Santos' : 'Ex: Departamento Comercial'}
+                    placeholder={quickAddModal === 'cliente' ? 'Ex: Empresa ABC Ltda' : quickAddModal === 'solicitante' ? 'Ex: Maria Santos' : 'Ex: Departamento Comercial'}
                   />
                 </div>
               </div>
@@ -2213,6 +2293,80 @@ export default function OSOperationalPage() {
               </div>
             </form>
           )}
+        </StandardModal>
+      )}
+
+      {/* Modal Cadastro Rápido de Veículo */}
+      {isOsVehicleQuickModalOpen && (
+        <StandardModal
+          onClose={() => setIsOsVehicleQuickModalOpen(false)}
+          title="Cadastrar Veículo"
+          subtitle="Cadastro rápido vinculado ao motorista selecionado"
+          icon={<Car size={24} />}
+          maxWidthClassName="max-w-5xl"
+        >
+          <form onSubmit={handleOsVehicleQuickSave} className="space-y-6">
+            <div className="flex flex-wrap gap-3">
+              <div className="w-[140px] space-y-2 flex-shrink-0">
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Placa <RequiredAsterisk /></label>
+                <input
+                  required
+                  value={osVehicleQuickForm.placa}
+                  onChange={e => setOsVehicleQuickForm(prev => ({ ...prev, placa: formatarPlacaOS(e.target.value) }))}
+                  className="max-w-[140px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
+                  placeholder="ABC-1234"
+                  maxLength={8}
+                />
+              </div>
+              <div className="w-[220px] space-y-2 flex-shrink-0">
+                <GeologSearchableSelect
+                  label="Marca"
+                  options={MARCAS_VEICULOS}
+                  value={osVehicleQuickForm.marca}
+                  onChange={value => setOsVehicleQuickForm(prev => ({ ...prev, marca: value }))}
+                  required
+                  triggerClassName="mt-[9px] h-[60px]"
+                />
+              </div>
+              <div className="flex-1 space-y-2 min-w-[150px]">
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Modelo <RequiredAsterisk /></label>
+                <input
+                  required
+                  value={osVehicleQuickForm.modelo}
+                  onChange={e => setOsVehicleQuickForm(prev => ({ ...prev, modelo: e.target.value }))}
+                  className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
+                  placeholder="Ex: Corolla"
+                />
+              </div>
+              <div className="w-[180px] space-y-2 flex-shrink-0">
+                <GeologSearchableSelect
+                  label="Tipo"
+                  options={TIPOS_VEICULO_OS}
+                  value={osVehicleQuickForm.tipo}
+                  onChange={value => setOsVehicleQuickForm(prev => ({ ...prev, tipo: value as typeof osVehicleQuickForm.tipo }))}
+                  required
+                  disableSearch
+                  triggerClassName="mt-[9px] h-[60px]"
+                />
+              </div>
+            </div>
+            <div className="flex gap-4 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsOsVehicleQuickModalOpen(false)}
+                className="flex-1 py-4 border-2 border-slate-200 text-slate-500 font-black rounded-2xl hover:bg-slate-50 transition-all uppercase tracking-widest text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmittingOsVehicle}
+                className="flex-1 py-4 bg-green-600 text-white font-black rounded-2xl hover:bg-green-500 shadow-lg shadow-green-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50 uppercase tracking-widest text-xs cursor-pointer"
+              >
+                {isSubmittingOsVehicle ? <Loader2 className="animate-spin" size={18} /> : 'Cadastrar Veículo'}
+              </button>
+            </div>
+          </form>
         </StandardModal>
       )}
     </div>

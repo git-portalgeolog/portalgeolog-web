@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Truck, ShieldCheck, TrendingUp, ChevronRight, LogIn } from 'lucide-react';
+import { ShieldCheck, TrendingUp, ChevronRight, LogIn } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function Home() {
@@ -13,6 +13,7 @@ export default function Home() {
       {/* Navbar */}
       <nav className="flex justify-between items-center py-6 px-8 max-w-7xl mx-auto">
         <div className="flex items-center gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="Geolog Logo" className="h-10 w-auto" />
           <span className="text-2xl font-bold tracking-tight text-[var(--color-geolog-blue)]">Portal Geolog</span>
           <span className="px-2 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-sm uppercase tracking-widest animate-pulse">Teste</span>

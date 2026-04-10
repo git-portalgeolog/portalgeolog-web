@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, usePathname } from 'next/navigation';
-import { useEffect, useState, ReactNode, cloneElement, ReactElement } from 'react';
+import { useEffect, useState, cloneElement, ReactElement } from 'react';
 import { useNotifications } from '@/hooks/useNotifications';
 import { 
   Truck, 
@@ -13,8 +13,6 @@ import {
   Settings, 
   Bell, 
   Menu, 
-  ChevronLeft, 
-  ChevronRight,
   Building,
   ShieldCheck,
   Package,
@@ -48,7 +46,7 @@ export default function DashboardLayout({
   }, [user, loading, router]);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = () => {
       if (showNotifications) {
         setShowNotifications(false);
       }
@@ -62,6 +60,7 @@ export default function DashboardLayout({
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#0A2540]">
         <div className="flex flex-col items-center gap-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="Portal Geolog" className="w-16 h-16 animate-pulse drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]" />
           <p className="text-[#0A2540] dark:text-white font-medium">Carregando...</p>
         </div>
@@ -86,6 +85,7 @@ export default function DashboardLayout({
       >
         <div className={`p-6 flex items-center ${collapsed ? 'justify-center' : 'justify-start gap-3'} border-b border-blue-800/50 h-20 overflow-hidden`}>
           <div className="p-1.5 bg-white rounded-lg flex-shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo.png" alt="Geolog Logo" className="h-6 w-auto" />
           </div>
           {!collapsed && (
@@ -377,7 +377,7 @@ function NavLink({ href, icon, label, active = false, collapsed = false }: { hre
       }`}
     >
       <div className={`${active ? 'scale-110' : 'group-hover/link:translate-x-0.5 group-hover/link:scale-110'} transition-all duration-200`}>
-        {cloneElement(icon as any, { size: 20 })}
+        {cloneElement(icon as ReactElement<{ size?: number }>, { size: 20 })}
       </div>
       {!collapsed && <span className="whitespace-nowrap">{label}</span>}
       {active && !collapsed && (

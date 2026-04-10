@@ -5,15 +5,12 @@ import {
   DollarSign, 
   TrendingUp, 
   Download, 
-  Search, 
-  Filter, 
   CheckCircle2, 
-  AlertCircle,
-  FileSpreadsheet
+  AlertCircle
 } from 'lucide-react';
 import { useData } from '@/context/DataContext';
 import { useAuth } from '@/context/AuthContext';
-import { DataTable, Column } from '@/components/ui/DataTable';
+import { DataTable } from '@/components/ui/DataTable';
 
 export default function MedicaoFinanceiraPage() {
   const { osList, clientes, updateOSStatus } = useData();
@@ -116,6 +113,7 @@ export default function MedicaoFinanceiraPage() {
           {
             key: 'documento',
             title: 'Documento / Data',
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             render: (_: any, item: any) => (
               <div className="flex flex-col gap-1">
                 <span className="text-base font-bold text-slate-800 leading-none">#{item.os}</span>
@@ -126,7 +124,8 @@ export default function MedicaoFinanceiraPage() {
           {
             key: 'cliente',
             title: 'Cliente',
-            render: (_: any, item: any) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            render: (_: unknown, item: any) => {
               const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || 'N/A';
               return (
                 <span className="text-base font-semibold text-slate-700">{clienteNome}</span>
@@ -136,6 +135,7 @@ export default function MedicaoFinanceiraPage() {
           {
             key: 'trecho',
             title: 'Itinerário / KM',
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             render: (_: any, item: any) => (
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-slate-800">{item.trecho}</span>
@@ -149,9 +149,9 @@ export default function MedicaoFinanceiraPage() {
             key: 'valorBruto',
             title: 'Faturamento (R$)',
             align: 'right',
-            render: (value: number) => (
+            render: (value: unknown) => (
               <span className="text-right font-black text-slate-900 tabular-nums text-lg">
-                {formatCurrency(value)}
+                {formatCurrency(value as number)}
               </span>
             )
           },
@@ -159,9 +159,9 @@ export default function MedicaoFinanceiraPage() {
             key: 'imposto',
             title: 'Deduções (12%)',
             align: 'right',
-            render: (value: number) => (
+            render: (value: unknown) => (
               <span className="text-right font-bold text-red-500 tabular-nums text-sm">
-                -{formatCurrency(value)}
+                -{formatCurrency(value as number)}
               </span>
             )
           },
@@ -169,9 +169,9 @@ export default function MedicaoFinanceiraPage() {
             key: 'custo',
             title: 'Repasse (R$)',
             align: 'right',
-            render: (value: number) => (
+            render: (value: unknown) => (
               <span className="text-right font-bold text-slate-600 tabular-nums text-sm">
-                {formatCurrency(value)}
+                {formatCurrency(value as number)}
               </span>
             )
           },
@@ -179,9 +179,9 @@ export default function MedicaoFinanceiraPage() {
             key: 'lucro',
             title: 'Lucro Líquido',
             align: 'right',
-            render: (value: number) => (
-              <span className={`text-right text-lg font-black tabular-nums ${value >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                {formatCurrency(value)}
+            render: (value: unknown) => (
+              <span className={`text-right text-lg font-black tabular-nums ${(value as number) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {formatCurrency(value as number)}
               </span>
             )
           },
@@ -189,6 +189,7 @@ export default function MedicaoFinanceiraPage() {
             key: 'status',
             title: 'Status',
             align: 'center',
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             render: (_: any, item: any) => (
               <div className="flex justify-center">
                 {item.status.financeiro === 'Faturado' ? (
@@ -218,7 +219,7 @@ export default function MedicaoFinanceiraPage() {
   );
 }
 
-function FinanceStatCard({ label, value, subValue, icon, color }: { label: string, value: string, subValue: string, icon: any, color: string }) {
+function FinanceStatCard({ label, value, subValue, icon, color }: { label: string, value: string, subValue: string, icon: React.ReactNode, color: string }) {
   const bgColors: Record<string, string> = {
     blue: 'bg-blue-50 border-blue-100',
     orange: 'bg-orange-50 border-orange-100',

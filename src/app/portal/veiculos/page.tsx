@@ -1,21 +1,19 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import StandardModal from '@/components/StandardModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
 import { useConfirm } from '@/hooks/useConfirm';
-import { Truck, Plus, MoreVertical, Loader2, Car, Settings, Users, Palette, Building2, Eye, Edit, Trash2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Truck, Plus, Loader2, Car, Settings, Users, Palette, Eye, Edit, Trash2 } from 'lucide-react';
 import { DataTable } from '@/components/ui/DataTable';
 import { PageHeader } from '@/components/ui/PageHeader';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import { toast } from 'sonner';
-import { useData, type ParceiroServico, type Vehicle } from '@/context/DataContext';
+import { useData, type Vehicle } from '@/context/DataContext';
 
 type VehicleType = Vehicle['tipo'];
-type VehicleStatus = Vehicle['status'];
 
 // Função para formatar Renavam
 const formatarRenavam = (value: string): string => {
@@ -26,14 +24,6 @@ const formatarRenavam = (value: string): string => {
   const limited = cleaned.slice(0, 11);
   
   return limited;
-};
-
-// Função para validar Renavam
-const validarRenavam = (renavam: string): boolean => {
-  const cleaned = renavam.replace(/\D/g, '');
-  
-  // RENAVAM deve ter exatamente 11 dígitos
-  return /^[0-9]{11}$/.test(cleaned);
 };
 
 // Função para formatar placa
@@ -87,8 +77,6 @@ export default function VeiculosPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
-  const actionMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const { updateVeiculo, deleteVeiculo } = useData();
   const supabase = createClient();
@@ -99,17 +87,12 @@ export default function VeiculosPage() {
     renavam: '',
     modelo: '',
     marca: '',
-    ano: new Date().getFullYear(),
+    ano: '',
     cor: '',
     tipo: 'carro' as VehicleType,
     status: 'ativo',
-    proprietario_tipo: 'parceiro' as 'interno' | 'parceiro',
-    parceiro_id: '',
   });
 
-  const { parceiros } = useData();
-
-  const parceiroOptions = parceiros.map(p => ({ id: p.id, nome: p.razaoSocialOuNomeCompleto }));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [tableUnavailable, setTableUnavailable] = useState(false);
 
@@ -123,12 +106,10 @@ export default function VeiculosPage() {
       renavam: '',
       modelo: '',
       marca: '',
-      ano: new Date().getFullYear(),
+      ano: '',
       cor: '',
       tipo: 'carro',
       status: 'ativo',
-      proprietario_tipo: 'parceiro',
-      parceiro_id: '',
     });
   };
 
@@ -201,11 +182,6 @@ export default function VeiculosPage() {
         throw new Error('Formato de placa inválido. Use formato antigo (ABC-1234) ou Mercosul (ABC-1D23).');
       }
 
-      // Validar formato do Renavam
-      if (!validarRenavam(formData.renavam)) {
-        throw new Error('RENAVAM inválido. Deve conter exatamente 11 dígitos numéricos.');
-      }
-
       if (hasDuplicatePlate(formData.placa)) {
         throw new Error('Já existe um veículo com esta placa.');
       }
@@ -215,17 +191,11 @@ export default function VeiculosPage() {
         renavam: formData.renavam.trim(),
         modelo: formData.modelo.trim(),
         marca: formData.marca.trim(),
-        ano: formData.ano,
+        ano: formData.ano ? parseInt(formData.ano) : 0,
         cor: formData.cor.trim(),
         tipo: formData.tipo,
         status: formData.status,
-        proprietario_tipo: formData.proprietario_tipo,
       };
-
-      // Só adiciona parceiro_id se for de parceiro
-      if (formData.proprietario_tipo === 'parceiro' && formData.parceiro_id) {
-        insertData.parceiro_id = formData.parceiro_id;
-      }
 
       const { data, error } = await supabase
         .from('veiculos')
@@ -395,12 +365,10 @@ export default function VeiculosPage() {
                   renavam: item.renavam,
                   modelo: item.modelo,
                   marca: item.marca,
-                  ano: item.ano,
+                  ano: item.ano?.toString() || '',
                   cor: item.cor || '',
                   tipo: item.tipo,
                   status: item.status,
-                  proprietario_tipo: item.proprietario_tipo,
-                  parceiro_id: item.parceiro_id || ''
                 });
                 setIsEditModalOpen(true);
               };
@@ -466,8 +434,8 @@ export default function VeiculosPage() {
               </div>
 
               <div className="grid grid-cols-1 gap-6">
-                <div className="grid grid-cols-4 gap-3">
-                  <div className="space-y-2">
+                <div className="flex flex-wrap gap-3">
+                  <div className="w-[140px] space-y-2 flex-shrink-0">
                     <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Placa <RequiredAsterisk /></label>
                     <input
                       required
@@ -476,38 +444,80 @@ export default function VeiculosPage() {
                         const formatted = formatarPlaca(e.target.value);
                         setFormData({...formData, placa: formatted});
                       }}
-                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[9px] h-[60px]"
+                      className="max-w-[140px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
                       placeholder="ABC-1234"
                       maxLength={8}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Renavam <RequiredAsterisk /></label>
-                    <input
+                  <div className="w-[220px] space-y-2 flex-shrink-0">
+                    <GeologSearchableSelect
+                      label="Marca"
+                      options={[
+                        { id: 'Acura', nome: 'Acura' },
+                        { id: 'Alfa Romeo', nome: 'Alfa Romeo' },
+                        { id: 'Aston Martin', nome: 'Aston Martin' },
+                        { id: 'Audi', nome: 'Audi' },
+                        { id: 'Bentley', nome: 'Bentley' },
+                        { id: 'BMW', nome: 'BMW' },
+                        { id: 'BYD', nome: 'BYD' },
+                        { id: 'Caoa Chery', nome: 'Caoa Chery' },
+                        { id: 'Chevrolet', nome: 'Chevrolet' },
+                        { id: 'Chrysler', nome: 'Chrysler' },
+                        { id: 'Citroën', nome: 'Citroën' },
+                        { id: 'Dodge', nome: 'Dodge' },
+                        { id: 'Ferrari', nome: 'Ferrari' },
+                        { id: 'Fiat', nome: 'Fiat' },
+                        { id: 'Ford', nome: 'Ford' },
+                        { id: 'GWM', nome: 'GWM' },
+                        { id: 'Honda', nome: 'Honda' },
+                        { id: 'Hyundai', nome: 'Hyundai' },
+                        { id: 'Jac', nome: 'Jac' },
+                        { id: 'Jaguar', nome: 'Jaguar' },
+                        { id: 'Jeep', nome: 'Jeep' },
+                        { id: 'Kia', nome: 'Kia' },
+                        { id: 'Lamborghini', nome: 'Lamborghini' },
+                        { id: 'Land Rover', nome: 'Land Rover' },
+                        { id: 'Lexus', nome: 'Lexus' },
+                        { id: 'Lifan', nome: 'Lifan' },
+                        { id: 'Maserati', nome: 'Maserati' },
+                        { id: 'McLaren', nome: 'McLaren' },
+                        { id: 'Mercedes-Benz', nome: 'Mercedes-Benz' },
+                        { id: 'Mini', nome: 'Mini' },
+                        { id: 'Mitsubishi', nome: 'Mitsubishi' },
+                        { id: 'Nissan', nome: 'Nissan' },
+                        { id: 'Peugeot', nome: 'Peugeot' },
+                        { id: 'Porsche', nome: 'Porsche' },
+                        { id: 'Ram', nome: 'Ram' },
+                        { id: 'Renault', nome: 'Renault' },
+                        { id: 'Rolls-Royce', nome: 'Rolls-Royce' },
+                        { id: 'Seat', nome: 'Seat' },
+                        { id: 'Smart', nome: 'Smart' },
+                        { id: 'Subaru', nome: 'Subaru' },
+                        { id: 'Suzuki', nome: 'Suzuki' },
+                        { id: 'Tesla', nome: 'Tesla' },
+                        { id: 'Toyota', nome: 'Toyota' },
+                        { id: 'Troller', nome: 'Troller' },
+                        { id: 'Volkswagen', nome: 'Volkswagen' },
+                        { id: 'Volvo', nome: 'Volvo' },
+                        { id: 'Outra', nome: 'Outra' }
+                      ]}
+                      value={formData.marca}
+                      onChange={(value) => setFormData({...formData, marca: value})}
                       required
-                      value={formData.renavam}
-                      onChange={e => {
-                        const formatted = formatarRenavam(e.target.value);
-                        setFormData({...formData, renavam: formatted});
-                      }}
-                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[9px] h-[60px]"
-                      placeholder="00000000000"
-                      maxLength={11}
+                      triggerClassName="mt-[9px] h-[60px]"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Ano <RequiredAsterisk /></label>
+                  <div className="flex-1 space-y-2 min-w-[150px]">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Modelo <RequiredAsterisk /></label>
                     <input
                       required
-                      type="number"
-                      min="1900"
-                      max={new Date().getFullYear() + 1}
-                      value={formData.ano}
-                      onChange={e => setFormData({...formData, ano: parseInt(e.target.value)})}
-                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[9px] h-[60px]"
+                      value={formData.modelo}
+                      onChange={e => setFormData({...formData, modelo: e.target.value})}
+                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
+                      placeholder="Ex: Gol"
                     />
                   </div>
-                  <div className="flex-[2.3] space-y-2">
+                  <div className="w-[180px] space-y-2 flex-shrink-0">
                     <GeologSearchableSelect
                       label="Tipo"
                       options={[
@@ -527,28 +537,33 @@ export default function VeiculosPage() {
                   </div>
                 </div>
 
-                <div className="flex gap-3">
-                  <div className="flex-[4.85] space-y-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Marca <RequiredAsterisk /></label>
+                <div className="flex flex-wrap gap-3">
+                  <div className="w-[180px] space-y-2 flex-shrink-0">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Renavam</label>
                     <input
-                      required
-                      value={formData.marca}
-                      onChange={e => setFormData({...formData, marca: e.target.value})}
-                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[9px] h-[60px]"
-                      placeholder="Ex: Volkswagen"
+                      value={formData.renavam}
+                      onChange={e => {
+                        const formatted = formatarRenavam(e.target.value);
+                        setFormData({...formData, renavam: formatted});
+                      }}
+                      className="w-[180px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[6px] h-[60px]"
+                      placeholder="00000000000"
+                      maxLength={11}
                     />
                   </div>
-                  <div className="flex-[4.85] space-y-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Modelo <RequiredAsterisk /></label>
+                  <div className="w-[130px] space-y-2 flex-shrink-0">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Ano</label>
                     <input
-                      required
-                      value={formData.modelo}
-                      onChange={e => setFormData({...formData, modelo: e.target.value})}
-                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[9px] h-[60px]"
-                      placeholder="Ex: Gol"
+                      type="number"
+                      min="1900"
+                      max={new Date().getFullYear() + 1}
+                      value={formData.ano}
+                      onChange={e => setFormData({...formData, ano: e.target.value})}
+                      className="w-[130px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[6px] h-[60px]"
+                      placeholder="0000"
                     />
                   </div>
-                  <div className="flex-[2.3] space-y-2">
+                  <div className="w-[250px] space-y-2 flex-shrink-0">
                     <GeologSearchableSelect
                       label="Cor"
                       options={[
@@ -569,51 +584,10 @@ export default function VeiculosPage() {
                       ]}
                       value={formData.cor}
                       onChange={(value) => setFormData({...formData, cor: value})}
-                      required
-                      triggerClassName="mt-[15px] h-[60px]"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t-2 border-slate-100"></div>
-
-            <div className="space-y-6">
-              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                  <Building2 size={20} className="text-slate-500" /> Proprietário
-                </h3>
-              </div>
-
-              <div className="flex gap-6">
-                <div className="w-[280px] space-y-2 flex-shrink-0">
-                  <GeologSearchableSelect
-                    label="Tipo de Proprietário"
-                    options={[
-                      { id: 'interno', nome: 'Frota Interna (Geolog)' },
-                      { id: 'parceiro', nome: 'Parceiro de Serviço' }
-                    ]}
-                    value={formData.proprietario_tipo}
-                    onChange={(value) => setFormData({...formData, proprietario_tipo: value as 'interno' | 'parceiro', parceiro_id: ''})}
-                    required
-                    disableSearch
-                    triggerClassName="mt-[9px] h-[60px]"
-                  />
-                </div>
-
-                {formData.proprietario_tipo === 'parceiro' && (
-                  <div className="flex-1 space-y-2">
-                    <GeologSearchableSelect
-                      label="Parceiro de Serviço"
-                      options={parceiroOptions}
-                      value={formData.parceiro_id}
-                      onChange={(value) => setFormData({...formData, parceiro_id: value})}
-                      required={formData.proprietario_tipo === 'parceiro'}
                       triggerClassName="mt-[9px] h-[60px]"
                     />
                   </div>
-                )}
+                </div>
               </div>
             </div>
 
@@ -702,33 +676,6 @@ export default function VeiculosPage() {
                 </div>
               </div>
             </div>
-
-            <div className="space-y-6 mt-8">
-              <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
-                <Building2 size={28} className="text-blue-600" />
-                <h3 className="text-xl font-black text-slate-900 uppercase tracking-[0.1em]">Proprietário</h3>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-6">
-                <div className="flex items-center gap-3">
-                  {selectedVehicle.proprietario_tipo === 'interno' ? (
-                    <Building2 size={24} className="text-blue-500" />
-                  ) : (
-                    <Building2 size={24} className="text-green-500" />
-                  )}
-                  <p className="text-lg font-bold text-slate-800">
-                    {selectedVehicle.proprietario_tipo === 'interno' ? 'Frota Interna (Geolog)' : 'Parceiro de Serviço'}
-                  </p>
-                </div>
-                {selectedVehicle.proprietario_tipo === 'parceiro' && selectedVehicle.parceiro_id && (
-                  <div className="mt-4 pt-4 border-t border-slate-200">
-                    <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2">Parceiro</p>
-                    <p className="text-base font-bold text-slate-700">
-                      {parceiros.find(p => p.id === selectedVehicle.parceiro_id)?.razaoSocialOuNomeCompleto || 'Não informado'}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         </StandardModal>
       )}
@@ -752,9 +699,6 @@ export default function VeiculosPage() {
               if (!validarPlaca(formData.placa)) {
                 throw new Error('Formato de placa inválido. Use formato antigo (ABC-1234) ou Mercosul (ABC-1D23).');
               }
-              if (!validarRenavam(formData.renavam)) {
-                throw new Error('RENAVAM inválido. Deve conter exatamente 11 dígitos numéricos.');
-              }
               if (hasDuplicatePlate(formData.placa) && selectedVehicle && selectedVehicle.placa !== formData.placa) {
                 throw new Error('Já existe um veículo com esta placa.');
               }
@@ -763,12 +707,10 @@ export default function VeiculosPage() {
                 renavam: formData.renavam,
                 modelo: formData.modelo,
                 marca: formData.marca,
-                ano: formData.ano,
+                ano: formData.ano ? parseInt(formData.ano) : 0,
                 cor: formData.cor,
                 tipo: formData.tipo,
-                status: formData.status,
-                proprietario_tipo: formData.proprietario_tipo,
-                parceiro_id: formData.proprietario_tipo === 'parceiro' ? formData.parceiro_id : undefined,
+                status: formData.status as Vehicle['status'],
               });
               setVehicles((prev) => prev.map((vehicle) => (vehicle.id === updatedVehicle.id ? updatedVehicle : vehicle)));
               setIsEditModalOpen(false);
@@ -792,8 +734,8 @@ export default function VeiculosPage() {
                 </h3>
               </div>
               <div className="grid grid-cols-1 gap-6">
-                <div className="grid grid-cols-4 gap-3">
-                  <div className="space-y-2">
+                <div className="flex flex-wrap gap-3">
+                  <div className="w-[140px] space-y-2 flex-shrink-0">
                     <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Placa <RequiredAsterisk /></label>
                     <input
                       required
@@ -802,38 +744,80 @@ export default function VeiculosPage() {
                         const formatted = formatarPlaca(e.target.value);
                         setFormData({...formData, placa: formatted});
                       }}
-                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[9px] h-[60px]"
+                      className="max-w-[140px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
                       placeholder="ABC-1234"
                       maxLength={8}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Renavam <RequiredAsterisk /></label>
-                    <input
+                  <div className="w-[220px] space-y-2 flex-shrink-0">
+                    <GeologSearchableSelect
+                      label="Marca"
+                      options={[
+                        { id: 'Acura', nome: 'Acura' },
+                        { id: 'Alfa Romeo', nome: 'Alfa Romeo' },
+                        { id: 'Aston Martin', nome: 'Aston Martin' },
+                        { id: 'Audi', nome: 'Audi' },
+                        { id: 'Bentley', nome: 'Bentley' },
+                        { id: 'BMW', nome: 'BMW' },
+                        { id: 'BYD', nome: 'BYD' },
+                        { id: 'Caoa Chery', nome: 'Caoa Chery' },
+                        { id: 'Chevrolet', nome: 'Chevrolet' },
+                        { id: 'Chrysler', nome: 'Chrysler' },
+                        { id: 'Citroën', nome: 'Citroën' },
+                        { id: 'Dodge', nome: 'Dodge' },
+                        { id: 'Ferrari', nome: 'Ferrari' },
+                        { id: 'Fiat', nome: 'Fiat' },
+                        { id: 'Ford', nome: 'Ford' },
+                        { id: 'GWM', nome: 'GWM' },
+                        { id: 'Honda', nome: 'Honda' },
+                        { id: 'Hyundai', nome: 'Hyundai' },
+                        { id: 'Jac', nome: 'Jac' },
+                        { id: 'Jaguar', nome: 'Jaguar' },
+                        { id: 'Jeep', nome: 'Jeep' },
+                        { id: 'Kia', nome: 'Kia' },
+                        { id: 'Lamborghini', nome: 'Lamborghini' },
+                        { id: 'Land Rover', nome: 'Land Rover' },
+                        { id: 'Lexus', nome: 'Lexus' },
+                        { id: 'Lifan', nome: 'Lifan' },
+                        { id: 'Maserati', nome: 'Maserati' },
+                        { id: 'McLaren', nome: 'McLaren' },
+                        { id: 'Mercedes-Benz', nome: 'Mercedes-Benz' },
+                        { id: 'Mini', nome: 'Mini' },
+                        { id: 'Mitsubishi', nome: 'Mitsubishi' },
+                        { id: 'Nissan', nome: 'Nissan' },
+                        { id: 'Peugeot', nome: 'Peugeot' },
+                        { id: 'Porsche', nome: 'Porsche' },
+                        { id: 'Ram', nome: 'Ram' },
+                        { id: 'Renault', nome: 'Renault' },
+                        { id: 'Rolls-Royce', nome: 'Rolls-Royce' },
+                        { id: 'Seat', nome: 'Seat' },
+                        { id: 'Smart', nome: 'Smart' },
+                        { id: 'Subaru', nome: 'Subaru' },
+                        { id: 'Suzuki', nome: 'Suzuki' },
+                        { id: 'Tesla', nome: 'Tesla' },
+                        { id: 'Toyota', nome: 'Toyota' },
+                        { id: 'Troller', nome: 'Troller' },
+                        { id: 'Volkswagen', nome: 'Volkswagen' },
+                        { id: 'Volvo', nome: 'Volvo' },
+                        { id: 'Outra', nome: 'Outra' }
+                      ]}
+                      value={formData.marca}
+                      onChange={(value) => setFormData({...formData, marca: value})}
                       required
-                      value={formData.renavam}
-                      onChange={e => {
-                        const formatted = formatarRenavam(e.target.value);
-                        setFormData({...formData, renavam: formatted});
-                      }}
-                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[9px] h-[60px]"
-                      placeholder="00000000000"
-                      maxLength={11}
+                      triggerClassName="mt-[9px] h-[60px]"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Ano <RequiredAsterisk /></label>
+                  <div className="flex-1 space-y-2 min-w-[150px]">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Modelo <RequiredAsterisk /></label>
                     <input
                       required
-                      type="number"
-                      min="1900"
-                      max={new Date().getFullYear() + 1}
-                      value={formData.ano}
-                      onChange={e => setFormData({...formData, ano: parseInt(e.target.value)})}
-                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[9px] h-[60px]"
+                      value={formData.modelo}
+                      onChange={e => setFormData({...formData, modelo: e.target.value})}
+                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
+                      placeholder="Ex: Gol"
                     />
                   </div>
-                  <div className="flex-[2.3] space-y-2">
+                  <div className="w-[180px] space-y-2 flex-shrink-0">
                     <GeologSearchableSelect
                       label="Tipo"
                       options={[
@@ -852,28 +836,33 @@ export default function VeiculosPage() {
                     />
                   </div>
                 </div>
-                <div className="flex gap-3">
-                  <div className="flex-[4.85] space-y-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Marca <RequiredAsterisk /></label>
+                <div className="flex flex-wrap gap-3">
+                  <div className="w-[180px] space-y-2 flex-shrink-0">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Renavam</label>
                     <input
-                      required
-                      value={formData.marca}
-                      onChange={e => setFormData({...formData, marca: e.target.value})}
-                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[9px] h-[60px]"
-                      placeholder="Ex: Volkswagen"
+                      value={formData.renavam}
+                      onChange={e => {
+                        const formatted = formatarRenavam(e.target.value);
+                        setFormData({...formData, renavam: formatted});
+                      }}
+                      className="w-[180px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[6px] h-[60px]"
+                      placeholder="00000000000"
+                      maxLength={11}
                     />
                   </div>
-                  <div className="flex-[4.85] space-y-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Modelo <RequiredAsterisk /></label>
+                  <div className="w-[130px] space-y-2 flex-shrink-0">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Ano</label>
                     <input
-                      required
-                      value={formData.modelo}
-                      onChange={e => setFormData({...formData, modelo: e.target.value})}
-                      className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[9px] h-[60px]"
-                      placeholder="Ex: Gol"
+                      type="number"
+                      min="1900"
+                      max={new Date().getFullYear() + 1}
+                      value={formData.ano}
+                      onChange={e => setFormData({...formData, ano: e.target.value})}
+                      className="w-[130px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[6px] h-[60px]"
+                      placeholder="0000"
                     />
                   </div>
-                  <div className="flex-[2.3] space-y-2">
+                  <div className="w-[250px] space-y-2 flex-shrink-0">
                     <GeologSearchableSelect
                       label="Cor"
                       options={[
@@ -894,47 +883,10 @@ export default function VeiculosPage() {
                       ]}
                       value={formData.cor}
                       onChange={(value) => setFormData({...formData, cor: value})}
-                      required
-                      triggerClassName="mt-[15px] h-[60px]"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="border-t-2 border-slate-100"></div>
-            <div className="space-y-6">
-              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                  <Building2 size={20} className="text-slate-500" /> Proprietário
-                </h3>
-              </div>
-              <div className="flex gap-6">
-                <div className="flex-[1.5] space-y-2">
-                  <GeologSearchableSelect
-                    label="Tipo de Proprietário"
-                    options={[
-                      { id: 'interno', nome: 'Frota Interna (Geolog)' },
-                      { id: 'parceiro', nome: 'Parceiro de Serviço' }
-                    ]}
-                    value={formData.proprietario_tipo}
-                    onChange={(value) => setFormData({...formData, proprietario_tipo: value as 'interno' | 'parceiro', parceiro_id: ''})}
-                    required
-                    disableSearch
-                    triggerClassName="mt-[9px] h-[60px]"
-                  />
-                </div>
-                {formData.proprietario_tipo === 'parceiro' && (
-                  <div className="flex-[3] space-y-2">
-                    <GeologSearchableSelect
-                      label="Parceiro de Serviço"
-                      options={parceiroOptions}
-                      value={formData.parceiro_id}
-                      onChange={(value) => setFormData({...formData, parceiro_id: value})}
-                      required={formData.proprietario_tipo === 'parceiro'}
                       triggerClassName="mt-[9px] h-[60px]"
                     />
                   </div>
-                )}
+                </div>
               </div>
             </div>
             <div className="flex gap-4 pt-4">

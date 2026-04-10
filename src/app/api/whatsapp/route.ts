@@ -44,8 +44,8 @@ export async function POST(request: Request) {
 
     console.log('✅ WhatsApp enviado com sucesso via WASenderAPI:', data);
     return NextResponse.json({ success: true, api_response: data });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('🔥 Erro Crítico WASenderAPI:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }

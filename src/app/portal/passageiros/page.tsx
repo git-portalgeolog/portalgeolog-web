@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useMemo, useState, useEffect } from 'react';
-import { useData, Passageiro, PassageiroEndereco, NovoPassageiroInput } from '@/context/DataContext';
-import { createClient } from '@/lib/supabase/client';
+import React, { useMemo, useState } from 'react';
+import { useData, Passageiro, PassageiroEndereco } from '@/context/DataContext';
 import StandardModal from '@/components/StandardModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useConfirm } from '@/hooks/useConfirm';
@@ -25,10 +24,14 @@ import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import { toast } from 'sonner';
 
-interface NewPassengerForm extends Omit<NovoPassageiroInput, 'enderecos'> {
-  enderecos: Array<Omit<PassageiroEndereco, 'id'>>;
+interface NewPassengerForm {
+  nomeCompleto: string;
+  email?: string;
+  celular: string;
+  cpf?: string;
   notificar: string;
   genero: string;
+  enderecos: Array<Omit<PassageiroEndereco, 'id'>>;
 }
 
 const initialEndereco = { rotulo: 'RESIDENCIAL', enderecoCompleto: '', referencia: '' };
@@ -140,7 +143,7 @@ export default function PassageirosPage() {
     }
 
     // Validar CPF (opcional, mas se preenchido precisa ter 11 dígitos)
-    const cpfDigits = formData.cpf.replace(/\D/g, '');
+    const cpfDigits = formData.cpf?.replace(/\D/g, '') || '';
     if (cpfDigits.length > 0 && cpfDigits.length !== 11) {
       toast.error('CPF deve conter exatamente 11 dígitos.');
       return;
@@ -155,7 +158,7 @@ export default function PassageirosPage() {
         enderecos: validEnderecos.map((endereco) => ({
           rotulo: endereco.rotulo.trim(),
           enderecoCompleto: endereco.enderecoCompleto.trim(),
-          referencia: endereco.referencia.trim()
+          referencia: endereco.referencia?.trim() || ''
         }))
       });
 
@@ -188,7 +191,7 @@ export default function PassageirosPage() {
       return;
     }
 
-    const cpfDigits = formData.cpf.replace(/\D/g, '');
+    const cpfDigits = formData.cpf?.replace(/\D/g, '') || '';
     if (cpfDigits.length > 0 && cpfDigits.length !== 11) {
       toast.error('CPF deve conter exatamente 11 dígitos.');
       return;
@@ -203,7 +206,7 @@ export default function PassageirosPage() {
         enderecos: cleanedEnderecos.map((endereco) => ({
           rotulo: endereco.rotulo.trim(),
           enderecoCompleto: endereco.enderecoCompleto.trim(),
-          referencia: endereco.referencia.trim()
+          referencia: endereco.referencia?.trim() || ''
         })),
         notificar: formData.notificar === 'Sim',
         genero: formData.genero
@@ -360,7 +363,6 @@ export default function PassageirosPage() {
             align: 'center' as const,
             render: (value: unknown, item: Passageiro) => {
               void value;
-              const { updatePassageiro, deletePassageiro } = useData();
 
               const handleDelete = async () => {
                 const confirmed = await confirm({
