@@ -43,4 +43,9 @@ jobs:
           ls -la cloudflare-output | sed -n '1,40p'
 
       - name: Deploy to Cloudflare Pages
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: npx wrangler pages deploy cloudflare-output --project-name=portalgeolog-web --branch=main --verbose
