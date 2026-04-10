@@ -186,6 +186,9 @@ export default function DriverDocsModal({ driver, onClose }: DriverDocsModalProp
         .eq('id', docObj.id);
 
       if (dbError) throw dbError;
+      
+      // Atualizar lista de documentos após exclusão
+      await fetchDocs();
     } catch (err: unknown) {
       console.error("Erro ao excluir:", err);
       const message = err instanceof Error ? err.message : 'Erro ao excluir o documento.';
