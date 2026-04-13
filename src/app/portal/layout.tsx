@@ -97,7 +97,7 @@ export default function DashboardLayout({
           <NavLink 
             href="/portal/dashboard" 
             icon={<LayoutDashboard />} 
-            label="Início" 
+            label="Dashboard" 
             active={pathname === '/portal/dashboard'} 
             collapsed={collapsed}
           />
@@ -137,8 +137,7 @@ export default function DashboardLayout({
             collapsed={collapsed}
           />
 
-          {!collapsed && <p className="text-[10px] font-black text-blue-400/40 uppercase tracking-[0.2em] px-5 mt-6 mb-2">Módulos</p>}
-          
+                    
           <NavLink 
             href="/portal/clientes" 
             icon={<Building />} 
@@ -151,13 +150,6 @@ export default function DashboardLayout({
             icon={<Handshake />} 
             label="Parceiros de Serviço" 
             active={pathname === '/portal/parcerias'} 
-            collapsed={collapsed}
-          />
-          <NavLink 
-            href="/portal/servicos" 
-            icon={<Package />} 
-            label="Serviços" 
-            active={pathname === '/portal/servicos'} 
             collapsed={collapsed}
           />
           <NavLink 
@@ -373,7 +365,7 @@ function NavLink({ href, icon, label, active = false, collapsed = false }: { hre
       className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3 px-4'} py-3 rounded-xl transition-all font-bold text-sm relative group/link ${
         active 
           ? 'bg-white text-[var(--color-geolog-blue)] shadow-md' 
-          : 'text-blue-100/60 hover:text-white hover:bg-white/10'
+          : 'text-blue-200/80 hover:text-white hover:bg-white/10'
       }`}
     >
       <div className={`${active ? 'scale-110' : 'group-hover/link:translate-x-0.5 group-hover/link:scale-110'} transition-all duration-200`}>

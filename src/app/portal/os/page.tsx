@@ -32,12 +32,21 @@ import {
   Handshake,
   Car,
   Loader2,
+  LayoutGrid,
+  CalendarDays,
 } from 'lucide-react';
+import FullCalendar from '@fullcalendar/react';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import timeGridPlugin from '@fullcalendar/timegrid';
+import interactionPlugin from '@fullcalendar/interaction';
+import listPlugin from '@fullcalendar/list';
+import ptBrLocale from '@fullcalendar/core/locales/pt-br';
 import { useData, type OrderService, type ParceiroServico } from '@/context/DataContext';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import { DataTable } from '@/components/ui/DataTable';
 import { toast } from 'sonner';
 import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
+import OSCalendar from '@/components/OS/OSCalendar';
 
 type FormPassenger = { id: string; solicitanteId: string; nome: string; };
 type FormWaypoint = { label: string; lat: number | null; lng: number | null; passengers: FormPassenger[]; };
@@ -181,6 +190,7 @@ export default function OSOperationalPage() {
   const [editingOSId, setEditingOSId] = useState<string | null>(null);
   const [viewingOSId, setViewingOSId] = useState<string | null>(null);
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table');
   const actionMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const passengerDraftIdRef = useRef(0);
   
@@ -1112,227 +1122,283 @@ export default function OSOperationalPage() {
   return (
     <div className="space-y-6">
       {/* Operational Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <OpStatCard label="Pendentes" value={osList.filter(o => o.status.operacional === 'Pendente').length} icon={<Clock className="text-slate-500" size={24} />} />
-        <OpStatCard label="Aguardando" value={osList.filter(o => o.status.operacional === 'Aguardando').length} icon={<Clock className="text-indigo-500" size={24} />} />
-        <OpStatCard label="Em Rota" value={osList.filter(o => o.status.operacional === 'Em Rota').length} icon={<Navigation className="text-blue-500" size={24} />} />
-        <OpStatCard label="Finalizados" value={osList.filter(o => o.status.operacional === 'Finalizado').length} icon={<CheckCircle2 className="text-emerald-500" size={24} />} />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <OpStatCard label="Pendentes" value={osList.filter(o => o.status.operacional === 'Pendente').length} icon={<Clock className="text-slate-500" size={20} />} />
+        <OpStatCard label="Aguardando" value={osList.filter(o => o.status.operacional === 'Aguardando').length} icon={<Clock className="text-indigo-500" size={20} />} />
+        <OpStatCard label="Em Rota" value={osList.filter(o => o.status.operacional === 'Em Rota').length} icon={<Navigation className="text-blue-500" size={20} />} />
+        <OpStatCard label="Finalizados" value={osList.filter(o => o.status.operacional === 'Finalizado').length} icon={<CheckCircle2 className="text-emerald-500" size={20} />} />
       </div>
 
-      <DataTable
-        data={filteredData}
-        actionButton={
-          <button 
-            onClick={handleOpenCreateOSModal}
-            className="flex items-center justify-center gap-2 bg-[var(--color-geolog-blue)] text-white px-8 py-3.5 rounded-2xl font-black shadow-lg shadow-blue-900/10 hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest shrink-0 w-full md:w-auto cursor-pointer whitespace-nowrap"
+      {/* Header com Toggle e Botão Nova OS */}
+      <div className={`flex flex-col md:flex-row gap-3 items-stretch md:items-center ${viewMode === 'calendar' ? 'md:justify-end' : ''}`}>
+        {/* Campo de busca (apenas em modo tabela) */}
+        {viewMode === 'table' && (
+          <div className="relative group flex-1">
+            <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <path d="m21 21-4.3-4.3"></path>
+            </svg>
+            <input
+              type="text"
+              placeholder="Pesquisar por Motorista, Trecho ou OS..."
+              className="w-full pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-2xl shadow-sm outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 font-bold text-sm transition-all"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        )}
+
+        {/* Toggle Tabela/Calendário */}
+        <div className={`flex items-center bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm shrink-0 ${viewMode === 'calendar' ? 'md:ml-0' : ''}`}>
+          <button
+            onClick={() => setViewMode('table')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm uppercase tracking-widest transition-all cursor-pointer ${
+              viewMode === 'table'
+                ? 'bg-[var(--color-geolog-blue)] text-white shadow-md'
+                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+            }`}
           >
-            <Plus size={18} strokeWidth={3} />
-            Nova OS
+            <LayoutGrid size={16} strokeWidth={2.5} />
+            Tabela
           </button>
-        }
-        columns={[
-          {
-            key: 'protocolo',
-            title: 'Protocolo',
-            render: (value: unknown, item: OrderService) => {
-              void value;
+          <button
+            onClick={() => setViewMode('calendar')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm uppercase tracking-widest transition-all cursor-pointer ${
+              viewMode === 'calendar'
+                ? 'bg-[var(--color-geolog-blue)] text-white shadow-md'
+                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            <CalendarDays size={16} strokeWidth={2.5} />
+            Calendário
+          </button>
+        </div>
 
-              return (
-              <div className="space-y-1">
-                <p className="font-black text-base text-slate-800 tracking-tight">{item.protocolo}</p>
-                <p className="text-sm font-semibold text-slate-400">{item.data.split('-').reverse().join('/')}</p>
-              </div>
-              );
-            }
-          },
-          {
-            key: 'os',
-            title: 'OS',
-            render: (value: unknown, item: OrderService) => {
-              void value;
+        {/* Botão Nova OS */}
+        <button 
+          onClick={handleOpenCreateOSModal}
+          className="flex items-center justify-center gap-2 bg-[var(--color-geolog-blue)] text-white px-8 py-3.5 rounded-2xl font-black shadow-lg shadow-blue-900/10 hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest shrink-0 w-full md:w-auto cursor-pointer whitespace-nowrap"
+        >
+          <Plus size={18} strokeWidth={3} />
+          Nova OS
+        </button>
+      </div>
 
-              return (
-              <p className="font-black text-base text-slate-700">{item.os || '—'}</p>
-              );
-            }
-          },
-          {
-            key: 'cliente',
-            title: 'Cliente',
-            width: '280px',
-            render: (value: unknown, item: OrderService) => {
-              void value;
+      {/* Conteúdo: Tabela ou Calendário */}
+      {viewMode === 'table' ? (
+        <DataTable
+          data={filteredData}
+          columns={[
+            {
+              key: 'protocolo',
+              title: 'Protocolo',
+              render: (value: unknown, item: OrderService) => {
+                void value;
 
-              const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || 'N/A';
-              return (
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
-                  <Building size={18} />
+                return (
+                <div className="space-y-1">
+                  <p className="font-black text-base text-slate-800 tracking-tight">{item.protocolo}</p>
+                  <p className="text-sm font-semibold text-slate-400">{item.data.split('-').reverse().join('/')}</p>
                 </div>
-                <div>
-                  <p className="font-bold text-sm text-slate-700">{clienteNome}</p>
-                </div>
-              </div>
-              );
-            }
-          },
-          {
-            key: 'trecho',
-            title: 'Itinerário',
-            width: '160px',
-            render: (value: unknown, item: OrderService) => {
-              void value;
-              const waypointCount = item.rota?.waypoints?.filter((waypoint) => waypoint.label.trim() !== '').length ?? 0;
-              const stopCount = waypointCount > 1 ? waypointCount - 2 : 0;
-              const displayCount = waypointCount > 0 ? waypointCount : 1;
-              
-              return (
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 rounded-lg">
-                    <Navigation size={13} className="text-blue-600" />
-                    <span className="text-sm font-extrabold text-blue-700">{displayCount}</span>
+                );
+              }
+            },
+            {
+              key: 'os',
+              title: 'OS',
+              render: (value: unknown, item: OrderService) => {
+                void value;
+
+                return (
+                <p className="font-black text-base text-slate-700">{item.os || '—'}</p>
+                );
+              }
+            },
+            {
+              key: 'cliente',
+              title: 'Cliente',
+              width: '280px',
+              render: (value: unknown, item: OrderService) => {
+                void value;
+
+                const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || 'N/A';
+                return (
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
+                    <Building size={18} />
                   </div>
-                  <span className="text-base font-medium text-slate-500">
-                    {waypointCount <= 1 ? 'Direto' : stopCount === 1 ? '1 parada' : `${stopCount} paradas`}
-                  </span>
+                  <div>
+                    <p className="font-bold text-sm text-slate-700">{clienteNome}</p>
+                  </div>
                 </div>
-              );
-            }
-          },
-          {
-            key: 'passageiros',
-            title: 'Passageiros',
-            width: '120px',
-            align: 'center',
-            render: (value: unknown, item: OrderService) => {
-              void value;
-              const passengerCount = item.rota?.waypoints?.reduce((total, waypoint) => {
-                return total + (waypoint.passengers?.length ?? 0);
-              }, 0) ?? 0;
-              
-              return (
-                <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-xl border border-emerald-100">
-                  <Users size={14} className="text-emerald-600" />
-                  <span className="text-sm font-bold text-emerald-700">{passengerCount}</span>
-                </div>
-              );
-            }
-          },
-          {
-            key: 'motorista',
-            title: 'Motorista',
-            width: '240px',
-            render: (value: unknown, item: OrderService) => {
-              void value;
-
-              return (
-              <div className="flex items-center gap-3">
-                <User size={14} className="text-blue-500" />
-                <span className="text-base font-bold">{String(item.motorista)}</span>
-              </div>
-            )
-            }
-          },
-          {
-            key: 'status',
-            title: 'Status',
-            align: 'center',
-            width: '140px',
-            render: (value: unknown, item: OrderService) => {
-              void value;
-
-              const config = getStatusConfig(item.status.operacional);
-              return (
-                <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs md:text-sm font-bold uppercase tracking-wide border ${config.bg} ${config.border} ${config.text}`}>
-                  {config.icon}
-                  {config.label}
-                </span>
-              );
-            }
-          },
-          {
-            key: 'acoes',
-            title: 'Ações',
-            align: 'center',
-            render: (value: unknown, item: OrderService) => {
-              void value;
-
-              return (
-              <div
-                className="relative inline-block"
-                ref={(el) => {
-                  if (el) {
-                    actionMenuRefs.current[item.id] = el;
-                  } else {
-                    delete actionMenuRefs.current[item.id];
-                  }
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
-                  }}
-                  className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm"
-                  aria-haspopup="true"
-                  aria-expanded={openActionMenuId === item.id}
-                >
-                  <MoreVertical size={18} />
-                </button>
-                {openActionMenuId === item.id && (() => {
-                  const rect = actionMenuRefs.current[item.id]?.getBoundingClientRect();
-                  if (!rect) return null;
-                  return (
-                    <div 
-                      className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
-                      style={{
-                        top: rect.bottom + 8,
-                        right: window.innerWidth - rect.right
-                      }}
-                    >
-                      <button
-                        onClick={() => handleViewOS(item.id)}
-                        className="w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-3 cursor-pointer"
-                      >
-                        <Eye size={16} className="text-slate-400" />
-                        Visualizar
-                      </button>
-                      <button
-                        onClick={() => handleEditOS(item.id)}
-                        className="w-full px-4 py-2 text-left text-sm font-bold text-blue-600 rounded-xl hover:bg-blue-50 flex items-center gap-3 cursor-pointer"
-                      >
-                        <Pencil size={16} className="text-blue-400" />
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => handleReopenOS(item.id)}
-                        className="w-full px-4 py-2 text-left text-sm font-bold text-emerald-600 rounded-xl hover:bg-emerald-50 flex items-center gap-3 cursor-pointer"
-                      >
-                        <RotateCcw size={16} className="text-emerald-400" />
-                        Reabrir
-                      </button>
-                      <button
-                        onClick={() => handleCancelOS(item.id)}
-                        className="w-full px-4 py-2 text-left text-sm font-bold text-rose-600 rounded-xl hover:bg-rose-50 flex items-center gap-3 cursor-pointer"
-                      >
-                        <XOctagon size={16} className="text-rose-400" />
-                        Cancelar
-                      </button>
+                );
+              }
+            },
+            {
+              key: 'trecho',
+              title: 'Itinerário',
+              width: '160px',
+              render: (value: unknown, item: OrderService) => {
+                void value;
+                const waypointCount = item.rota?.waypoints?.filter((waypoint) => waypoint.label.trim() !== '').length ?? 0;
+                const stopCount = waypointCount > 1 ? waypointCount - 2 : 0;
+                const displayCount = waypointCount > 0 ? waypointCount : 1;
+                
+                return (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 rounded-lg">
+                      <Navigation size={13} className="text-blue-600" />
+                      <span className="text-sm font-extrabold text-blue-700">{displayCount}</span>
                     </div>
-                  );
-                })()}
-              </div>
-              );
+                    <span className="text-base font-medium text-slate-500">
+                      {waypointCount <= 1 ? 'Direto' : stopCount === 1 ? '1 parada' : `${stopCount} paradas`}
+                    </span>
+                  </div>
+                );
+              }
+            },
+            {
+              key: 'passageiros',
+              title: 'Passageiros',
+              width: '120px',
+              align: 'center',
+              render: (value: unknown, item: OrderService) => {
+                void value;
+                const passengerCount = item.rota?.waypoints?.reduce((total, waypoint) => {
+                  return total + (waypoint.passengers?.length ?? 0);
+                }, 0) ?? 0;
+                
+                return (
+                  <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-xl border border-emerald-100">
+                    <Users size={14} className="text-emerald-600" />
+                    <span className="text-sm font-bold text-emerald-700">{passengerCount}</span>
+                  </div>
+                );
+              }
+            },
+            {
+              key: 'motorista',
+              title: 'Motorista',
+              width: '240px',
+              render: (value: unknown, item: OrderService) => {
+                void value;
+
+                return (
+                <div className="flex items-center gap-3">
+                  <User size={14} className="text-blue-500" />
+                  <span className="text-base font-bold">{String(item.motorista)}</span>
+                </div>
+              )
+              }
+            },
+            {
+              key: 'status',
+              title: 'Status',
+              align: 'center',
+              width: '140px',
+              render: (value: unknown, item: OrderService) => {
+                void value;
+
+                const config = getStatusConfig(item.status.operacional);
+                return (
+                  <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs md:text-sm font-bold uppercase tracking-wide border ${config.bg} ${config.border} ${config.text}`}>
+                    {config.icon}
+                    {config.label}
+                  </span>
+                );
+              }
+            },
+            {
+              key: 'acoes',
+              title: 'Ações',
+              align: 'center',
+              render: (value: unknown, item: OrderService) => {
+                void value;
+
+                return (
+                <div
+                  className="relative inline-block"
+                  ref={(el) => {
+                    if (el) {
+                      actionMenuRefs.current[item.id] = el;
+                    } else {
+                      delete actionMenuRefs.current[item.id];
+                    }
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
+                    }}
+                    className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm"
+                    aria-haspopup="true"
+                    aria-expanded={openActionMenuId === item.id}
+                  >
+                    <MoreVertical size={18} />
+                  </button>
+                  {openActionMenuId === item.id && (() => {
+                    const rect = actionMenuRefs.current[item.id]?.getBoundingClientRect();
+                    if (!rect) return null;
+                    return (
+                      <div 
+                        className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
+                        style={{
+                          top: rect.bottom + 8,
+                          right: window.innerWidth - rect.right
+                        }}
+                      >
+                        <button
+                          onClick={() => handleViewOS(item.id)}
+                          className="w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-3 cursor-pointer"
+                        >
+                          <Eye size={16} className="text-slate-400" />
+                          Visualizar
+                        </button>
+                        <button
+                          onClick={() => handleEditOS(item.id)}
+                          className="w-full px-4 py-2 text-left text-sm font-bold text-blue-600 rounded-xl hover:bg-blue-50 flex items-center gap-3 cursor-pointer"
+                        >
+                          <Pencil size={16} className="text-blue-400" />
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => handleReopenOS(item.id)}
+                          className="w-full px-4 py-2 text-left text-sm font-bold text-emerald-600 rounded-xl hover:bg-emerald-50 flex items-center gap-3 cursor-pointer"
+                        >
+                          <RotateCcw size={16} className="text-emerald-400" />
+                          Reabrir
+                        </button>
+                        <button
+                          onClick={() => handleCancelOS(item.id)}
+                          className="w-full px-4 py-2 text-left text-sm font-bold text-rose-600 rounded-xl hover:bg-rose-50 flex items-center gap-3 cursor-pointer"
+                        >
+                          <XOctagon size={16} className="text-rose-400" />
+                          Cancelar
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </div>
+                );
+              }
             }
-          }
-        ]}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        searchPlaceholder="Pesquisar por Motorista, Trecho ou OS..."
-        emptyMessage="Nenhuma OS encontrada."
-        emptyIcon={<Truck size={48} />}
-      />
+          ]}
+          searchTerm=""
+          onSearchChange={undefined}
+          searchPlaceholder=""
+          emptyMessage="Nenhuma OS encontrada."
+          emptyIcon={<Truck size={48} />}
+          showHeader={false}
+        />
+      ) : (
+        <OSCalendar 
+          osList={filteredData} 
+          clientes={clientes}
+          onEventClick={(osId: string) => handleViewOS(osId)}
+        />
+      )}
 
       {/* Modal Nova OS */}
       {isModalOpen && (
@@ -2376,11 +2442,11 @@ export default function OSOperationalPage() {
 
 function OpStatCard({ label, value, icon }: { label: string, value: number, icon: React.ReactNode }) {
   return (
-    <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center gap-6">
-      <div className="p-4 bg-slate-50 rounded-2xl">{icon}</div>
+    <div className="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm flex items-center gap-4">
+      <div className="p-3 bg-slate-50 rounded-xl">{icon}</div>
       <div>
-        <p className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-1">{label}</p>
-        <h3 className="text-3xl font-black text-slate-800 tabular-nums">{value}</h3>
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">{label}</p>
+        <h3 className="text-2xl font-black text-slate-800 tabular-nums">{value}</h3>
       </div>
     </div>
   );
