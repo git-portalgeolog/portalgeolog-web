@@ -196,7 +196,7 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
             fontSize: '8.5px'
           }}>
             <User size={8} strokeWidth={3} />
-            {os.motorista.split(' ')[0].toUpperCase()}
+            {os.motorista.split(' ').slice(0, 2).join(' ').toUpperCase()}
           </div>
         )}
       </div>
