@@ -120,23 +120,21 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
         {clienteNome}
       </div>
 
-      {/* Linha 2: Passageiro */}
-      {passengerDisplay && (
-        <div style={{ 
-          color: '#3b82f6', 
-          fontWeight: 700, 
-          whiteSpace: 'nowrap', 
-          overflow: 'hidden', 
-          textOverflow: 'ellipsis',
-          fontSize: '10px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '4px'
-        }}>
-          <div style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#3b82f6' }} />
-          {passengerDisplay}
-        </div>
-      )}
+      {/* Linha 2: Solicitante (No lugar dos passageiros) */}
+      <div style={{ 
+        color: '#64748b', 
+        fontWeight: 700, 
+        whiteSpace: 'nowrap', 
+        overflow: 'hidden', 
+        textOverflow: 'ellipsis',
+        fontSize: '10px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px'
+      }}>
+        <div style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#94a3b8' }} />
+        {os.solicitante.toUpperCase()}
+      </div>
 
       {/* Linha 3: Trajeto (Endereço) - Font weight menor */}
       {trajeto && (
@@ -157,7 +155,7 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
         </div>
       )}
 
-      {/* Linha 4: Horário, Motorista e Solicitante */}
+      {/* Linha 4: Horário e Motorista */}
       <div style={{ 
         color: '#475569', 
         fontWeight: 600, 
@@ -201,15 +199,6 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
             {os.motorista.split(' ')[0].toUpperCase()}
           </div>
         )}
-
-        <div style={{ 
-          color: '#64748b', 
-          fontWeight: 700,
-          fontSize: '8.5px',
-          paddingLeft: '2px'
-        }}>
-          {os.solicitante.split(' ')[0].toUpperCase()}
-        </div>
       </div>
     </div>
   );
