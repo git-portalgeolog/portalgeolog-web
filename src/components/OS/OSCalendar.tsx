@@ -69,17 +69,6 @@ const statusColors: Record<string, { bg: string; border: string; text: string; d
   }
 };
 
-const getStatusIcon = (status: string): React.ComponentType<{ size?: number; className?: string }> => {
-  switch (status) {
-    case 'Pendente': return Clock;
-    case 'Aguardando': return Clock;
-    case 'Em Rota': return Navigation;
-    case 'Finalizado': return CheckCircle2;
-    case 'Cancelado': return X;
-    default: return Clock;
-  }
-};
-
 // Componente de Evento Customizado
 const EventContent = ({ os, clientes }: EventContentProps) => {
   const status = os.status.operacional;
@@ -87,53 +76,115 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
   const clienteNome = clientes.find(c => c.id === os.clienteId)?.nome || 'N/A';
   const startTime = os.hora ? os.hora.slice(0, 5) : '';
   
+  // Extrair passageiros
+  const allPassengers = os.rota?.waypoints?.flatMap(w => w.passengers.map(p => p.nome)).filter(Boolean) || [];
+  const passengerDisplay = allPassengers.length > 0 ? allPassengers[0].toUpperCase() : '';
+  
+  // Trajeto
+  const trajeto = os.trecho || '';
+
   return (
     <div 
-      className="fc-event-custom"
+      className="fc-event-custom group transition-all duration-200 hover:shadow-md"
       style={{
         backgroundColor: colors.bg,
-        borderLeft: `3px solid ${colors.dot}`,
-        padding: '2px 4px',
-        borderRadius: '4px',
-        fontSize: '0.85em',
-        fontWeight: 600,
-        color: colors.text,
-        overflow: 'hidden',
-        whiteSpace: 'nowrap',
-        textOverflow: 'ellipsis',
+        borderLeft: `4px solid ${colors.dot}`,
+        padding: '5px 8px',
+        borderRadius: '10px',
+        fontSize: '10px',
+        lineHeight: '1.3',
+        color: '#334155',
         cursor: 'pointer',
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        gap: '1px'
+        justifyContent: 'center',
+        gap: '2px',
+        overflow: 'hidden',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+        border: `1px solid ${colors.dot}20`
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.9em' }}>
-        <span style={{ fontWeight: 700 }}>{startTime}</span>
-        <span style={{ 
-          width: '6px', 
-          height: '6px', 
-          borderRadius: '50%', 
-          backgroundColor: colors.dot,
-          flexShrink: 0
-        }} />
-      </div>
+      {/* Linha 1: Cliente */}
       <div style={{ 
-        fontWeight: 700, 
-        overflow: 'hidden',
+        fontWeight: 900, 
+        textTransform: 'uppercase', 
+        color: '#0f172a', 
+        whiteSpace: 'nowrap', 
+        overflow: 'hidden', 
         textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap'
-      }}>
-        {os.protocolo}
-      </div>
-      <div style={{ 
-        fontSize: '0.85em', 
-        opacity: 0.8,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap'
+        fontSize: '11px',
+        letterSpacing: '0.01em'
       }}>
         {clienteNome}
+      </div>
+
+      {/* Linha 2: Passageiro */}
+      {passengerDisplay && (
+        <div style={{ 
+          color: '#3b82f6', 
+          fontWeight: 700, 
+          whiteSpace: 'nowrap', 
+          overflow: 'hidden', 
+          textOverflow: 'ellipsis',
+          fontSize: '10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px'
+        }}>
+          <div style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#3b82f6' }} />
+          {passengerDisplay}
+        </div>
+      )}
+
+      {/* Linha 3: Trajeto (Endereço) - Font weight menor */}
+      {trajeto && (
+        <div style={{ 
+          fontWeight: 500, 
+          textTransform: 'uppercase', 
+          color: '#64748b', 
+          whiteSpace: 'nowrap', 
+          overflow: 'hidden', 
+          textOverflow: 'ellipsis',
+          fontSize: '9.5px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px'
+        }}>
+          <Navigation size={9} strokeWidth={3} className="text-slate-400" />
+          {trajeto}
+        </div>
+      )}
+
+      {/* Linha 4: Solicitante e Horário */}
+      <div style={{ 
+        color: '#475569', 
+        fontWeight: 600, 
+        fontSize: '9.5px',
+        whiteSpace: 'nowrap', 
+        overflow: 'hidden', 
+        textOverflow: 'ellipsis',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        marginTop: '1px'
+      }}>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '3px',
+          color: '#0ea5e9',
+          fontWeight: 800,
+          backgroundColor: '#f0f9ff',
+          padding: '1px 5px',
+          borderRadius: '4px',
+          fontSize: '9px'
+        }}>
+          <Clock size={9} strokeWidth={3} />
+          {startTime}
+        </div>
+        <span style={{ fontSize: '9px', color: '#94a3b8' }}>|</span>
+        <span style={{ color: '#64748b', fontWeight: 700 }}>{os.solicitante.toUpperCase()}</span>
       </div>
     </div>
   );
@@ -334,8 +385,8 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
             list: 'Lista'
           }}
           noEventsContent="Nenhuma OS para este período"
-          eventMinHeight={50}
-          eventShortHeight={50}
+          eventMinHeight={85}
+          eventShortHeight={85}
         />
       </div>
 
