@@ -16,7 +16,8 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  Truck
+  Truck,
+  User
 } from 'lucide-react';
 
 interface Cliente {
@@ -156,35 +157,59 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
         </div>
       )}
 
-      {/* Linha 4: Solicitante e Horário */}
+      {/* Linha 4: Horário, Motorista e Solicitante */}
       <div style={{ 
         color: '#475569', 
         fontWeight: 600, 
-        fontSize: '9.5px',
+        fontSize: '9px',
         whiteSpace: 'nowrap', 
         overflow: 'hidden', 
         textOverflow: 'ellipsis',
         display: 'flex',
         alignItems: 'center',
-        gap: '6px',
-        marginTop: '1px'
+        gap: '4px',
+        marginTop: '2px'
       }}>
         <div style={{ 
           display: 'flex', 
           alignItems: 'center', 
-          gap: '3px',
+          gap: '2px',
           color: '#0ea5e9',
           fontWeight: 800,
           backgroundColor: '#f0f9ff',
-          padding: '1px 5px',
+          padding: '1px 4px',
           borderRadius: '4px',
-          fontSize: '9px'
+          fontSize: '8.5px'
         }}>
-          <Clock size={9} strokeWidth={3} />
+          <Clock size={8} strokeWidth={3} />
           {startTime}
         </div>
-        <span style={{ fontSize: '9px', color: '#94a3b8' }}>|</span>
-        <span style={{ color: '#64748b', fontWeight: 700 }}>{os.solicitante.toUpperCase()}</span>
+
+        {os.motorista && (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '2px',
+            color: '#6366f1',
+            fontWeight: 800,
+            backgroundColor: '#f5f3ff',
+            padding: '1px 4px',
+            borderRadius: '4px',
+            fontSize: '8.5px'
+          }}>
+            <User size={8} strokeWidth={3} />
+            {os.motorista.split(' ')[0].toUpperCase()}
+          </div>
+        )}
+
+        <div style={{ 
+          color: '#64748b', 
+          fontWeight: 700,
+          fontSize: '8.5px',
+          paddingLeft: '2px'
+        }}>
+          {os.solicitante.split(' ')[0].toUpperCase()}
+        </div>
       </div>
     </div>
   );
