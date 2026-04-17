@@ -861,28 +861,39 @@ export default function OSOperationalPage() {
     const trimmedEndereco = quickPassengerForm.enderecoCompleto.trim();
     const phoneDigits = quickPassengerForm.celular.replace(/\D/g, '');
 
+    setQuickPassengerErrors({});
+
     const errors: { celular?: string } = {};
-    if (isEstrangeiro && phoneDigits.length !== 11) {
+    if (!isEstrangeiro && phoneDigits.length !== 11) {
       errors.celular = 'Celular brasileiro deve conter 11 dígitos.';
     }
 
-    if (!trimmedNome || !trimmedEndereco || Object.keys(errors).length > 0) {
+    if (!trimmedNome || Object.keys(errors).length > 0) {
       setQuickPassengerErrors(errors);
       return;
     }
 
-    try {
-      const novoPassageiro = await addPassageiro({
-        nomeCompleto: trimmedNome,
-        celular: quickPassengerForm.celular.trim(),
-        notificar: quickPassengerForm.notificar === 'Sim',
-        enderecos: [
+    if (isAddressExpanded && !trimmedEndereco) {
+      toast.error('Informe o endereço completo ou recolha a seção de endereço para salvar sem endereço.');
+      return;
+    }
+
+    const enderecos = trimmedEndereco
+      ? [
           {
             rotulo: quickPassengerForm.rotulo.trim(),
             referencia: quickPassengerForm.referencia.trim(),
             enderecoCompleto: trimmedEndereco
           }
         ]
+      : [];
+
+    try {
+      const novoPassageiro = await addPassageiro({
+        nomeCompleto: trimmedNome,
+        celular: quickPassengerForm.celular.trim(),
+        notificar: quickPassengerForm.notificar === 'Sim',
+        enderecos
       });
 
       const newWaypoints = [...formData.waypoints];
@@ -1866,7 +1877,7 @@ export default function OSOperationalPage() {
                   </div>
                 </div>
                 <input
-                  required={isEstrangeiro}
+                  required={!isEstrangeiro}
                   value={quickPassengerForm.celular}
                   onChange={(e) => {
                     const formatted = formatPhone(e.target.value);
