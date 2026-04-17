@@ -205,7 +205,7 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
 };
 
 export default function OSCalendar({ osList, clientes, onEventClick }: OSCalendarProps) {
-  const [currentView, setCurrentView] = useState<'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'>('dayGridMonth');
+  const [currentView, setCurrentView] = useState<'dayGridMonth' | 'dayGridWeek' | 'dayGridDay' | 'listWeek'>('dayGridMonth');
   const calendarRef = React.useRef<FullCalendar>(null);
 
   // Converter OS para eventos do FullCalendar
@@ -251,7 +251,7 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
     console.log('Data selecionada:', selectInfo.startStr);
   }, []);
 
-  const changeView = (view: 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek') => {
+  const changeView = (view: 'dayGridMonth' | 'dayGridWeek' | 'dayGridDay' | 'listWeek') => {
     setCurrentView(view);
     const calendarApi = calendarRef.current?.getApi();
     if (calendarApi) {
@@ -322,13 +322,13 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
         <div className="flex items-center bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
           {[
             { key: 'dayGridMonth', label: 'Mês', icon: CalendarDays },
-            { key: 'timeGridWeek', label: 'Semana', icon: CalendarDays },
-            { key: 'timeGridDay', label: 'Dia', icon: Clock },
+            { key: 'dayGridWeek', label: 'Semana', icon: CalendarDays },
+            { key: 'dayGridDay', label: 'Dia', icon: Clock },
             { key: 'listWeek', label: 'Lista', icon: Truck },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
-              onClick={() => changeView(key as 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek')}
+              onClick={() => changeView(key as 'dayGridMonth' | 'dayGridWeek' | 'dayGridDay' | 'listWeek')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-xs uppercase tracking-wider transition-all ${
                 currentView === key
                   ? 'bg-[var(--color-geolog-blue)] text-white shadow-md'
@@ -362,6 +362,9 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
           moreLinkContent={(arg) => `+${arg.num} mais`}
           moreLinkClassNames="text-blue-600 font-bold text-xs hover:text-blue-800"
           eventDisplay="block"
+          slotEventOverlap={false}
+          slotDuration="00:30:00"
+          slotLabelInterval="01:00"
           eventTimeFormat={{
             hour: '2-digit',
             minute: '2-digit',
@@ -381,7 +384,7 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
           slotMaxTime="22:00:00"
           allDaySlot={true}
           allDayText="Dia Todo"
-          expandRows={false}
+          expandRows={true}
           stickyHeaderDates={true}
           nowIndicator={true}
           navLinks={true}
@@ -399,9 +402,62 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
             list: 'Lista'
           }}
           noEventsContent="Nenhuma OS para este período"
-          eventMinHeight={85}
-          eventShortHeight={85}
+          eventMinHeight={100}
         />
+        <style jsx global>{`
+          /* Estilos para o DayGrid (Mês, Semana, Dia) */
+          .fc .fc-daygrid-day-frame {
+            min-height: 50px !important;
+          }
+          
+          .fc .fc-daygrid-day-events {
+            padding: 8px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 8px !important;
+          }
+
+          .fc-daygrid-event-harness {
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 100px !important;
+          }
+
+          /* Garantir que o conteúdo do evento ocupe o espaço */
+          .fc-event-custom {
+            min-height: 100px !important;
+          }
+
+          /* Remover estilos de slots que não serão mais usados se estivermos em dayGrid */
+          .fc .fc-timegrid-slot {
+            height: 100px !important;
+          }
+
+          .fc-v-event {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+
+          /* Melhorar visual do scroll */
+          .fc-scroller {
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e1 transparent;
+          }
+
+          .fc-scroller::-webkit-scrollbar {
+            width: 6px;
+          }
+
+          .fc-scroller::-webkit-scrollbar-track {
+            background: transparent;
+          }
+
+          .fc-scroller::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 20px;
+          }
+        `}</style>
       </div>
 
       {/* Legenda de Status */}
