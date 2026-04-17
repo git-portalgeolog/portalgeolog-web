@@ -1,17 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import StandardModal from '@/components/StandardModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
 import { useConfirm } from '@/hooks/useConfirm';
-import { Truck, Plus, Loader2, Car, Settings, Users, Palette, Eye, Edit, Trash2 } from 'lucide-react';
+import { Truck, Plus, Loader2, Car, Palette, Eye, Edit, Trash2, Bus } from 'lucide-react';
 import { DataTable } from '@/components/ui/DataTable';
 import { PageHeader } from '@/components/ui/PageHeader';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import { toast } from 'sonner';
 import { useData, type Vehicle } from '@/context/DataContext';
+import { fetchVeiculosPage } from '@/lib/supabase/queries';
+import { useServerPaginatedTable } from '@/hooks/useServerPaginatedTable';
 
 type VehicleType = Vehicle['tipo'];
 
@@ -69,17 +71,33 @@ const validarPlaca = (placa: string): boolean => {
   return regexAntigo.test(cleaned) || regexMercosulCarro.test(cleaned) || regexMercosulMoto.test(cleaned);
 };
 
+// Função para obter ícone baseado no tipo de veículo
+const getTipoIcon = (tipo: VehicleType) => {
+  switch (tipo) {
+    case 'carro':
+      return <Car size={18} />;
+    case 'moto':
+      return <Car size={18} />;
+    case 'onibus':
+      return <Bus size={18} />;
+    case 'caminhao':
+      return <Truck size={18} />;
+    case 'van':
+      return <Car size={18} />;
+    default:
+      return <Car size={18} />;
+  }
+};
+
 export default function VeiculosPage() {
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const { updateVeiculo, deleteVeiculo } = useData();
   const supabase = createClient();
+  const vehicleTable = useServerPaginatedTable(fetchVeiculosPage, 10);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -94,11 +112,6 @@ export default function VeiculosPage() {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [tableUnavailable, setTableUnavailable] = useState(false);
-
-  const normalizePlate = (plate: string): string => {
-    return plate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-  };
 
   const resetForm = () => {
     setFormData({
@@ -113,64 +126,25 @@ export default function VeiculosPage() {
     });
   };
 
-  const hasDuplicatePlate = (plate: string): boolean => {
-    const normalizedPlate = normalizePlate(plate);
-    if (!normalizedPlate) return false;
+  const hasDuplicatePlate = async (plate: string, excludeId?: string): Promise<boolean> => {
+    const formattedPlate = formatarPlaca(plate);
+    if (!formattedPlate) return false;
 
-    return vehicles.some((vehicle) => {
-      const vehiclePlate = normalizePlate(vehicle.placa);
-      return vehiclePlate === normalizedPlate;
-    });
+    let query = supabase
+      .from('veiculos')
+      .select('id')
+      .eq('placa', formattedPlate)
+      .limit(1);
+
+    if (excludeId) {
+      query = query.neq('id', excludeId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return (data || []).length > 0;
   };
-
-  useEffect(() => {
-    const fetchVehicles = async () => {
-      const { data, error } = await supabase
-        .from('veiculos')
-        .select('*')
-        .order('marca', { ascending: true })
-        .order('modelo', { ascending: true });
-      
-      if (error) {
-        const isMissingTable =
-          error.code === '42P01' ||
-          error.message?.toLowerCase().includes('veiculos') ||
-          error.message?.toLowerCase().includes('does not exist');
-
-        if (isMissingTable) {
-          setTableUnavailable(true);
-          setVehicles([]);
-          setLoading(false);
-          return;
-        }
-
-        console.error('Erro ao buscar veículos:', error);
-        toast.error('Erro ao buscar veículos.');
-      } else {
-        setTableUnavailable(false);
-        setVehicles(data as Vehicle[]);
-      }
-      setLoading(false);
-    };
-
-    fetchVehicles();
-
-    // Set up real-time subscription
-    const channel = supabase
-      .channel('veiculos-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'veiculos' },
-        () => {
-          fetchVehicles();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [supabase]);
 
   const handleAddVehicle = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -182,7 +156,7 @@ export default function VeiculosPage() {
         throw new Error('Formato de placa inválido. Use formato antigo (ABC-1234) ou Mercosul (ABC-1D23).');
       }
 
-      if (hasDuplicatePlate(formData.placa)) {
+      if (await hasDuplicatePlate(formData.placa)) {
         throw new Error('Já existe um veículo com esta placa.');
       }
 
@@ -197,7 +171,7 @@ export default function VeiculosPage() {
         status: formData.status,
       };
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('veiculos')
         .insert([insertData])
         .select('*')
@@ -205,16 +179,9 @@ export default function VeiculosPage() {
 
       if (error) throw error;
 
-      if (data) {
-        setVehicles((prev) => [...prev, data as Vehicle].sort((a, b) => {
-          const marcaCompare = a.marca.localeCompare(b.marca, 'pt-BR');
-          if (marcaCompare !== 0) return marcaCompare;
-          return a.modelo.localeCompare(b.modelo, 'pt-BR');
-        }));
-      }
-
       setIsModalOpen(false);
       resetForm();
+      await vehicleTable.refresh();
       toast.success('Veículo cadastrado com sucesso!');
     } catch (error) {
       if (error instanceof Error && error.message.toLowerCase().includes('duplicate key value violates unique constraint')) {
@@ -225,25 +192,6 @@ export default function VeiculosPage() {
         console.error('Erro ao salvar veículo:', error);
         toast.error('Erro ao salvar no Supabase. Verifique as políticas de RLS.');
       }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const filteredVehicles = vehicles.filter(v => 
-    v.placa.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    v.modelo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    v.marca.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const getTipoIcon = (tipo: string) => {
-    switch (tipo) {
-      case 'carro': return <Car size={16} />;
-      case 'van': return <Users size={16} />;
-      case 'onibus': return <Users size={16} />;
-      case 'moto': return <Car size={16} />;
-      case 'caminhao': return <Truck size={16} />;
-      default: return <Settings size={16} />;
     }
   };
 
@@ -263,7 +211,7 @@ export default function VeiculosPage() {
         icon={<Truck size={20} />}
       />
 
-      {tableUnavailable && (
+      {vehicleTable.error && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-6 py-4 text-amber-900 shadow-sm">
           <p className="font-black uppercase tracking-widest text-xs">Tabela de veículos indisponível</p>
           <p className="mt-2 text-sm font-medium">
@@ -274,8 +222,17 @@ export default function VeiculosPage() {
 
       {/* Vehicles List */}
       <DataTable
-        data={filteredVehicles}
-        loading={loading}
+        data={vehicleTable.items}
+        loading={vehicleTable.loading}
+        searchTerm={vehicleTable.searchTerm}
+        onSearchChange={vehicleTable.setSearchTerm}
+        disableClientSearch
+        pagination={{
+          page: vehicleTable.page,
+          pageSize: vehicleTable.pageSize,
+          totalItems: vehicleTable.totalCount,
+          onPageChange: vehicleTable.setPage,
+        }}
         actionButton={
           <button
             onClick={() => setIsModalOpen(true)}
@@ -353,7 +310,7 @@ export default function VeiculosPage() {
 
                 if (confirmed) {
                   await deleteVeiculo(item.id);
-                  setVehicles((prev) => prev.filter((vehicle) => vehicle.id !== item.id));
+                  await vehicleTable.refresh();
                   toast.success('Veículo excluído com sucesso.');
                 }
               };
@@ -406,8 +363,6 @@ export default function VeiculosPage() {
             }
           }
         ]}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
         searchPlaceholder="Buscar por placa, modelo ou marca..."
         emptyMessage="Nenhum veículo encontrado."
         emptyIcon={<Truck size={48} />}
@@ -699,10 +654,10 @@ export default function VeiculosPage() {
               if (!validarPlaca(formData.placa)) {
                 throw new Error('Formato de placa inválido. Use formato antigo (ABC-1234) ou Mercosul (ABC-1D23).');
               }
-              if (hasDuplicatePlate(formData.placa) && selectedVehicle && selectedVehicle.placa !== formData.placa) {
+              if (await hasDuplicatePlate(formData.placa, selectedVehicle?.id)) {
                 throw new Error('Já existe um veículo com esta placa.');
               }
-              const updatedVehicle = await updateVeiculo(selectedVehicle!.id, {
+              await updateVeiculo(selectedVehicle!.id, {
                 placa: formData.placa,
                 renavam: formData.renavam,
                 modelo: formData.modelo,
@@ -712,7 +667,7 @@ export default function VeiculosPage() {
                 tipo: formData.tipo,
                 status: formData.status as Vehicle['status'],
               });
-              setVehicles((prev) => prev.map((vehicle) => (vehicle.id === updatedVehicle.id ? updatedVehicle : vehicle)));
+              await vehicleTable.refresh();
               setIsEditModalOpen(false);
               setSelectedVehicle(null);
               resetForm();

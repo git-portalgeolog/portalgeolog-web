@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { ParceiroServico, NovoParceiroInput, useData } from '@/context/DataContext';
 import StandardModal from '@/components/StandardModal';
 import { Building2, Edit2, Eye, Handshake, Mail, MapPin, Phone, PlusCircle, Trash2, Users, Briefcase, Plus } from 'lucide-react';
@@ -10,6 +10,8 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useConfirm } from '@/hooks/useConfirm';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { fetchParceirosPage } from '@/lib/supabase/queries';
+import { useServerPaginatedTable } from '@/hooks/useServerPaginatedTable';
 
 const PESSOA_TIPO_OPTIONS = [
   { id: 'juridica', nome: 'Pessoa jurídica' },
@@ -111,14 +113,9 @@ export default function ParceriasPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingParceiro, setEditingParceiro] = useState<ParceiroServico | null>(null);
   const [viewingParceiro, setViewingParceiro] = useState<ParceiroServico | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState<ParceiroFormData>(initialForm());
-
-  const filteredParceiros = useMemo(() => {
-    const term = searchTerm.toLowerCase().trim();
-    if (!term) return parceiros;
-    return parceiros.filter((parceiro) => parceiro.searchIndex.includes(term));
-  }, [parceiros, searchTerm]);
+  const parceiroTable = useServerPaginatedTable(fetchParceirosPage, 10);
+  const searchTerm = parceiroTable.searchTerm;
 
   const resetForm = () => {
     setEditingParceiro(null);
@@ -240,15 +237,12 @@ export default function ParceriasPage() {
     })),
   });
 
-  // Funções de validação robustas
   const validateCPF = (cpf: string): boolean => {
     const cpfClean = cpf.replace(/\D/g, '');
     if (cpfClean.length !== 11) return false;
     
-    // Verificar se todos os dígitos são iguais
     if (/^(\d)\1{10}$/.test(cpfClean)) return false;
     
-    // Validação dos dígitos verificadores
     let sum = 0;
     for (let i = 0; i < 9; i++) {
       sum += parseInt(cpfClean.charAt(i)) * (10 - i);
@@ -272,10 +266,8 @@ export default function ParceriasPage() {
     const cnpjClean = cnpj.replace(/\D/g, '');
     if (cnpjClean.length !== 14) return false;
     
-    // Verificar se todos os dígitos são iguais
     if (/^(\d)\1{13}$/.test(cnpjClean)) return false;
     
-    // Validação dos dígitos verificadores
     const weightsFirst = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     const weightsSecond = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     
@@ -301,13 +293,10 @@ export default function ParceriasPage() {
   const validateCelular = (celular: string): boolean => {
     const celularClean = celular.replace(/\D/g, '');
     
-    // Verificar quantidade exata de 11 dígitos
     if (celularClean.length !== 11) return false;
     
-    // Verificar se todos os dígitos são iguais
     if (/^(\d)\1{10}$/.test(celularClean)) return false;
     
-    // Verificar se começa com DDD válido (2 dígitos)
     const ddd = celularClean.substring(0, 2);
     if (ddd < '11' || ddd > '99') return false;
     
@@ -315,7 +304,6 @@ export default function ParceriasPage() {
   };
 
   const validateForm = (): string | null => {
-    // Validar campos principais
     if (!formData.razaoSocialOuNomeCompleto.trim()) {
       return 'Razão Social/Nome completo é obrigatório';
     }
@@ -324,7 +312,6 @@ export default function ParceriasPage() {
       return 'CNPJ/CPF é obrigatório';
     }
     
-    // Validar quantidade de dígitos antes da validação completa
     const documentoLimpo = formData.documento.replace(/\D/g, '');
     if (formData.pessoaTipo === 'juridica') {
       if (documentoLimpo.length !== 14) {
@@ -342,7 +329,6 @@ export default function ParceriasPage() {
       }
     }
     
-    // Validar pelo menos 1 contato completo
     const primeiroContato = formData.contatos[0];
     if (!primeiroContato.setor.trim()) {
       return 'Setor do primeiro contato é obrigatório';
@@ -354,7 +340,6 @@ export default function ParceriasPage() {
       return 'Responsável do primeiro contato é obrigatório';
     }
     
-    // Validar formato e dígitos do celular
     const celularLimpo = primeiroContato.celular.replace(/\D/g, '');
     if (celularLimpo.length !== 11) {
       return 'Celular deve ter 11 dígitos completos: (00) 00000-0000';
@@ -363,7 +348,6 @@ export default function ParceriasPage() {
       return 'Celular inválido';
     }
     
-    // Validar email se preenchido
     if (primeiroContato.email && primeiroContato.email.trim()) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(primeiroContato.email.trim())) {
@@ -377,7 +361,6 @@ export default function ParceriasPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validar formulário
     const validationError = validateForm();
     if (validationError) {
       toast.error(validationError);
@@ -394,6 +377,8 @@ export default function ParceriasPage() {
         await addParceiro(cleanForm);
         toast.success('Parceiro cadastrado com sucesso!');
       }
+
+      await parceiroTable.refresh();
       
       handleCloseModal();
     } catch (error) {
@@ -414,7 +399,8 @@ export default function ParceriasPage() {
     });
     
     if (confirmed) {
-      deleteParceiro(id);
+      await deleteParceiro(id);
+      await parceiroTable.refresh();
       toast.success('Parceiro excluído com sucesso!');
     }
   };
@@ -427,7 +413,17 @@ export default function ParceriasPage() {
       />
 
       <DataTable
-        data={filteredParceiros}
+        data={parceiroTable.items}
+        loading={parceiroTable.loading}
+        searchTerm={parceiroTable.searchTerm}
+        onSearchChange={parceiroTable.setSearchTerm}
+        disableClientSearch
+        pagination={{
+          page: parceiroTable.page,
+          pageSize: parceiroTable.pageSize,
+          totalItems: parceiroTable.totalCount,
+          onPageChange: parceiroTable.setPage,
+        }}
         actionButton={
           <button
             onClick={() => handleOpenModal()}
@@ -566,8 +562,6 @@ export default function ParceriasPage() {
             )
           }
         ]}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
         searchPlaceholder="Buscar por nome, CPF/CNPJ, contato ou cidade..."
         emptyMessage="Nenhum parceiro cadastrado."
         emptyIcon={<Handshake size={48} />}

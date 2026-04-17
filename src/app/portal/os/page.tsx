@@ -35,18 +35,16 @@ import {
   LayoutGrid,
   CalendarDays,
 } from 'lucide-react';
-import FullCalendar from '@fullcalendar/react';
-import dayGridPlugin from '@fullcalendar/daygrid';
-import timeGridPlugin from '@fullcalendar/timegrid';
-import interactionPlugin from '@fullcalendar/interaction';
-import listPlugin from '@fullcalendar/list';
-import ptBrLocale from '@fullcalendar/core/locales/pt-br';
 import { useData, type OrderService, type ParceiroServico } from '@/context/DataContext';
+import { fetchOSPage } from '@/lib/supabase/queries';
+import { useServerPaginatedTable } from '@/hooks/useServerPaginatedTable';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import { DataTable } from '@/components/ui/DataTable';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { toast } from 'sonner';
 import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
 import OSCalendar from '@/components/OS/OSCalendar';
+import { useConfirm } from '@/hooks/useConfirm';
 
 type FormPassenger = { id: string; solicitanteId: string; nome: string; };
 type FormWaypoint = { label: string; lat: number | null; lng: number | null; passengers: FormPassenger[]; };
@@ -180,12 +178,12 @@ const validarPlacaOS = (placa: string): boolean => {
 };
 
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, refreshData } = useData();
+  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, refreshData } = useData();
   const supabase = createClient();
+  const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQuickPassengerModalOpen, setIsQuickPassengerModalOpen] = useState(false);
   const [quickPassengerTarget, setQuickPassengerTarget] = useState<{ waypointIndex: number; passengerId: string } | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
   const [editingOSId, setEditingOSId] = useState<string | null>(null);
   const [viewingOSId, setViewingOSId] = useState<string | null>(null);
@@ -193,6 +191,7 @@ export default function OSOperationalPage() {
   const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table');
   const actionMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const passengerDraftIdRef = useRef(0);
+  const osTable = useServerPaginatedTable(fetchOSPage, 10);
   
   // Estados para cadastros rápidos
   const [quickAddModal, setQuickAddModal] = useState<'cliente' | 'motorista' | 'solicitante' | 'centroCusto' | null>(null);
@@ -362,6 +361,7 @@ export default function OSOperationalPage() {
 
   const handleReopenOS = (osId: string) => {
     updateOSStatus(osId, { operacional: 'Pendente' });
+    void osTable.refresh();
     setOpenActionMenuId(null);
   };
 
@@ -370,9 +370,34 @@ export default function OSOperationalPage() {
     setOpenActionMenuId(null);
   };
 
+  const handleDeleteOS = async (osId: string) => {
+    const targetOS = osList.find((os) => os.id === osId);
+    if (!targetOS) return;
+
+    const confirmed = await confirm({
+      title: 'Excluir OS',
+      message: `Tem certeza que deseja excluir a OS "${targetOS.protocolo || targetOS.os || 'sem protocolo'}"? Esta ação não pode ser desfeita.`,
+      confirmText: 'Sim, excluir',
+      cancelText: 'Cancelar',
+      type: 'danger',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      await deleteOS(osId);
+      setOpenActionMenuId(null);
+      toast.success('OS excluída com sucesso!');
+    } catch (error) {
+      console.error('Erro ao excluir OS:', error);
+      toast.error('Erro ao excluir OS.');
+    }
+  };
+
   const confirmCancelOS = () => {
     if (!cancelTargetId) return;
     updateOSStatus(cancelTargetId, { operacional: 'Cancelado' });
+    void osTable.refresh();
     setCancelTargetId(null);
   };
 
@@ -404,6 +429,7 @@ export default function OSOperationalPage() {
   const [quickPassengerForm, setQuickPassengerForm] = useState(initialQuickPassengerForm);
   const [quickPassengerErrors, setQuickPassengerErrors] = useState<{ celular?: string }>({});
   const [isAddressExpanded, setIsAddressExpanded] = useState(false);
+  const [isEstrangeiro, setIsEstrangeiro] = useState(false);
   const driverOptions = useMemo(() => {
     const baseOptions = drivers.filter(d => d.status !== 'inactive').map(d => ({
       id: d.name,
@@ -421,14 +447,14 @@ export default function OSOperationalPage() {
   }, [drivers, quickAddedDriverOptions]);
 
   const formatPhone = (value: string) => {
+    if (isEstrangeiro) {
+      return value.replace(/\D/g, '').slice(0, 15);
+    }
     const digits = value.replace(/\D/g, '').slice(0, 11);
-    const part1 = digits.slice(0, 2);
-    const part2 = digits.slice(2, 7);
-    const part3 = digits.slice(7, 11);
-
-    if (digits.length <= 2) return digits;
-    if (digits.length <= 7) return `(${part1}) ${part2}`;
-    return `(${part1}) ${part2}-${part3}`;
+    if (digits.length <= 10) {
+      return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3').trim();
+    }
+    return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').trim();
   };
 
   // Auto-update trecho preview from waypoints
@@ -836,8 +862,8 @@ export default function OSOperationalPage() {
     const phoneDigits = quickPassengerForm.celular.replace(/\D/g, '');
 
     const errors: { celular?: string } = {};
-    if (phoneDigits.length !== 11) {
-      errors.celular = 'Informe os 11 dígitos do celular';
+    if (isEstrangeiro && phoneDigits.length !== 11) {
+      errors.celular = 'Celular brasileiro deve conter 11 dígitos.';
     }
 
     if (!trimmedNome || !trimmedEndereco || Object.keys(errors).length > 0) {
@@ -899,12 +925,14 @@ export default function OSOperationalPage() {
 
     if (editingOSId) {
       updateOS(editingOSId, finalData);
+      void osTable.refresh();
       resetMainModalState();
       return;
     }
 
     try {
-      addOS(finalData);
+      await addOS(finalData);
+      await osTable.refresh();
       resetMainModalState();
     } catch (error) {
       console.error('Error in handleAddOS:', error);
@@ -978,13 +1006,14 @@ export default function OSOperationalPage() {
   const filteredData = useMemo(() => {
     return osList.filter(item => {
       const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || '';
-      const matchSearch = searchTerm === '' || 
-        item.os.includes(searchTerm) || 
-        clienteNome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.trecho.toLowerCase().includes(searchTerm.toLowerCase());
+      const searchValue = osTable.searchTerm.toLowerCase();
+      const matchSearch = searchValue === '' || 
+        item.os.includes(osTable.searchTerm) || 
+        clienteNome.toLowerCase().includes(searchValue) ||
+        item.trecho.toLowerCase().includes(searchValue);
       return matchSearch;
     });
-  }, [osList, searchTerm, clientes]);
+  }, [osList, clientes, osTable.searchTerm]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -1142,8 +1171,8 @@ export default function OSOperationalPage() {
               type="text"
               placeholder="Pesquisar por Motorista, Trecho ou OS..."
               className="w-full pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-2xl shadow-sm outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 font-bold text-sm transition-all"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={osTable.searchTerm}
+              onChange={(e) => osTable.setSearchTerm(e.target.value)}
             />
           </div>
         )}
@@ -1187,7 +1216,15 @@ export default function OSOperationalPage() {
       {/* Conteúdo: Tabela ou Calendário */}
       {viewMode === 'table' ? (
         <DataTable
-          data={filteredData}
+          data={osTable.items}
+          loading={osTable.loading}
+          disableClientSearch
+          pagination={{
+            page: osTable.page,
+            pageSize: osTable.pageSize,
+            totalItems: osTable.totalCount,
+            onPageChange: osTable.setPage,
+          }}
           columns={[
             {
               key: 'protocolo',
@@ -1217,7 +1254,7 @@ export default function OSOperationalPage() {
             {
               key: 'cliente',
               title: 'Cliente',
-              width: '280px',
+              width: '380px',
               render: (value: unknown, item: OrderService) => {
                 void value;
 
@@ -1237,7 +1274,7 @@ export default function OSOperationalPage() {
             {
               key: 'trecho',
               title: 'Itinerário',
-              width: '160px',
+              width: '200px',
               render: (value: unknown, item: OrderService) => {
                 void value;
                 const waypointCount = item.rota?.waypoints?.filter((waypoint) => waypoint.label.trim() !== '').length ?? 0;
@@ -1279,14 +1316,19 @@ export default function OSOperationalPage() {
             {
               key: 'motorista',
               title: 'Motorista',
-              width: '240px',
+              width: '250px',
               render: (value: unknown, item: OrderService) => {
                 void value;
+
+                const motoristaParts = String(item.motorista).trim().split(/\s+/).filter(Boolean);
+                const motoristaNomeCurto = motoristaParts.length > 1
+                  ? `${motoristaParts[0]} ${motoristaParts[1]}`
+                  : motoristaParts[0] || '—';
 
                 return (
                 <div className="flex items-center gap-3">
                   <User size={14} className="text-blue-500" />
-                  <span className="text-base font-bold">{String(item.motorista)}</span>
+                  <span className="text-base font-bold">{motoristaNomeCurto}</span>
                 </div>
               )
               }
@@ -1332,7 +1374,7 @@ export default function OSOperationalPage() {
                       event.stopPropagation();
                       setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
                     }}
-                    className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm"
+                    className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm cursor-pointer"
                     aria-haspopup="true"
                     aria-expanded={openActionMenuId === item.id}
                   >
@@ -1341,41 +1383,52 @@ export default function OSOperationalPage() {
                   {openActionMenuId === item.id && (() => {
                     const rect = actionMenuRefs.current[item.id]?.getBoundingClientRect();
                     if (!rect) return null;
+                    const menuHeight = 200; // Altura aproximada do menu
+                    const spaceBelow = window.innerHeight - rect.bottom;
+                    const shouldOpenUp = spaceBelow < menuHeight + 16;
                     return (
-                      <div 
+                      <div
                         className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
                         style={{
-                          top: rect.bottom + 8,
+                          top: shouldOpenUp ? rect.top - menuHeight - 8 : rect.bottom + 8,
                           right: window.innerWidth - rect.right
                         }}
                       >
                         <button
                           onClick={() => handleViewOS(item.id)}
-                          className="w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-3 cursor-pointer"
+                          className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-cyan-50 hover:text-cyan-600 flex items-center gap-3 cursor-pointer"
                         >
-                          <Eye size={16} className="text-slate-400" />
+                          <Eye size={16} className="text-slate-400 group-hover:text-cyan-600" />
                           Visualizar
                         </button>
                         <button
                           onClick={() => handleEditOS(item.id)}
-                          className="w-full px-4 py-2 text-left text-sm font-bold text-blue-600 rounded-xl hover:bg-blue-50 flex items-center gap-3 cursor-pointer"
+                          className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-blue-50 hover:text-blue-600 flex items-center gap-3 cursor-pointer"
                         >
-                          <Pencil size={16} className="text-blue-400" />
+                          <Pencil size={16} className="text-slate-400 group-hover:text-blue-600" />
                           Editar
                         </button>
                         <button
                           onClick={() => handleReopenOS(item.id)}
-                          className="w-full px-4 py-2 text-left text-sm font-bold text-emerald-600 rounded-xl hover:bg-emerald-50 flex items-center gap-3 cursor-pointer"
+                          className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 flex items-center gap-3 cursor-pointer"
                         >
-                          <RotateCcw size={16} className="text-emerald-400" />
+                          <RotateCcw size={16} className="text-slate-400 group-hover:text-emerald-600" />
                           Reabrir
                         </button>
                         <button
                           onClick={() => handleCancelOS(item.id)}
-                          className="w-full px-4 py-2 text-left text-sm font-bold text-rose-600 rounded-xl hover:bg-rose-50 flex items-center gap-3 cursor-pointer"
+                          className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-100 hover:text-slate-600 flex items-center gap-3 cursor-pointer"
                         >
-                          <XOctagon size={16} className="text-rose-400" />
+                          <XOctagon size={16} className="text-slate-400 group-hover:text-slate-600" />
                           Cancelar
+                        </button>
+                        <button
+                          onClick={() => handleDeleteOS(item.id)}
+                          className="group w-full px-4 py-2 text-left text-sm font-bold rounded-xl bg-rose-50 hover:bg-rose-100 flex items-center gap-3 cursor-pointer"
+                          style={{ color: 'rgb(219, 132, 153)' }}
+                        >
+                          <XOctagon size={16} style={{ color: 'rgb(219, 132, 153)' }} />
+                          Excluir
                         </button>
                       </div>
                     );
@@ -1385,8 +1438,6 @@ export default function OSOperationalPage() {
               }
             }
           ]}
-          searchTerm=""
-          onSearchChange={undefined}
           searchPlaceholder=""
           emptyMessage="Nenhuma OS encontrada."
           emptyIcon={<Truck size={48} />}
@@ -1783,11 +1834,11 @@ export default function OSOperationalPage() {
           title="Novo Passageiro Rápido"
           subtitle="Cadastro sintetizado direto no atendimento"
           icon={<User size={24} />}
-          maxWidthClassName="max-w-5xl"
+          maxWidthClassName="max-w-6xl"
         >
           <form onSubmit={handleQuickPassengerSubmit} className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-25 gap-6">
-              <div className="space-y-2 md:col-span-14">
+              <div className="space-y-2 md:col-span-12">
                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Nome completo <span className="text-rose-300 text-base">*</span></label>
                 <input
                   required
@@ -1798,27 +1849,37 @@ export default function OSOperationalPage() {
                 />
               </div>
               <div className="space-y-2 md:col-span-6">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Celular <span className="text-rose-300 text-base">*</span></label>
+                <div className="flex justify-between items-center">
+                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Celular <RequiredAsterisk /></label>
+                  <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1" style={{ marginTop: '-7px' }}>
+                    <input
+                      type="checkbox"
+                      id="isEstrangeiroQuick"
+                      checked={isEstrangeiro}
+                      onChange={(e) => {
+                        setIsEstrangeiro(e.target.checked);
+                        setQuickPassengerForm(prev => ({ ...prev, celular: '' }));
+                      }}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <label htmlFor="isEstrangeiroQuick" className="text-xs font-bold text-slate-700 cursor-pointer">Estrangeiro</label>
+                  </div>
+                </div>
                 <input
-                  required
+                  required={isEstrangeiro}
                   value={quickPassengerForm.celular}
                   onChange={(e) => {
                     const formatted = formatPhone(e.target.value);
-                    const digits = formatted.replace(/\D/g, '');
                     setQuickPassengerForm(prev => ({ ...prev, celular: formatted }));
-                    setQuickPassengerErrors(prev => ({
-                      ...prev,
-                      celular: digits.length === 0 || digits.length === 11 ? undefined : 'Informe os 11 dígitos do celular'
-                    }));
                   }}
                   className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                  placeholder="(00) 00000-0000"
+                  placeholder={isEstrangeiro ? "+00 123456789" : "(00) 00000-0000"}
                 />
                 {quickPassengerErrors.celular && (
                   <p className="text-xs font-semibold text-rose-400 ml-1">{quickPassengerErrors.celular}</p>
                 )}
               </div>
-              <div className="space-y-2 md:col-span-5 mt-1">
+              <div className="space-y-2 md:col-span-5">
                 <GeologSearchableSelect
                   label="Notificar"
                   options={[
@@ -2435,6 +2496,17 @@ export default function OSOperationalPage() {
           </form>
         </StandardModal>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        onClose={closeConfirm}
+        onConfirm={handleConfirm}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText={confirmState.confirmText}
+        cancelText={confirmState.cancelText}
+        type={confirmState.type}
+      />
     </div>
   );
 }

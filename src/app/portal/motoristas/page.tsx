@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import StandardModal from '@/components/StandardModal';
-import { UserPlus, Phone, IdCard, Loader2, Truck, FileText, Building2, Handshake, Eye, Edit2, Trash2, User, PlusCircle, CreditCard, Car, Plus, Users, MapPin, Briefcase } from 'lucide-react';
+import { UserPlus, Phone, IdCard, Loader2, Truck, FileText, Building2, Handshake, Eye, Edit2, Trash2, User, PlusCircle, Car, Users, MapPin } from 'lucide-react';
 import DriverDocsModal from '@/components/DriverDocsModal';
 import { DataTable } from '@/components/ui/DataTable';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -13,6 +13,8 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useConfirm } from '@/hooks/useConfirm';
 import { toast } from 'sonner';
 import { useData, type ParceiroServico, type NovoParceiroInput } from '@/context/DataContext';
+import { fetchDriversPage } from '@/lib/supabase/queries';
+import { useServerPaginatedTable } from '@/hooks/useServerPaginatedTable';
 
 interface DriverVehicle {
   id: string;
@@ -153,26 +155,15 @@ const validateCNPJ = (cnpj: string): boolean => {
   return true;
 };
 
-const validateCelular = (celular: string): boolean => {
-  const celularClean = celular.replace(/\D/g, '');
-  if (celularClean.length !== 11) return false;
-  if (/^(\d)\1{10}$/.test(celularClean)) return false;
-  const ddd = celularClean.substring(0, 2);
-  if (ddd < '11' || ddd > '99') return false;
-  return true;
-};
-
 export default function MotoristasPage() {
-  const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
   const [selectedDriverForDocs, setSelectedDriverForDocs] = useState<Driver | null>(null);
   const [viewingDriver, setViewingDriver] = useState<Driver | null>(null);
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const supabase = createClient();
-  const { parceiros, refreshData, addParceiro } = useData();
+  const { parceiros, drivers: allDrivers, refreshData, addParceiro } = useData();
+  const driversTable = useServerPaginatedTable(fetchDriversPage, 10);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -541,7 +532,7 @@ export default function MotoristasPage() {
       return false;
     }
 
-    return drivers.some((driver) => {
+    return allDrivers.some((driver) => {
       if (excludeId && driver.id === excludeId) return false;
       const driverValue = driver[field] ?? '';
       const normalizedDriverValue = field === 'name' || field === 'email'
@@ -576,20 +567,6 @@ export default function MotoristasPage() {
   };
 
   useEffect(() => {
-    const fetchDrivers = async () => {
-      const { data, error } = await supabase
-        .from('drivers')
-        .select(`*, driver_vehicles(id, vehicle_id, vehicle:veiculos(id, placa, modelo, marca))`)
-        .order('name', { ascending: true });
-      
-      if (error) {
-        console.error("Erro ao buscar motoristas:", error);
-      } else {
-        setDrivers(data as Driver[]);
-      }
-      setLoading(false);
-    };
-
     const fetchVehicles = async () => {
       const { data, error } = await supabase
         .from('veiculos')
@@ -618,20 +595,7 @@ export default function MotoristasPage() {
       }
     };
 
-    fetchDrivers();
     fetchVehicles();
-
-    // Set up real-time subscription
-    const driversChannel = supabase
-      .channel('drivers-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'drivers' },
-        () => {
-          fetchDrivers();
-        }
-      )
-      .subscribe();
 
     const vehiclesChannel = supabase
       .channel('veiculos-changes')
@@ -645,7 +609,6 @@ export default function MotoristasPage() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(driversChannel);
       supabase.removeChannel(vehiclesChannel);
     };
   }, [supabase]);
@@ -746,11 +709,11 @@ export default function MotoristasPage() {
           toast.error('Motorista criado, mas houve erro ao vincular veículos.');
         }
         
-        setDrivers((prev) => [...prev, data as Driver].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')));
         void refreshData();
+        void driversTable.refresh();
       } else if (data) {
-        setDrivers((prev) => [...prev, data as Driver].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')));
         void refreshData();
+        void driversTable.refresh();
       }
 
       setIsModalOpen(false);
@@ -888,8 +851,8 @@ export default function MotoristasPage() {
           }
         }
 
-        setDrivers((prev) => prev.map((driver) => (driver.id === editingDriver.id ? (data as Driver) : driver)));
         void refreshData();
+        void driversTable.refresh();
       }
 
       toast.success('Motorista atualizado com sucesso!');
@@ -911,7 +874,7 @@ export default function MotoristasPage() {
   };
 
   const handleDeleteDriver = async (id: string) => {
-    const driver = drivers.find(d => d.id === id);
+    const driver = driversTable.items.find(d => d.id === id);
     if (!driver) return;
 
     const confirmed = await confirm({
@@ -933,16 +896,11 @@ export default function MotoristasPage() {
       console.error('Erro ao excluir motorista:', error);
       toast.error('Erro ao excluir motorista.');
     } else {
-      setDrivers((prev) => prev.filter((driver) => driver.id !== id));
       void refreshData();
+      void driversTable.refresh();
       toast.success('Motorista excluído com sucesso!');
     }
   };
-
-  const filteredDrivers = drivers.filter(d => 
-    d.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    d.cpf.includes(searchTerm)
-  );
 
   return (
     <div className="space-y-6">
@@ -953,8 +911,17 @@ export default function MotoristasPage() {
 
       {/* Drivers List */}
       <DataTable
-        data={filteredDrivers}
-        loading={loading}
+        data={driversTable.items}
+        loading={driversTable.loading}
+        searchTerm={driversTable.searchTerm}
+        onSearchChange={driversTable.setSearchTerm}
+        disableClientSearch
+        pagination={{
+          page: driversTable.page,
+          pageSize: driversTable.pageSize,
+          totalItems: driversTable.totalCount,
+          onPageChange: driversTable.setPage,
+        }}
         actionButton={
           <button
             onClick={() => {
@@ -972,14 +939,9 @@ export default function MotoristasPage() {
             key: 'name',
             title: 'Motorista',
             render: (value: unknown, item: Driver) => (
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-cyan-50 text-cyan-600 rounded-lg flex items-center justify-center font-black">
-                  {String(value)[0]}
-                </div>
-                <div className="space-y-1">
-                  <p className="font-black text-base text-slate-800 tracking-tight uppercase">{String(value)}</p>
-                  <p className="text-sm font-semibold text-slate-400">ID: {item.id.substring(0, 8)}</p>
-                </div>
+              <div className="space-y-1">
+                <p className="font-black text-base text-slate-800 tracking-tight uppercase">{String(value)}</p>
+                <p className="text-sm font-semibold text-slate-400">ID: {item.id.substring(0, 8)}</p>
               </div>
             )
           },
@@ -1031,7 +993,9 @@ export default function MotoristasPage() {
               return (
               <div className="space-y-1">
                 <p className="text-base font-medium text-slate-500"><span className="font-semibold">CPF:</span> <span className="text-slate-600 font-normal">{formatDocumento(item.cpf || '', 'cpf')}</span></p>
-                <p className="text-base font-medium text-slate-500"><span className="font-semibold">CNH:</span> <span className="text-slate-600 font-normal">{item.cnh}</span></p>
+                {item.cnh && (
+                  <p className="text-base font-medium text-slate-500"><span className="font-semibold">CNH:</span> <span className="text-slate-600 font-normal">{item.cnh}</span></p>
+                )}
               </div>
               );
             }
@@ -1098,8 +1062,6 @@ export default function MotoristasPage() {
             }
           }
         ]}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
         searchPlaceholder="Buscar por nome ou CPF..."
         emptyMessage="Nenhum motorista encontrado."
         emptyIcon={<Truck size={48} />}

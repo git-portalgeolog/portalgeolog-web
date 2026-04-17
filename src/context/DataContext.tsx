@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
   fetchClientes,
@@ -23,18 +23,15 @@ import {
   deleteCentroCustoFromDB,
   insertPassageiro,
   insertDriver,
-  deleteDriverFromDB,
   insertOS,
   updateOSInDB,
   updateOSStatusInDB,
-  createNotification,
+  deleteOSFromDB,
   fetchParceiros,
   insertParceiro,
   updateParceiroInDB,
   deleteParceiroFromDB,
   type ParceiroServico,
-  type ParceiroContato,
-  type ParceiroFilial,
   type NovoParceiroInput,
 } from '@/lib/supabase/queries';
 import { toast } from 'sonner';
@@ -160,6 +157,17 @@ export interface Driver {
   docs?: DriverDoc[];
   vinculoTipo?: 'interno' | 'parceiro';
   parceiroId?: string;
+  driver_vehicles?: Array<{
+    id: string;
+    driver_id: string;
+    vehicle_id: string;
+    vehicle?: {
+      id: string;
+      placa: string;
+      modelo: string;
+      marca: string;
+    };
+  }>;
 }
 
 export interface DriverDoc {
@@ -167,12 +175,6 @@ export interface DriverDoc {
   type: string;
   status: 'valid' | 'expired' | 'pending';
   expiryDate?: string;
-}
-
-interface AppNotificationRecord {
-  type: 'success' | 'info' | 'warning' | 'error';
-  title: string;
-  message: string;
 }
 
 const normalizeTextValue = (value: string): string => value.trim().toLowerCase();
@@ -247,6 +249,7 @@ interface DataContextType {
   addOS: (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => OrderService;
   updateOS: (id: string, osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => void;
   updateOSStatus: (id: string, updates: Partial<OSStatus>) => void;
+  deleteOS: (id: string) => Promise<void>;
 
   refreshData: () => Promise<void>;
   getSolicitantesByCliente: (clienteId: string) => Solicitante[];
@@ -256,6 +259,7 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
+  const hasLoadedData = useRef(false);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [solicitantes, setSolicitantes] = useState<Solicitante[]>([]);
   const [passageiros, setPassageiros] = useState<Passageiro[]>([]);
@@ -298,11 +302,17 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [dbFetchClientes, dbFetchSolicitantes, dbFetchPassageiros, dbFetchParceiros, dbFetchOSList, dbFetchDrivers]);
 
   useEffect(() => {
-    if (!authLoading) {
-      if (user) {
-        refreshData().finally(() => setLoading(false));
-      }
+    if (authLoading || !user || hasLoadedData.current) {
+      return;
     }
+
+    hasLoadedData.current = true;
+
+    queueMicrotask(() => {
+      void refreshData().finally(() => {
+        setLoading(false);
+      });
+    });
   }, [refreshData, user, authLoading]);
 
   // Real-time Subscriptions with Silenced Fallback
@@ -741,6 +751,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       .catch(err => console.error('Error updateOSStatusInDB:', err));
   };
 
+  const deleteOS = async (id: string): Promise<void> => {
+    setOsList((prev) => prev.filter((os) => os.id !== id));
+
+    try {
+      await deleteOSFromDB(id);
+      void refreshData();
+    } catch (err) {
+      console.error('Error deleteOSFromDB:', err);
+      void refreshData();
+      throw err;
+    }
+  };
+
   const getSolicitantesByCliente = useCallback((clienteId: string) => {
     return solicitantes.filter((s) => s.clienteId === clienteId);
   }, [solicitantes]);
@@ -839,6 +862,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         addOS,
         updateOS,
         updateOSStatus,
+        deleteOS,
         refreshData,
         getSolicitantesByCliente,
         getCentrosCustoByCliente,

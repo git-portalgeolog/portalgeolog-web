@@ -1,28 +1,18 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { useData, Passageiro, PassageiroEndereco } from '@/context/DataContext';
+import React, { useState } from 'react';
+import { UserSquare2, Plus, Edit, Eye, Trash2, Mail, Phone, MapPin, Layers, IdCard, PlusCircle } from 'lucide-react';
+import { useData } from '@/context/DataContext';
 import StandardModal from '@/components/StandardModal';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import { useConfirm } from '@/hooks/useConfirm';
-import {
-  Plus,
-  UserSquare2,
-  Mail,
-  Phone,
-  MapPin,
-  PlusCircle,
-  Trash2,
-  Layers,
-  Eye,
-  Edit,
-  IdCard
-} from 'lucide-react';
 import { DataTable } from '@/components/ui/DataTable';
 import { PageHeader } from '@/components/ui/PageHeader';
-import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import { toast } from 'sonner';
+import { useConfirm } from '@/hooks/useConfirm';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
+import { fetchPassageirosPage } from '@/lib/supabase/queries';
+import { useServerPaginatedTable } from '@/hooks/useServerPaginatedTable';
 
 interface NewPassengerForm {
   nomeCompleto: string;
@@ -47,25 +37,15 @@ const initialForm: NewPassengerForm = {
 };
 
 export default function PassageirosPage() {
-  const { passageiros, addPassageiro, updatePassageiro, deletePassageiro } = useData();
+  const { addPassageiro, updatePassageiro, deletePassageiro } = useData();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
-  const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedPassenger, setSelectedPassenger] = useState<Passageiro | null>(null);
   const [formData, setFormData] = useState<NewPassengerForm>(initialForm);
-
-  const filteredPassageiros = useMemo(() => {
-    return passageiros.filter((passageiro) => {
-      const term = searchTerm.toLowerCase();
-      return (
-        passageiro.nomeCompleto.toLowerCase().includes(term) ||
-        (passageiro.cpf ?? '').replace(/\D/g, '').includes(term.replace(/\D/g, '')) ||
-        (passageiro.email ?? '').toLowerCase().includes(term)
-      );
-    });
-  }, [passageiros, searchTerm]);
+  const [isEstrangeiro, setIsEstrangeiro] = useState(false);
+  const passengerTable = useServerPaginatedTable(fetchPassageirosPage, 10);
 
   const handleAddEndereco = () => {
     setFormData((prev) => ({
@@ -105,6 +85,9 @@ export default function PassageirosPage() {
   };
 
   const formatPhone = (value: string) => {
+    if (isEstrangeiro) {
+      return value.replace(/\D/g, '').slice(0, 15);
+    }
     const digits = value.replace(/\D/g, '').slice(0, 11);
     if (digits.length <= 10) {
       return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3').trim();
@@ -135,10 +118,9 @@ export default function PassageirosPage() {
       return;
     }
 
-    // Validar celular (obrigatório, 11 dígitos)
     const celularDigits = formData.celular.replace(/\D/g, '');
-    if (celularDigits.length !== 11) {
-      toast.error('Celular deve conter exatamente 11 dígitos.');
+    if (isEstrangeiro && celularDigits.length !== 11) {
+      toast.error('Celular brasileiro deve conter 11 dígitos (DDD + 9 + número).');
       return;
     }
 
@@ -162,6 +144,7 @@ export default function PassageirosPage() {
         }))
       });
 
+      await passengerTable.refresh();
       setFormData(initialForm);
       setIsModalOpen(false);
     } catch (error) {
@@ -186,8 +169,8 @@ export default function PassageirosPage() {
     }
 
     const celularDigits = formData.celular.replace(/\D/g, '');
-    if (celularDigits.length !== 11) {
-      toast.error('Celular deve conter exatamente 11 dígitos.');
+    if (isEstrangeiro && celularDigits.length !== 11) {
+      toast.error('Celular brasileiro deve conter 11 dígitos (DDD + 9 + número).');
       return;
     }
 
@@ -212,6 +195,7 @@ export default function PassageirosPage() {
         genero: formData.genero
       });
 
+      await passengerTable.refresh();
       setFormData(initialForm);
       setSelectedPassenger(null);
       setIsEditModalOpen(false);
@@ -259,7 +243,17 @@ export default function PassageirosPage() {
       />
 
       <DataTable
-        data={filteredPassageiros}
+        data={passengerTable.items}
+        loading={passengerTable.loading}
+        searchTerm={passengerTable.searchTerm}
+        onSearchChange={passengerTable.setSearchTerm}
+        disableClientSearch
+        pagination={{
+          page: passengerTable.page,
+          pageSize: passengerTable.pageSize,
+          totalItems: passengerTable.totalCount,
+          onPageChange: passengerTable.setPage,
+        }}
         actionButton={
           <button
             onClick={() => setIsModalOpen(true)}
@@ -374,8 +368,9 @@ export default function PassageirosPage() {
                 });
 
                 if (confirmed) {
-                  deletePassageiro(item.id);
-                  toast.success('Passageiro excluído com sucesso.');
+                  await deletePassageiro(item.id);
+                  await passengerTable.refresh();
+                  toast.success('Passageiro excluído com sucesso!');
                 }
               };
 
@@ -430,8 +425,6 @@ export default function PassageirosPage() {
             }
           }
         ]}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
         searchPlaceholder="Buscar por nome, CPF ou e-mail"
         emptyMessage="Nenhum passageiro encontrado."
         emptyIcon={<UserSquare2 size={48} />}
@@ -466,16 +459,32 @@ export default function PassageirosPage() {
                     />
                   </div>
                   <div className="space-y-2 flex-1">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <RequiredAsterisk /></label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <RequiredAsterisk /></label>
+                      <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1" style={{ marginTop: '-4px' }}>
+                        <input
+                          type="checkbox"
+                          id="isEstrangeiroNew"
+                          checked={isEstrangeiro}
+                          onChange={(e) => {
+                            setIsEstrangeiro(e.target.checked);
+                            // Limpa o campo do celular ao mudar o modo para evitar erros de máscara
+                            setFormData(prev => ({ ...prev, celular: '' }));
+                          }}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        />
+                        <label htmlFor="isEstrangeiroNew" className="text-xs font-bold text-slate-700 cursor-pointer">Estrangeiro</label>
+                      </div>
+                    </div>
                     <input
-                      required
-                      placeholder="(22) 99999-0000"
+                      required={isEstrangeiro}
+                      placeholder={isEstrangeiro ? "+00 123456789" : "(22) 99999-0000"}
                       value={formData.celular}
                       onChange={(event) => handleInputChange('celular', event.target.value)}
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
-                  <div className="space-y-2 flex-[0.8]">
+                  <div className="space-y-2 flex-[0.8]" style={{ marginTop: '-4px' }}>
                     <GeologSearchableSelect
                       label="Notificar"
                       options={[
@@ -709,16 +718,31 @@ export default function PassageirosPage() {
                     />
                   </div>
                   <div className="space-y-2 flex-1">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <RequiredAsterisk /></label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <RequiredAsterisk /></label>
+                      <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1" style={{ marginTop: '-4px' }}>
+                        <input
+                          type="checkbox"
+                          id="isEstrangeiroEdit"
+                          checked={isEstrangeiro}
+                          onChange={(e) => {
+                            setIsEstrangeiro(e.target.checked);
+                            setFormData(prev => ({ ...prev, celular: '' }));
+                          }}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        />
+                        <label htmlFor="isEstrangeiroEdit" className="text-xs font-bold text-slate-700 cursor-pointer">Estrangeiro</label>
+                      </div>
+                    </div>
                     <input
-                      required
-                      placeholder="(22) 99999-0000"
+                      required={isEstrangeiro}
+                      placeholder={isEstrangeiro ? "+00 123456789" : "(22) 99999-0000"}
                       value={formData.celular}
                       onChange={(event) => handleInputChange('celular', event.target.value)}
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
-                  <div className="space-y-2 flex-[0.8]">
+                  <div className="space-y-2 flex-[0.8]" style={{ marginTop: '-4px' }}>
                     <GeologSearchableSelect
                       label="Notificar"
                       options={[

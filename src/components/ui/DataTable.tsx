@@ -22,6 +22,7 @@ export interface DataTableProps<T> {
   loading?: boolean;
   searchTerm?: string;
   onSearchChange?: (value: string) => void;
+  disableClientSearch?: boolean;
   searchPlaceholder?: string;
   emptyMessage?: string;
   emptyIcon?: ReactNode;
@@ -31,6 +32,12 @@ export interface DataTableProps<T> {
   striped?: boolean;
   compact?: boolean;
   actionButton?: ReactNode;
+  pagination?: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    onPageChange: (page: number) => void;
+  };
 }
 
 export function DataTable<T extends { id?: string | number }>({
@@ -39,6 +46,7 @@ export function DataTable<T extends { id?: string | number }>({
   loading = false,
   searchTerm = '',
   onSearchChange,
+  disableClientSearch = false,
   searchPlaceholder = 'Buscar...',
   emptyMessage = 'Nenhum registro encontrado.',
   emptyIcon,
@@ -47,15 +55,49 @@ export function DataTable<T extends { id?: string | number }>({
   hover = true,
   striped = true,
   compact = false,
-  actionButton
+  actionButton,
+  pagination,
 }: DataTableProps<T>) {
-  const filteredData = searchTerm
-    ? data.filter(item =>
+  const filteredData = disableClientSearch || !searchTerm
+    ? data
+    : data.filter(item =>
         Object.values(item).some(value =>
           String(value).toLowerCase().includes(searchTerm.toLowerCase())
         )
-      )
-    : data;
+      );
+
+  const totalPages = pagination ? Math.max(1, Math.ceil(pagination.totalItems / pagination.pageSize)) : 1;
+  const currentPage = pagination ? Math.min(Math.max(1, pagination.page), totalPages) : 1;
+  const safePageSize = pagination?.pageSize ?? 10;
+  const totalItems = pagination?.totalItems ?? filteredData.length;
+
+  const buildPageItems = () => {
+    if (!pagination || totalPages <= 1) return [] as Array<number | 'ellipsis'>;
+
+    const pages: Array<number | 'ellipsis'> = [];
+    const maxVisible = 5;
+
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i += 1) pages.push(i);
+      return pages;
+    }
+
+    pages.push(1);
+
+    const start = Math.max(2, currentPage - 1);
+    const end = Math.min(totalPages - 1, currentPage + 1);
+
+    if (start > 2) pages.push('ellipsis');
+
+    for (let i = start; i <= end; i += 1) {
+      pages.push(i);
+    }
+
+    if (end < totalPages - 1) pages.push('ellipsis');
+
+    pages.push(totalPages);
+    return pages;
+  };
 
   const getAlignmentClass = (align?: 'left' | 'center' | 'right') => {
     switch (align) {
@@ -138,6 +180,7 @@ export function DataTable<T extends { id?: string | number }>({
                     <td
                       key={String(column.key)}
                       className={`${getPaddingClass()} ${getAlignmentClass(column.align)} ${column.className}`}
+                      style={{ width: column.width }}
                     >
                       {column.render
                         ? column.render(item[column.key as keyof T], item, index)
@@ -151,6 +194,75 @@ export function DataTable<T extends { id?: string | number }>({
           </tbody>
         </table>
       </div>
+
+      {pagination && totalItems > 0 && totalPages > 1 && (
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between px-1">
+          <p className="text-xs font-black uppercase tracking-[0.3em] text-slate-400">
+            Mostrando {Math.min((currentPage - 1) * safePageSize + 1, totalItems)}-
+            {Math.min(currentPage * safePageSize, totalItems)} de {totalItems}
+          </p>
+
+          <div className="flex items-center gap-2 self-end md:self-auto">
+            <button
+              type="button"
+              onClick={() => pagination.onPageChange(1)}
+              disabled={currentPage === 1 || loading}
+              className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-500 font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              &laquo;
+            </button>
+            <button
+              type="button"
+              onClick={() => pagination.onPageChange(currentPage - 1)}
+              disabled={currentPage === 1 || loading}
+              className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              Anterior
+            </button>
+
+            <div className="flex items-center gap-2">
+              {buildPageItems().map((item, index) =>
+                item === 'ellipsis' ? (
+                  <span key={`ellipsis-${index}`} className="px-2 text-slate-400 font-black">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => pagination.onPageChange(item)}
+                    disabled={loading}
+                    className={`min-w-10 px-4 py-2 rounded-xl border font-black text-sm transition-all cursor-pointer ${
+                      item === currentPage
+                        ? 'bg-[var(--color-geolog-blue)] border-[var(--color-geolog-blue)] text-white shadow-lg shadow-blue-900/10'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {item}
+                  </button>
+                )
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => pagination.onPageChange(currentPage + 1)}
+              disabled={currentPage === totalPages || loading}
+              className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              Próxima
+            </button>
+            <button
+              type="button"
+              onClick={() => pagination.onPageChange(totalPages)}
+              disabled={currentPage === totalPages || loading}
+              className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-500 font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              &raquo;
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

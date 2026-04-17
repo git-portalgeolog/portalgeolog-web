@@ -16,6 +16,30 @@ const supabase = createClient();
 
 const trimText = (value?: string): string => value?.trim() ?? '';
 
+type PaginationParams = {
+  page?: number;
+  pageSize?: number;
+  searchTerm?: string;
+};
+
+export type PaginatedResult<T> = {
+  items: T[];
+  totalCount: number;
+};
+
+const normalizePagination = (page = 1, pageSize = 10) => {
+  const safePage = Math.max(1, Math.floor(page || 1));
+  const safePageSize = Math.max(1, Math.floor(pageSize || 10));
+  return {
+    page: safePage,
+    pageSize: safePageSize,
+    from: (safePage - 1) * safePageSize,
+    to: safePage * safePageSize - 1,
+  };
+};
+
+const sanitizeSearchTerm = (term: string): string => term.trim().replace(/[%_]/g, '\\$&');
+
 // Função para criar notificações
 export async function createNotification(
   type: 'success' | 'info' | 'warning' | 'error',
@@ -112,6 +136,16 @@ type DriverRow = {
   phone?: string | null;
   status: 'active' | 'inactive';
   created_at?: string;
+  driver_vehicles?: Array<{
+    id: string;
+    vehicle_id: string;
+    vehicle: {
+      id: string;
+      placa: string;
+      modelo: string;
+      marca: string;
+    };
+  }>;
 };
 
 // ── Clientes ──────────────────────────────────────────────
@@ -417,6 +451,65 @@ export async function deletePassageiroFromDB(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function fetchPassageirosPage({
+  page = 1,
+  pageSize = 10,
+  searchTerm = '',
+}: PaginationParams = {}): Promise<PaginatedResult<Passageiro>> {
+  const { from, to } = normalizePagination(page, pageSize);
+  const term = searchTerm.trim();
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+
+  let query = supabase
+    .from('passageiros')
+    .select('*', { count: 'exact' })
+    .order('nome_completo', { ascending: true })
+    .range(from, to);
+
+  if (likeTerm) {
+    query = query.or(
+      `nome_completo.ilike.${likeTerm},email.ilike.${likeTerm},celular.ilike.${likeTerm},cpf.ilike.${likeTerm}`
+    );
+  }
+
+  const { data: passRaw, error, count } = await query;
+  if (error) throw error;
+
+  const typedPassengers = (passRaw || []) as PassageiroRow[];
+  const passengerIds = typedPassengers.map((p) => p.id);
+
+  let endRaw: PassageiroEnderecoRow[] = [];
+  if (passengerIds.length > 0) {
+    const { data: endData } = await supabase
+      .from('passageiro_enderecos')
+      .select('id, passageiro_id, rotulo, endereco_completo, referencia')
+      .in('passageiro_id', passengerIds);
+
+    endRaw = (endData || []) as PassageiroEnderecoRow[];
+  }
+
+  return {
+    items: typedPassengers.map((p) => ({
+      id: p.id,
+      nomeCompleto: p.nome_completo,
+      email: p.email || undefined,
+      celular: p.celular || '',
+      cpf: p.cpf || undefined,
+      notificar: p.notificar ?? undefined,
+      genero: p.genero ?? undefined,
+      enderecos: endRaw
+        .filter((e) => e.passageiro_id === p.id)
+        .map((e) => ({
+          id: e.id,
+          rotulo: e.rotulo,
+          enderecoCompleto: e.endereco_completo,
+          referencia: e.referencia || undefined,
+        })),
+    })),
+    totalCount: count ?? typedPassengers.length,
+  };
+}
+
 // ── Veículos ───────────────────────────────────────────
 
 export async function updateVeiculoInDB(id: string, input: Partial<Vehicle>): Promise<Vehicle> {
@@ -536,6 +629,101 @@ export async function fetchOSList(): Promise<OrderService[]> {
       rota: waypoints.length > 0 ? { waypoints } : undefined,
     };
   });
+}
+
+export async function fetchOSPage({
+  page = 1,
+  pageSize = 10,
+  searchTerm = '',
+}: PaginationParams = {}): Promise<PaginatedResult<OrderService>> {
+  const { from, to } = normalizePagination(page, pageSize);
+  const term = searchTerm.trim();
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+
+  let query = supabase
+    .from('ordens_servico')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (likeTerm) {
+    query = query.or(
+      `protocolo.ilike.${likeTerm},os_number.ilike.${likeTerm},trecho.ilike.${likeTerm},motorista.ilike.${likeTerm}`
+    );
+  }
+
+  const { data: osRaw, error, count } = await query;
+  if (error) throw error;
+
+  const typedOrders = (osRaw || []) as OSRow[];
+  const osIds = typedOrders.map((o) => o.id);
+  let wpRaw: OSWaypointRow[] = [];
+  let wpPassRaw: OSWaypointPassengerRow[] = [];
+
+  if (osIds.length > 0) {
+    const { data: wpData } = await supabase
+      .from('os_waypoints')
+      .select('id, ordem_servico_id, position, label, lat, lng')
+      .in('ordem_servico_id', osIds)
+      .order('position');
+
+    wpRaw = (wpData || []) as OSWaypointRow[];
+    const wpIds = wpRaw.map((w) => w.id);
+
+    if (wpIds.length > 0) {
+      const { data: passData } = await supabase
+        .from('os_waypoint_passengers')
+        .select('id, waypoint_id, passageiro_id, nome')
+        .in('waypoint_id', wpIds);
+
+      wpPassRaw = (passData || []) as OSWaypointPassengerRow[];
+    }
+  }
+
+  return {
+    items: typedOrders.map((o) => {
+      const waypoints: Waypoint[] = wpRaw
+        .filter((w) => w.ordem_servico_id === o.id)
+        .map((w) => ({
+          label: w.label,
+          lat: w.lat,
+          lng: w.lng,
+          passengers: wpPassRaw
+            .filter((p) => p.waypoint_id === w.id)
+            .map((p) => ({
+              id: p.id,
+              solicitanteId: p.passageiro_id || '',
+              nome: p.nome || '',
+            })),
+        }));
+
+      return {
+        id: o.id,
+        protocolo: o.protocolo || '',
+        os: o.os_number || '',
+        data: o.data || '',
+        hora: o.hora || '',
+        horaExtra: o.hora_extra || '',
+        clienteId: o.cliente_id || '',
+        solicitante: o.solicitante || '',
+        centroCustoId: o.centro_custo_id || '',
+        trecho: o.trecho || '',
+        motorista: o.motorista || '',
+        veiculoId: o.veiculo_id || undefined,
+        valorBruto: Number(o.valor_bruto),
+        imposto: Number(o.imposto),
+        custo: Number(o.custo),
+        lucro: Number(o.lucro),
+        status: {
+          operacional: o.status_operacional as OrderService['status']['operacional'],
+          financeiro: o.status_financeiro as OrderService['status']['financeiro'],
+        },
+        distancia: o.distancia ? Number(o.distancia) : undefined,
+        rota: waypoints.length > 0 ? { waypoints } : undefined,
+      };
+    }),
+    totalCount: count ?? typedOrders.length,
+  };
 }
 
 type OSInput = Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>;
@@ -727,6 +915,40 @@ export async function updateOSStatusInDB(
   if (error) throw error;
 }
 
+export async function deleteOSFromDB(id: string): Promise<void> {
+  const { data: waypoints, error: waypointsError } = await supabase
+    .from('os_waypoints')
+    .select('id')
+    .eq('ordem_servico_id', id);
+
+  if (waypointsError) throw waypointsError;
+
+  const waypointIds = (waypoints || []).map((waypoint) => waypoint.id);
+
+  if (waypointIds.length > 0) {
+    const { error: passengersError } = await supabase
+      .from('os_waypoint_passengers')
+      .delete()
+      .in('waypoint_id', waypointIds);
+
+    if (passengersError) throw passengersError;
+
+    const { error: deleteWaypointsError } = await supabase
+      .from('os_waypoints')
+      .delete()
+      .eq('ordem_servico_id', id);
+
+    if (deleteWaypointsError) throw deleteWaypointsError;
+  }
+
+  const { error: osError } = await supabase
+    .from('ordens_servico')
+    .delete()
+    .eq('id', id);
+
+  if (osError) throw osError;
+}
+
 // ── Centros de Custo ──────────────────────────────────────
 
 export async function fetchCentrosCustoByCliente(clienteId: string): Promise<CentroCusto[]> {
@@ -758,6 +980,79 @@ export async function fetchDrivers(): Promise<Driver[]> {
     status: d.status as 'active' | 'inactive',
     created_at: d.created_at
   }));
+}
+
+export async function fetchDriversPage({
+  page = 1,
+  pageSize = 10,
+  searchTerm = '',
+}: PaginationParams = {}): Promise<PaginatedResult<Driver>> {
+  const { from, to } = normalizePagination(page, pageSize);
+  const term = searchTerm.trim();
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+
+  let query = supabase
+    .from('drivers')
+    .select(`*, driver_vehicles(id, vehicle_id, vehicle:veiculos(id, placa, modelo, marca))`, { count: 'exact' })
+    .order('name', { ascending: true })
+    .range(from, to);
+
+  if (likeTerm) {
+    query = query.or(`name.ilike.${likeTerm},cpf.ilike.${likeTerm},cnh.ilike.${likeTerm},phone.ilike.${likeTerm}`);
+  }
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+
+  return {
+    items: ((data || []) as DriverRow[]).map((d) => ({
+      id: d.id,
+      name: d.name,
+      cpf: d.cpf || '',
+      cnh: d.cnh || '',
+      phone: d.phone || '',
+      status: d.status as 'active' | 'inactive',
+      created_at: d.created_at,
+      driver_vehicles: d.driver_vehicles?.map((dv) => ({
+        id: dv.id,
+        driver_id: d.id,
+        vehicle_id: dv.vehicle_id,
+        vehicle: dv.vehicle,
+      })) || [],
+    })),
+    totalCount: count ?? (data || []).length,
+  };
+}
+
+// ── Veículos ───────────────────────────────────────────
+
+export async function fetchVeiculosPage({
+  page = 1,
+  pageSize = 10,
+  searchTerm = '',
+}: PaginationParams = {}): Promise<PaginatedResult<Vehicle>> {
+  const { from, to } = normalizePagination(page, pageSize);
+  const term = searchTerm.trim();
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+
+  let query = supabase
+    .from('veiculos')
+    .select('*', { count: 'exact' })
+    .order('marca', { ascending: true })
+    .order('modelo', { ascending: true })
+    .range(from, to);
+
+  if (likeTerm) {
+    query = query.or(`placa.ilike.${likeTerm},modelo.ilike.${likeTerm},marca.ilike.${likeTerm},renavam.ilike.${likeTerm}`);
+  }
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+
+  return {
+    items: (data || []) as Vehicle[],
+    totalCount: count ?? (data || []).length,
+  };
 }
 
 export async function insertDriver(driver: Omit<Driver, 'id' | 'created_at'>): Promise<Driver> {
@@ -951,6 +1246,61 @@ export async function fetchParceiros(): Promise<ParceiroServico[]> {
     const parceiroFiliais = filiais.filter(f => f.parceiro_id === parceiro.id);
     return mapParceiroPayload(parceiro, parceiroContatos, parceiroFiliais);
   });
+}
+
+export async function fetchParceirosPage({
+  page = 1,
+  pageSize = 10,
+  searchTerm = '',
+}: PaginationParams = {}): Promise<PaginatedResult<ParceiroServico>> {
+  const { from, to } = normalizePagination(page, pageSize);
+  const term = searchTerm.trim();
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+
+  let query = supabase
+    .from('parceiros_servico')
+    .select('*', { count: 'exact' })
+    .order('nome', { ascending: true })
+    .range(from, to);
+
+  if (likeTerm) {
+    query = query.or(`search_index.ilike.${likeTerm}`);
+  }
+
+  const { data: parceirosData, error: parceirosError, count } = await query;
+  if (parceirosError) throw parceirosError;
+  const parceiros = (parceirosData || []) as ParceiroRow[];
+
+  const parceirosIds = parceiros.map((p) => p.id);
+  let contatos: ParceiroContatoRow[] = [];
+  let filiais: ParceiroFilialRow[] = [];
+
+  if (parceirosIds.length > 0) {
+    const { data: contatosData, error: contatosError } = await supabase
+      .from('parceiros_contatos')
+      .select('*')
+      .in('parceiro_id', parceirosIds);
+
+    if (contatosError) throw contatosError;
+    contatos = contatosData as ParceiroContatoRow[];
+
+    const { data: filiaisData, error: filiaisError } = await supabase
+      .from('parceiros_filiais')
+      .select('*')
+      .in('parceiro_id', parceirosIds);
+
+    if (filiaisError) throw filiaisError;
+    filiais = filiaisData as ParceiroFilialRow[];
+  }
+
+  return {
+    items: parceiros.map((parceiro) => {
+      const parceiroContatos = contatos.filter((c) => c.parceiro_id === parceiro.id);
+      const parceiroFiliais = filiais.filter((f) => f.parceiro_id === parceiro.id);
+      return mapParceiroPayload(parceiro, parceiroContatos, parceiroFiliais);
+    }),
+    totalCount: count ?? parceiros.length,
+  };
 }
 
 export async function fetchParceiroById(id: string): Promise<ParceiroServico> {
