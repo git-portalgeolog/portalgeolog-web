@@ -63,6 +63,7 @@ export interface Waypoint {
   label: string;
   lat: number | null;
   lng: number | null;
+  comment?: string;
   passengers: {
     id: string;
     solicitanteId: string;

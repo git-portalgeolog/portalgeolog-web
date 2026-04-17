@@ -24,6 +24,7 @@ import {
   RotateCcw,
   XOctagon,
   MessageCircle,
+  MessageSquareMore,
   Users,
   AlertTriangle,
   ChevronDown,
@@ -47,7 +48,7 @@ import OSCalendar from '@/components/OS/OSCalendar';
 import { useConfirm } from '@/hooks/useConfirm';
 
 type FormPassenger = { id: string; solicitanteId: string; nome: string; };
-type FormWaypoint = { label: string; lat: number | null; lng: number | null; passengers: FormPassenger[]; };
+type FormWaypoint = { label: string; lat: number | null; lng: number | null; comment: string; passengers: FormPassenger[]; };
 type OSFormData = {
   data: string;
   hora: string;
@@ -299,8 +300,8 @@ export default function OSOperationalPage() {
     valorBruto: 0,
     custo: 0,
     waypoints: [
-      { label: '', lat: null, lng: null, passengers: [] },
-      { label: '', lat: null, lng: null, passengers: [] }
+      { label: '', lat: null, lng: null, comment: '', passengers: [] },
+      { label: '', lat: null, lng: null, comment: '', passengers: [] }
     ]
   };
 
@@ -308,15 +309,31 @@ export default function OSOperationalPage() {
     setIsModalOpen(false);
     setEditingOSId(null);
     setFormData(initialForm);
+    setOpenWaypointComments({});
   };
 
   const handleOpenCreateOSModal = () => {
     setEditingOSId(null);
     setFormData(initialForm);
+    setOpenWaypointComments({});
     setIsModalOpen(true);
   };
 
   const hydrateFormFromOS = (osItem: OrderService) => {
+    const hydratedWaypoints = osItem.rota?.waypoints?.length
+      ? osItem.rota.waypoints.map((waypoint, index) => ({
+          label: waypoint.label,
+          lat: waypoint.lat ?? null,
+          lng: waypoint.lng ?? null,
+          comment: waypoint.comment || '',
+          passengers: (waypoint.passengers || []).map((passenger, passengerIndex) => ({
+            id: passenger.id || `${osItem.id}-${index}-${passengerIndex}`,
+            solicitanteId: passenger.solicitanteId || '',
+            nome: passenger.nome || ''
+          }))
+        }))
+      : initialForm.waypoints;
+
     setFormData({
       data: osItem.data,
       hora: osItem.hora || '',
@@ -329,19 +346,15 @@ export default function OSOperationalPage() {
       centroCusto: osItem.centroCustoId || '',
       valorBruto: osItem.valorBruto,
       custo: osItem.custo,
-      waypoints: osItem.rota?.waypoints?.length
-        ? osItem.rota.waypoints.map((waypoint, index) => ({
-            label: waypoint.label,
-            lat: waypoint.lat ?? null,
-            lng: waypoint.lng ?? null,
-            passengers: (waypoint.passengers || []).map((passenger, passengerIndex) => ({
-              id: passenger.id || `${osItem.id}-${index}-${passengerIndex}`,
-              solicitanteId: passenger.solicitanteId || '',
-              nome: passenger.nome || ''
-            }))
-          }))
-        : initialForm.waypoints
+      waypoints: hydratedWaypoints
     });
+
+    setOpenWaypointComments(
+      hydratedWaypoints.reduce<Record<number, boolean>>((acc, waypoint, index) => {
+        acc[index] = Boolean(waypoint.comment.trim());
+        return acc;
+      }, {})
+    );
   };
 
   const handleViewOS = (osId: string) => {
@@ -418,6 +431,7 @@ export default function OSOperationalPage() {
   }, [openActionMenuId]);
 
   const [formData, setFormData] = useState(initialForm);
+  const [openWaypointComments, setOpenWaypointComments] = useState<Record<number, boolean>>({});
   const initialQuickPassengerForm = {
     nomeCompleto: '',
     celular: '',
@@ -499,6 +513,14 @@ export default function OSOperationalPage() {
   }, [viewingOS]);
 
   const handleSwapRoute = () => {
+    setOpenWaypointComments((prev) => {
+      const entries = Object.entries(prev).map(([key, value]) => [Number(key), value] as const);
+      const reversed = entries.reduce<Record<number, boolean>>((acc, [key, value]) => {
+        acc[formData.waypoints.length - 1 - key] = value;
+        return acc;
+      }, {});
+      return reversed;
+    });
     setFormData(prev => ({
       ...prev,
       waypoints: [...prev.waypoints].reverse()
@@ -506,14 +528,27 @@ export default function OSOperationalPage() {
   };
 
   const handleAddWaypoint = () => {
+    setOpenWaypointComments((prev) => ({
+      ...prev,
+      [formData.waypoints.length]: false,
+    }));
     setFormData(prev => ({
       ...prev,
-      waypoints: [...prev.waypoints, { label: '', lat: null, lng: null, passengers: [] }]
+      waypoints: [...prev.waypoints, { label: '', lat: null, lng: null, comment: '', passengers: [] }]
     }));
   };
 
   const handleRemoveWaypoint = (index: number) => {
     if (formData.waypoints.length <= 2) return;
+    setOpenWaypointComments((prev) => {
+      const next: Record<number, boolean> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        const numericKey = Number(key);
+        if (numericKey < index) next[numericKey] = value;
+        if (numericKey > index) next[numericKey - 1] = value;
+      });
+      return next;
+    });
     setFormData(prev => ({
       ...prev,
       waypoints: prev.waypoints.filter((_, i) => i !== index)
@@ -526,6 +561,39 @@ export default function OSOperationalPage() {
     setFormData(prev => ({
       ...prev,
       waypoints: newWaypoints
+    }));
+  };
+
+  const handleWaypointCommentChange = (index: number, value: string) => {
+    const newWaypoints = [...formData.waypoints];
+    newWaypoints[index] = { ...newWaypoints[index], comment: value };
+    setFormData(prev => ({
+      ...prev,
+      waypoints: newWaypoints
+    }));
+  };
+
+  const toggleWaypointComment = (index: number) => {
+    const waypointComment = formData.waypoints[index]?.comment?.trim() || '';
+    const isOpen = Boolean(openWaypointComments[index]);
+
+    if (isOpen) {
+      if (waypointComment.length > 0) {
+        toast.error('Apague a observação antes de recolher.');
+        return;
+      }
+
+      setOpenWaypointComments((prev) => {
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      });
+      return;
+    }
+
+    setOpenWaypointComments((prev) => ({
+      ...prev,
+      [index]: true
     }));
   };
 
@@ -1642,7 +1710,7 @@ export default function OSOperationalPage() {
                               
                               <div className="flex items-start gap-4">
                                  <div className="flex-1 space-y-4">
-                                    <div className="flex items-end gap-4">
+                                    <div className="space-y-4">
                                        <div className="flex-1 space-y-3">
                                           <label className="block text-[10px] font-black uppercase tracking-[0.25em] ml-1 mb-2">
                                              <div className={`inline-flex items-stretch rounded-xl overflow-hidden shadow-sm border text-[10px] md:text-[11px] ${index === 0 ? 'bg-emerald-500 border-emerald-400 text-white' : index === formData.waypoints.length - 1 ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
@@ -1661,33 +1729,58 @@ export default function OSOperationalPage() {
                                                 value={waypoint.label} 
                                                 onChange={(e) => handleWaypointChange(index, e.target.value)} 
                                                 placeholder={index === 0 ? "Ex: Hotel H/Niterói" : "Próximo destino..."} 
-                                                className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm pr-12"
+                                                className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm pr-36"
                                              />
-                                             <MapPin size={18} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-300" />
+                                             <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => toggleWaypointComment(index)}
+                                                  className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all cursor-pointer ${openWaypointComments[index] || waypoint.comment.trim() ? 'border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-600'}`}
+                                                  title="Adicionar observação"
+                                                >
+                                                  <MessageSquareMore size={16} />
+                                                </button>
+                                                <MapPin size={18} className="text-slate-300" />
+                                                <button 
+                                                   type="button" 
+                                                   onClick={() => handleAddPassenger(index)}
+                                                   className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all flex items-center justify-center shadow-sm border border-blue-100 cursor-pointer"
+                                                   title="Adicionar Passageiro"
+                                                >
+                                                   <Plus size={18} />
+                                                </button>
+                                             </div>
                                           </div>
-                                       </div>
-                                       
-                                       <div className="flex items-center gap-2 mb-1 self-end">
-                                          <button 
-                                             type="button" 
-                                             onClick={() => handleAddPassenger(index)}
-                                             className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-all opacity-0 group-hover:opacity-100 flex items-center justify-center shadow-sm border border-blue-100 cursor-pointer"
-                                             title="Adicionar Passageiro"
-                                          >
-                                             <Plus size={20} />
-                                          </button>
-                                          {formData.waypoints.length > 2 && (
-                                             <button 
-                                                type="button" 
-                                                onClick={() => handleRemoveWaypoint(index)}
-                                                className="p-3 bg-red-50 text-red-400 rounded-xl hover:bg-red-100 transition-all opacity-0 group-hover:opacity-100 flex items-center justify-center shadow-sm border border-red-100 cursor-pointer"
-                                                title="Remover Parada"
-                                             >
-                                                <X size={20} />
-                                             </button>
+                                          {openWaypointComments[index] && (
+                                            <div className="mt-3 ml-1">
+                                              <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">
+                                                Observação do trajeto
+                                              </label>
+                                              <textarea
+                                                value={waypoint.comment}
+                                                onChange={(e) => handleWaypointCommentChange(index, e.target.value)}
+                                                rows={2}
+                                                placeholder="Ex: aguardar na portaria, desembarque pela lateral..."
+                                                className="w-full resize-none rounded-xl border-2 border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none transition-all focus:border-blue-600 focus:bg-white shadow-sm"
+                                              />
+                                            </div>
                                           )}
                                        </div>
                                     </div>
+
+                                    {/* Botão Remover Parada - apenas para paradas intermediárias */}
+                                    {formData.waypoints.length > 2 && (
+                                       <div className="flex items-center justify-end pt-1">
+                                          <button
+                                             type="button"
+                                             onClick={() => handleRemoveWaypoint(index)}
+                                             className="p-2 bg-red-50 text-red-400 rounded-lg hover:bg-red-100 transition-all flex items-center justify-center shadow-sm border border-red-100 cursor-pointer"
+                                             title="Remover Parada"
+                                          >
+                                             <X size={18} />
+                                          </button>
+                                       </div>
+                                    )}
 
                                     {/* Linhas de Passageiros */}
                                     {waypoint.passengers && waypoint.passengers.length > 0 && (

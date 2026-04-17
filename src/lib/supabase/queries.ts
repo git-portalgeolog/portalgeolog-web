@@ -121,6 +121,7 @@ type OSWaypointRow = {
   label: string;
   lat: number | null;
   lng: number | null;
+  comment: string | null;
 };
 type OSWaypointPassengerRow = {
   id: string;
@@ -571,7 +572,7 @@ export async function fetchOSList(): Promise<OrderService[]> {
   if (osIds.length > 0) {
     const { data: wpData } = await supabase
       .from('os_waypoints')
-      .select('id, ordem_servico_id, position, label, lat, lng')
+      .select('id, ordem_servico_id, position, label, lat, lng, comment')
       .in('ordem_servico_id', osIds)
       .order('position');
 
@@ -595,6 +596,7 @@ export async function fetchOSList(): Promise<OrderService[]> {
         label: w.label,
         lat: w.lat,
         lng: w.lng,
+        comment: w.comment || undefined,
         passengers: wpPassRaw
           .filter((p) => p.waypoint_id === w.id)
           .map((p) => ({
@@ -663,7 +665,7 @@ export async function fetchOSPage({
   if (osIds.length > 0) {
     const { data: wpData } = await supabase
       .from('os_waypoints')
-      .select('id, ordem_servico_id, position, label, lat, lng')
+      .select('id, ordem_servico_id, position, label, lat, lng, comment')
       .in('ordem_servico_id', osIds)
       .order('position');
 
@@ -688,6 +690,7 @@ export async function fetchOSPage({
           label: w.label,
           lat: w.lat,
           lng: w.lng,
+          comment: w.comment || undefined,
           passengers: wpPassRaw
             .filter((p) => p.waypoint_id === w.id)
             .map((p) => ({
@@ -773,6 +776,7 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
         label: wp.label,
         lat: wp.lat || null,
         lng: wp.lng || null,
+        comment: wp.comment?.trim() || null,
       })
       .select('id')
       .single();
@@ -805,10 +809,21 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
       }
     }
 
+    const cleanComment = wp.comment?.trim() || '';
+    if (cleanComment) {
+      await supabase.from('os_waypoint_comments').insert({
+        ordem_servico_id: osRow.id,
+        waypoint_position: i,
+        waypoint_label: wp.label,
+        comment: cleanComment,
+      });
+    }
+
     insertedWaypoints.push({
       label: wp.label,
       lat: wp.lat,
       lng: wp.lng,
+      comment: wp.comment?.trim() || undefined,
       passengers: insertedPassengers,
     });
   }
@@ -883,6 +898,7 @@ export async function updateOSInDB(
         label: wp.label,
         lat: wp.lat || null,
         lng: wp.lng || null,
+        comment: wp.comment?.trim() || null,
       })
       .select('id')
       .single();
@@ -895,6 +911,16 @@ export async function updateOSInDB(
           nome: p.nome || '',
         }))
       );
+    }
+
+    const cleanComment = wp.comment?.trim() || '';
+    if (cleanComment) {
+      await supabase.from('os_waypoint_comments').insert({
+        ordem_servico_id: id,
+        waypoint_position: i,
+        waypoint_label: wp.label,
+        comment: cleanComment,
+      });
     }
   }
 }
