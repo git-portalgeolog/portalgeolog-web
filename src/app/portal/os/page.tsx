@@ -35,6 +35,7 @@ import {
   Loader2,
   LayoutGrid,
   CalendarDays,
+  Trash2,
 } from 'lucide-react';
 import { useData, type OrderService, type ParceiroServico } from '@/context/DataContext';
 import { fetchOSPage } from '@/lib/supabase/queries';
@@ -67,9 +68,8 @@ type OSFormData = {
 type QuickAddDriverForm = {
   name: string;
   cpf: string;
-  cnh: string;
   celular: string;
-  vehicle_id: string;
+  vehicle_ids: string[];
   vinculo_tipo: 'interno' | 'parceiro';
   parceiro_id: string;
   tipo_documento: 'cpf' | 'passaporte';
@@ -85,9 +85,8 @@ type VehicleOption = {
 const initialQuickAddDriverForm: QuickAddDriverForm = {
   name: '',
   cpf: '',
-  cnh: '',
   celular: '',
-  vehicle_id: '',
+  vehicle_ids: [],
   vinculo_tipo: 'parceiro',
   parceiro_id: '',
   tipo_documento: 'cpf'
@@ -112,10 +111,6 @@ const formatDriverCelular = (value: string): string => {
   if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
 
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
-};
-
-const validateDriverCNH = (value: string): boolean => {
-  return value.replace(/\D/g, '').length === 11;
 };
 
 const validateDriverCPF = (value: string): boolean => {
@@ -186,11 +181,13 @@ export default function OSOperationalPage() {
   const [isQuickPassengerModalOpen, setIsQuickPassengerModalOpen] = useState(false);
   const [quickPassengerTarget, setQuickPassengerTarget] = useState<{ waypointIndex: number; passengerId: string } | null>(null);
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+  const [calendarMenuPosition, setCalendarMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [editingOSId, setEditingOSId] = useState<string | null>(null);
   const [viewingOSId, setViewingOSId] = useState<string | null>(null);
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table');
   const actionMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const calendarMenuRef = useRef<HTMLDivElement | null>(null);
   const passengerDraftIdRef = useRef(0);
   const osTable = useServerPaginatedTable(fetchOSPage, 10);
   
@@ -418,9 +415,17 @@ export default function OSOperationalPage() {
     if (!openActionMenuId) return;
 
     const handleClickOutside = (event: MouseEvent) => {
+      // Para modo tabela - verifica ref do botão MoreVertical
       const currentMenu = actionMenuRefs.current[openActionMenuId];
-      if (currentMenu && !currentMenu.contains(event.target as Node)) {
+      // Para modo calendário - verifica ref do menu do calendário
+      const calendarMenu = calendarMenuRef.current;
+      
+      const clickedOutsideTableMenu = currentMenu && !currentMenu.contains(event.target as Node);
+      const clickedOutsideCalendarMenu = calendarMenu && !calendarMenu.contains(event.target as Node);
+      
+      if (clickedOutsideTableMenu || clickedOutsideCalendarMenu) {
         setOpenActionMenuId(null);
+        setCalendarMenuPosition(null);
       }
     };
 
@@ -770,17 +775,11 @@ export default function OSOperationalPage() {
         }
                 case 'motorista': {
           const name = quickAddDriverForm.name.trim();
-          const cnhDigits = quickAddDriverForm.cnh.replace(/\D/g, '');
           const cpfDigits = quickAddDriverForm.cpf.replace(/\D/g, '');
           const celularDigits = quickAddDriverForm.celular.replace(/\D/g, '');
 
           if (!name) {
             toast.error('Nome completo é obrigatório.');
-            return;
-          }
-
-          if (cnhDigits.length !== 11) {
-            toast.error(`CNH deve ter exatamente 11 dígitos numéricos. Você informou ${cnhDigits.length} dígitos.`);
             return;
           }
 
@@ -804,14 +803,13 @@ export default function OSOperationalPage() {
             return;
           }
 
-          if (!quickAddDriverForm.vehicle_id) {
-            toast.error('Selecione um veículo para o motorista.');
+          if (quickAddDriverForm.vehicle_ids.length === 0) {
+            toast.error('Adicione pelo menos um veículo ao motorista.');
             return;
           }
 
           const duplicateName = drivers.some((driver) => normalizeTextValue(driver.name) === normalizeTextValue(name));
           const duplicateCpf = drivers.some((driver) => normalizeDigitsValue(driver.cpf || '') === cpfDigits);
-          const duplicateCnh = drivers.some((driver) => normalizeDigitsValue(driver.cnh || '') === cnhDigits);
           const duplicatePhone = drivers.some((driver) => normalizeDigitsValue(driver.phone || '') === celularDigits);
 
           if (duplicateName) {
@@ -824,11 +822,6 @@ export default function OSOperationalPage() {
             return;
           }
 
-          if (duplicateCnh) {
-            toast.error('Já existe um motorista com esta CNH.');
-            return;
-          }
-
           if (duplicatePhone) {
             toast.error('Já existe um motorista com este celular.');
             return;
@@ -837,9 +830,8 @@ export default function OSOperationalPage() {
           const insertData: Record<string, unknown> = {
             name,
             cpf: cpfDigits,
-            cnh: cnhDigits,
             phone: celularDigits,
-            vehicle_id: quickAddDriverForm.vehicle_id,
+            vehicle_id: quickAddDriverForm.vehicle_ids[0],
             status: 'active',
             vinculo_tipo: quickAddDriverForm.vinculo_tipo,
           };
@@ -855,6 +847,23 @@ export default function OSOperationalPage() {
             .single();
 
           if (error) throw error;
+
+          // Inserir veículos vinculados
+          if (data && quickAddDriverForm.vehicle_ids.length > 0) {
+            const driverVehicles = quickAddDriverForm.vehicle_ids.map(vehicleId => ({
+              driver_id: data.id,
+              vehicle_id: vehicleId,
+            }));
+
+            const { error: vehiclesError } = await supabase
+              .from('driver_vehicles')
+              .insert(driverVehicles);
+
+            if (vehiclesError) {
+              console.error('Erro ao vincular veículos:', vehiclesError);
+              toast.error('Motorista criado, mas houve erro ao vincular veículos.');
+            }
+          }
 
           toast.success('Motorista cadastrado com sucesso!');
           if (data) {
@@ -1523,11 +1532,71 @@ export default function OSOperationalPage() {
           showHeader={false}
         />
       ) : (
-        <OSCalendar 
-          osList={filteredData} 
-          clientes={clientes}
-          onEventClick={(osId: string) => handleViewOS(osId)}
-        />
+        <>
+          <OSCalendar 
+            osList={filteredData} 
+            clientes={clientes}
+            onEventClick={(osId: string, position?: { x: number; y: number }) => {
+              setOpenActionMenuId(osId);
+              setCalendarMenuPosition(position || null);
+            }}
+          />
+          
+          {/* Menu de Ações para o Calendário */}
+          {viewMode === 'calendar' && openActionMenuId && calendarMenuPosition && (() => {
+            const osId = openActionMenuId;
+            const menuHeight = 200;
+            const spaceBelow = window.innerHeight - calendarMenuPosition.y;
+            const shouldOpenUp = spaceBelow < menuHeight + 16;
+            return (
+              <div
+                ref={calendarMenuRef}
+                className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
+                style={{
+                  top: shouldOpenUp ? calendarMenuPosition.y - menuHeight - 8 : calendarMenuPosition.y + 8,
+                  left: calendarMenuPosition.x
+                }}
+              >
+                <button
+                  onClick={() => { handleViewOS(osId); setCalendarMenuPosition(null); }}
+                  className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-cyan-50 hover:text-cyan-600 flex items-center gap-3 cursor-pointer"
+                >
+                  <Eye size={16} className="text-slate-400 group-hover:text-cyan-600" />
+                  Visualizar
+                </button>
+                <button
+                  onClick={() => { handleEditOS(osId); setCalendarMenuPosition(null); }}
+                  className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-blue-50 hover:text-blue-600 flex items-center gap-3 cursor-pointer"
+                >
+                  <Pencil size={16} className="text-slate-400 group-hover:text-blue-600" />
+                  Editar
+                </button>
+                <button
+                  onClick={() => { handleReopenOS(osId); setCalendarMenuPosition(null); }}
+                  className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 flex items-center gap-3 cursor-pointer"
+                >
+                  <RotateCcw size={16} className="text-slate-400 group-hover:text-emerald-600" />
+                  Reabrir
+                </button>
+                <button
+                  onClick={() => { handleCancelOS(osId); setCalendarMenuPosition(null); }}
+                  className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-100 hover:text-slate-600 flex items-center gap-3 cursor-pointer"
+                >
+                  <XOctagon size={16} className="text-slate-400 group-hover:text-slate-600" />
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => { handleDeleteOS(osId); setCalendarMenuPosition(null); }}
+                  className="group w-full px-4 py-2 text-left text-sm font-bold rounded-xl bg-rose-50 hover:bg-rose-100 flex items-center gap-3 cursor-pointer"
+                  style={{ color: 'rgb(219, 132, 153)' }}
+                >
+                  <XOctagon size={16} style={{ color: 'rgb(219, 132, 153)' }} />
+                  Excluir
+                </button>
+              </div>
+            );
+          })()}
+        </>
       )}
 
       {/* Modal Nova OS */}
@@ -2332,25 +2401,71 @@ export default function OSOperationalPage() {
 
                 <div className="grid grid-cols-1 gap-6">
                   <div className="flex flex-col md:flex-row gap-6 items-start">
-                    <div className="space-y-2 flex-1">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-                        Nome completo <RequiredAsterisk />
-                      </label>
+                    <div className="space-y-2 w-full md:w-[45%]">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome completo <span className="text-rose-300 text-base">*</span></label>
                       <input
-                        type="text"
                         required
                         placeholder="Ex: João Silva da Rocha"
                         value={quickAddDriverForm.name}
-                        onChange={(e) => setQuickAddDriverForm(prev => ({ ...prev, name: e.target.value }))}
+                        onChange={e => setQuickAddDriverForm(prev => ({ ...prev, name: e.target.value }))}
                         className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                       />
                     </div>
-
-                    <div className="space-y-2 md:mt-7">
-                      <div className="flex gap-3">
+                    <div className="space-y-2 w-full md:w-48">
+                      <GeologSearchableSelect
+                        label="Tipo"
+                        options={tipoDocumentoOptions}
+                        value={quickAddDriverForm.tipo_documento}
+                        onChange={(value) => setQuickAddDriverForm(prev => ({ ...prev, tipo_documento: value as 'cpf' | 'passaporte', cpf: formatDriverDocument(prev.cpf, value as 'cpf' | 'passaporte') }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2 w-full md:w-40">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">{getDriverDocumentLabel(quickAddDriverForm.tipo_documento)} <span className="text-rose-300 text-base">*</span></label>
+                      <input
+                        required
+                        placeholder={getDriverDocumentPlaceholder(quickAddDriverForm.tipo_documento)}
+                        value={quickAddDriverForm.cpf}
+                        onChange={e => setQuickAddDriverForm(prev => ({ ...prev, cpf: formatDriverDocument(e.target.value, prev.tipo_documento) }))}
+                        className="w-full px-4 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                      />
+                    </div>
+                    <div className="space-y-2 w-full md:w-44">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <span className="text-rose-300 text-base">*</span></label>
+                      <input
+                        required
+                        placeholder="(00) 9XXXX-XXXX"
+                        value={formatDriverCelular(quickAddDriverForm.celular)}
+                        onChange={e => {
+                          const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 11);
+                          setQuickAddDriverForm(prev => ({ ...prev, celular: digitsOnly }));
+                        }}
+                        className={`w-full px-4 py-4 bg-slate-50 border-2 rounded-xl font-bold text-base text-slate-900 outline-none focus:bg-white transition-all shadow-sm ${
+                          quickAddDriverForm.celular && !validateDriverCelular(quickAddDriverForm.celular)
+                            ? 'border-red-500 focus:border-red-500'
+                            : 'border-slate-200 focus:border-blue-600'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col md:flex-row gap-6 items-start">
+                    {quickAddDriverForm.vinculo_tipo === 'parceiro' && (
+                      <div className="space-y-2 w-full md:w-[45%]">
+                        <GeologSearchableSelect
+                          label="Parceiro de serviço"
+                          options={parceiroOptions}
+                          value={quickAddDriverForm.parceiro_id}
+                          onChange={(value) => setQuickAddDriverForm(prev => ({ ...prev, parceiro_id: value, vehicle_ids: [] }))}
+                          placeholder="Selecione o parceiro..."
+                          required
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2 w-full md:w-auto">
+                      <div className="flex gap-3 mt-7">
                         <button
                           type="button"
-                          onClick={() => setQuickAddDriverForm(prev => ({ ...prev, vinculo_tipo: 'interno', parceiro_id: '', vehicle_id: '', tipo_documento: 'cpf' }))}
+                          onClick={() => setQuickAddDriverForm(prev => ({ ...prev, vinculo_tipo: 'interno', parceiro_id: '', vehicle_ids: [], tipo_documento: 'cpf' }))}
                           className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
                             quickAddDriverForm.vinculo_tipo === 'interno'
                               ? 'bg-blue-600 border-blue-600 text-white shadow-md'
@@ -2361,7 +2476,7 @@ export default function OSOperationalPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setQuickAddDriverForm(prev => ({ ...prev, vinculo_tipo: 'parceiro', parceiro_id: '', vehicle_id: '', tipo_documento: 'cpf' }))}
+                          onClick={() => setQuickAddDriverForm(prev => ({ ...prev, vinculo_tipo: 'parceiro', parceiro_id: '', vehicle_ids: [], tipo_documento: 'cpf' }))}
                           className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
                             quickAddDriverForm.vinculo_tipo === 'parceiro'
                               ? 'bg-teal-500 border-teal-500 text-white shadow-md'
@@ -2373,102 +2488,86 @@ export default function OSOperationalPage() {
                       </div>
                     </div>
                   </div>
+                </div>
+              </section>
 
-                  <div className="flex flex-col md:flex-row gap-6 items-start">
-                    <div className="space-y-2 w-full md:w-56">
-                      <GeologSearchableSelect
-                        label="Tipo"
-                        options={tipoDocumentoOptions}
-                        value={quickAddDriverForm.tipo_documento}
-                        onChange={(value) => setQuickAddDriverForm(prev => ({
-                          ...prev,
-                          tipo_documento: value as 'cpf' | 'passaporte',
-                          cpf: formatDriverDocument(prev.cpf, value as 'cpf' | 'passaporte')
-                        }))}
-                        required
-                      />
-                    </div>
+              {/* Seção de Veículos Vinculados */}
+              <section className="space-y-6">
+                <div className="flex items-center justify-between border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
+                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                    <Truck size={20} className="text-slate-500" /> Veículos Vinculados
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setQuickAddDriverForm(prev => ({ ...prev, vehicle_ids: [...prev.vehicle_ids, filteredQuickAddVehicles.find(v => !prev.vehicle_ids.includes(v.id))?.id || ''] }))}
+                    disabled={filteredQuickAddVehicles.filter(v => !quickAddDriverForm.vehicle_ids.includes(v.id)).length === 0}
+                    className="flex items-center gap-3 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <PlusCircle size={14} /> Adicionar veículo
+                  </button>
+                </div>
 
-                    <div className="space-y-2 w-full md:w-52">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-                        {getDriverDocumentLabel(quickAddDriverForm.tipo_documento)} <RequiredAsterisk />
-                      </label>
-                      <input
-                        required
-                        placeholder={getDriverDocumentPlaceholder(quickAddDriverForm.tipo_documento)}
-                        value={quickAddDriverForm.cpf}
-                        onChange={(e) => setQuickAddDriverForm(prev => ({ ...prev, cpf: formatDriverDocument(e.target.value, prev.tipo_documento) }))}
-                        className="w-full px-4 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                      />
-                    </div>
-
-                    <div className="space-y-2 w-full md:w-60">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-                        Celular <RequiredAsterisk />
-                      </label>
-                      <input
-                        required
-                        placeholder="(00) 9XXXX-XXXX"
-                        value={formatDriverCelular(quickAddDriverForm.celular)}
-                        onChange={(e) => {
-                          const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 11);
-                          setQuickAddDriverForm(prev => ({ ...prev, celular: digitsOnly }));
-                        }}
-                        className={`w-full px-4 py-4 bg-slate-50 border-2 rounded-xl font-bold text-base text-slate-900 outline-none focus:bg-white transition-all shadow-sm ${
-                          quickAddDriverForm.celular && !validateDriverCelular(quickAddDriverForm.celular)
-                            ? 'border-red-500 focus:border-red-500'
-                            : 'border-slate-200 focus:border-blue-600'
-                        }`}
-                      />
-                    </div>
-
-                    <div className="space-y-2 w-full md:w-52">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-                        CNH <RequiredAsterisk />
-                      </label>
-                      <input
-                        required
-                        placeholder="11 dígitos numéricos"
-                        value={quickAddDriverForm.cnh}
-                        onChange={(e) => {
-                          const value = e.target.value.replace(/\D/g, '').slice(0, 11);
-                          setQuickAddDriverForm(prev => ({ ...prev, cnh: value }));
-                        }}
-                        className={`w-full px-4 py-4 bg-slate-50 border-2 rounded-xl font-bold text-base text-slate-900 outline-none focus:bg-white transition-all shadow-sm ${
-                          quickAddDriverForm.cnh && !validateDriverCNH(quickAddDriverForm.cnh)
-                            ? 'border-red-500 focus:border-red-500'
-                            : 'border-slate-200 focus:border-blue-600'
-                        }`}
-                      />
-                    </div>
+                <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  <div className="hidden md:grid grid-cols-[2fr_2fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                    <span>Veículo</span>
+                    <span className="ml-8">Placa</span>
+                    <span className="text-right">Ações</span>
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {quickAddDriverForm.vinculo_tipo === 'parceiro' && (
-                      <GeologSearchableSelect
-                        label="Parceiro de serviço"
-                        options={parceiroOptions}
-                        value={quickAddDriverForm.parceiro_id}
-                        onChange={(value) => setQuickAddDriverForm(prev => ({ ...prev, parceiro_id: value, vehicle_id: '' }))}
-                        placeholder="Selecione o parceiro..."
-                        required
-                      />
+                  <div className="divide-y divide-slate-100 max-h-[30vh] overflow-y-auto custom-scrollbar">
+                    {quickAddDriverForm.vehicle_ids.length === 0 && (
+                      <div className="px-6 py-8 text-center text-slate-400 text-sm">
+                        Nenhum veículo vinculado. Clique em &quot;Adicionar veículo&quot; acima.
+                      </div>
                     )}
-
-                    <div className={quickAddDriverForm.vinculo_tipo === 'parceiro' ? '' : 'md:col-span-2'}>
-                      <GeologSearchableSelect
-                        label="Veículo"
-                        options={filteredQuickAddVehicles.map((vehicle) => ({
-                          id: vehicle.id,
-                          nome: `${vehicle.marca} ${vehicle.modelo} - ${vehicle.placa}`
-                        }))}
-                        value={quickAddDriverForm.vehicle_id}
-                        onChange={(value) => setQuickAddDriverForm(prev => ({ ...prev, vehicle_id: value }))}
-                        placeholder="Selecione o veículo..."
-                        required
-                        disabled={vehiclesUnavailable || filteredQuickAddVehicles.length === 0}
-                      />
-                    </div>
+                    {quickAddDriverForm.vehicle_ids.map((vehicleId, index) => {
+                      const vehicle = vehicles.find(v => v.id === vehicleId);
+                      const availableVehiclesForThisRow = filteredQuickAddVehicles.filter(v =>
+                        v.id === vehicleId || !quickAddDriverForm.vehicle_ids.includes(v.id)
+                      );
+                      return (
+                        <div key={index} className="grid grid-cols-1 md:grid-cols-[2fr_2fr_auto] gap-4 items-center px-6 py-4">
+                          <div className="space-y-2">
+                            <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Veículo</label>
+                            <GeologSearchableSelect
+                              label=""
+                              options={availableVehiclesForThisRow.map(v => ({
+                                id: v.id,
+                                nome: `${v.marca} ${v.modelo}`,
+                                sublabel: v.placa
+                              }))}
+                              value={vehicleId}
+                              onChange={(value) => setQuickAddDriverForm(prev => ({
+                                ...prev,
+                                vehicle_ids: prev.vehicle_ids.map((id, idx) => idx === index ? value : id)
+                              }))}
+                              placeholder="Selecione o veículo..."
+                            />
+                          </div>
+                          <div className="space-y-1 ml-5">
+                            <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Placa</label>
+                            <div className="w-[120px] bg-white border-2 border-slate-400 rounded-md overflow-hidden shadow-sm flex flex-col items-center">
+                              <div className="w-full bg-blue-600 h-1" />
+                              <div className="py-3 px-4 flex items-center justify-center">
+                                <span className="text-[15px] font-black text-slate-900 uppercase tracking-widest leading-none">{vehicle?.placa || '—'}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setQuickAddDriverForm(prev => ({
+                                ...prev,
+                                vehicle_ids: prev.vehicle_ids.filter((_, idx) => idx !== index)
+                              }))}
+                              className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                              aria-label="Remover veículo"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </section>

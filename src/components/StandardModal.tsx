@@ -27,16 +27,23 @@ export default function StandardModal({
   bodyClassName = 'p-6 md:p-10 pb-16 space-y-12'
 }: StandardModalProps) {
   useEffect(() => {
+    // Salvar posição de scroll atual
+    const scrollY = window.scrollY;
+
     // Bloquear scroll do body quando modal está aberto
     document.body.style.overflow = 'hidden';
     document.body.style.position = 'fixed';
     document.body.style.width = '100%';
+    document.body.style.top = `-${scrollY}px`;
 
     return () => {
       // Restaurar scroll quando modal fecha
       document.body.style.overflow = '';
       document.body.style.position = '';
       document.body.style.width = '';
+      document.body.style.top = '';
+      // Restaurar posição de scroll
+      window.scrollTo(0, scrollY);
     };
   }, []);
 

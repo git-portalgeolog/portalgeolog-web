@@ -33,7 +33,7 @@ interface EventContentProps {
 interface OSCalendarProps {
   osList: OrderService[];
   clientes: Cliente[];
-  onEventClick: (osId: string) => void;
+  onEventClick: (osId: string, position?: { x: number; y: number }) => void;
 }
 
 // Cores por status
@@ -240,9 +240,9 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
     });
   }, [osList, clientes]);
 
-  const handleEventClick = useCallback((info: { jsEvent: Event; event: { id: string } }) => {
+  const handleEventClick = useCallback((info: { jsEvent: MouseEvent; event: { id: string } }) => {
     info.jsEvent.preventDefault();
-    onEventClick(info.event.id);
+    onEventClick(info.event.id, { x: info.jsEvent.clientX, y: info.jsEvent.clientY });
   }, [onEventClick]);
 
   const handleDateSelect = useCallback((selectInfo: { startStr: string }) => {
@@ -456,6 +456,88 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
           .fc-scroller::-webkit-scrollbar-thumb {
             background-color: #cbd5e1;
             border-radius: 20px;
+          }
+
+          /* Popover "+X mais" (Fix UI Bug) */
+          .fc-more-popover {
+            z-index: 9999 !important;
+            background: #ffffff !important;
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 24px !important;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+            overflow: hidden !important;
+            width: 350px !important;
+            animation: fcPopoverFadeIn 0.2s ease-out;
+          }
+
+          @keyframes fcPopoverFadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+
+          .fc-more-popover .fc-popover-header {
+            background: #ffffff !important;
+            padding: 16px 20px !important;
+            border-bottom: 1px solid #f1f5f9 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+          }
+
+          .fc-more-popover .fc-popover-title {
+            font-size: 13px !important;
+            font-weight: 900 !important;
+            color: #1e293b !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.1em !important;
+          }
+
+          .fc-more-popover .fc-popover-close {
+            background: #f1f5f9 !important;
+            border-radius: 50% !important;
+            width: 28px !important;
+            height: 28px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            color: #64748b !important;
+            opacity: 1 !important;
+            transition: all 0.2s !important;
+            font-size: 14px !important;
+            cursor: pointer !important;
+          }
+
+          .fc-more-popover .fc-popover-close:hover {
+            background: #e2e8f0 !important;
+            color: #0f172a !important;
+          }
+
+          .fc-more-popover .fc-popover-body {
+            padding: 16px !important;
+            max-height: 400px !important;
+            overflow-y: auto !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 10px !important;
+          }
+
+          /* Scrollbar para o popover */
+          .fc-more-popover .fc-popover-body::-webkit-scrollbar {
+            width: 6px;
+          }
+
+          .fc-more-popover .fc-popover-body::-webkit-scrollbar-track {
+            background: transparent;
+          }
+
+          .fc-more-popover .fc-popover-body::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 20px;
+          }
+
+          .fc-more-popover .fc-popover-body .fc-daygrid-event-harness {
+            min-height: auto !important;
+            margin-bottom: 4px !important;
           }
         `}</style>
       </div>
