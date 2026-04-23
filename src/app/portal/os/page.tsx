@@ -195,19 +195,25 @@ export default function OSOperationalPage() {
   const calendarMenuRef = useRef<HTMLDivElement | null>(null);
   const passengerDraftIdRef = useRef(0);
   const osTable = useServerPaginatedTable(fetchOSPage, 10);
+  const osTableRefreshRef = useRef(osTable.refresh);
   
+  useEffect(() => {
+    osTableRefreshRef.current = osTable.refresh;
+  }, [osTable.refresh]);
+
   // Sincronizar tabela com atualizações globais de OS
   useEffect(() => {
     if (lastOSUpdate > 0) {
-      void osTable.refresh();
+      void osTableRefreshRef.current();
     }
-  }, [lastOSUpdate, osTable]);
+  }, [lastOSUpdate]);
 
   // Estados para cadastros rápidos
   const [quickAddModal, setQuickAddModal] = useState<'cliente' | 'motorista' | 'solicitante' | 'centroCusto' | null>(null);
   const [quickAddForm, setQuickAddForm] = useState({ nome: '' });
   const [quickAddDriverForm, setQuickAddDriverForm] = useState<QuickAddDriverForm>(initialQuickAddDriverForm);
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
+  const [vehiclesUnavailable, setVehiclesUnavailable] = useState(false);
   const [quickAddedDriverOptions, setQuickAddedDriverOptions] = useState<{ id: string; nome: string }[]>([]);
   const [driverVehiclesAssoc, setDriverVehiclesAssoc] = useState<{ driver_id: string; vehicle_id: string }[]>([]);
   const [isOsVehicleQuickModalOpen, setIsOsVehicleQuickModalOpen] = useState(false);
