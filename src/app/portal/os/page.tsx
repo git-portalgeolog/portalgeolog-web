@@ -469,7 +469,7 @@ export default function OSOperationalPage() {
 
     const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
     // Link de aceitação
-    const acceptLink = `https://portalgeolog.com.br/os/aceitar?id=${osData.id}`; 
+    const acceptLink = `https://portalgeolog.com.br/aceitar/${osData.id}`; 
     
     // Formatação do itinerário
     const waypoints = osData.rota?.waypoints || [];
