@@ -12,6 +12,7 @@ import {
   X,
   PlusCircle,
   FileText,
+  
   MapPin,
   Clock,
   CheckCircle2,
@@ -36,6 +37,10 @@ import {
   LayoutGrid,
   CalendarDays,
   Trash2,
+  Mail,
+  Smartphone,
+  Bell,
+  Send,
 } from 'lucide-react';
 import { useData, type OrderService, type ParceiroServico } from '@/context/DataContext';
 import { fetchOSPage } from '@/lib/supabase/queries';
@@ -411,6 +416,104 @@ export default function OSOperationalPage() {
     setCancelTargetId(null);
   };
 
+  const handleNotifyPassenger = async (
+    passengerKey: string,
+    type: 'email' | 'whatsapp' | 'both',
+    passenger: { nome: string; email: string; celular: string; hasEmail: boolean; hasPhone: boolean; solicitanteId: string; waypointIndex: number }
+  ) => {
+    if (!viewingOS) return;
+    setNotifyLoadingKey(passengerKey);
+    try {
+      const acceptUrl = `${window.location.origin}/aceitar`;
+      console.log('[handleNotifyPassenger] sending', { type, osId: viewingOS.id, passageiroId: passenger.solicitanteId, hasPhone: passenger.hasPhone, celular: passenger.celular });
+      const res = await fetch('/api/notify-passenger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type,
+          passengerEmail: passenger.hasEmail ? passenger.email : undefined,
+          passengerPhone: passenger.hasPhone ? passenger.celular : undefined,
+          passengerName: passenger.nome,
+          osProtocol: viewingOS.protocolo,
+          osId: viewingOS.id,
+          passageiroId: passenger.solicitanteId || undefined,
+          acceptUrl,
+        }),
+      });
+      const data = await res.json();
+      console.log('[handleNotifyPassenger] response', data);
+      if (data.success) {
+        toast.success('Notificação enviada com sucesso!');
+      } else {
+        toast.error(data.error || `Erro ao enviar notificação. Status: ${res.status}`);
+      }
+    } catch (err) {
+      console.error('[handleNotifyPassenger] catch error:', err);
+      toast.error('Erro ao enviar notificação. Verifique o console.');
+    } finally {
+      setNotifyLoadingKey(null);
+      setOpenNotifyMenuKey(null);
+    }
+  };
+
+  const sendWhatsAppNotification = async (osData: OrderService) => {
+    // Buscar o telefone do motorista pelo nome
+    const driverObj = drivers.find(d => d.name === osData.motorista);
+    let phone = driverObj?.phone || "5522997259180"; 
+    
+    // Limpeza e formatação do telefone
+    phone = phone.replace(/\D/g, '');
+    if (phone.length <= 11 && !phone.startsWith('55')) {
+      phone = `55${phone}`;
+    }
+
+    const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
+    // Link de aceitação
+    const acceptLink = `https://portalgeolog.com.br/os/aceitar?id=${osData.id}`; 
+    
+    // Formatação do itinerário
+    const waypoints = osData.rota?.waypoints || [];
+    let itineraryText = "";
+    if (waypoints.length >= 2) {
+      itineraryText = waypoints.map((w, idx) => {
+        const label = w.label.trim();
+        if (idx === 0) return `🟢 *Origem:* ${label}`;
+        if (idx === waypoints.length - 1) return `🔵 *Destino Final:* ${label}`;
+        return `🛑 *Parada:* ${label}`;
+      }).join('\n\n');
+    }
+
+    const message = 
+      `🏢 *Empresa:* ${cliente}\n` +
+      `📍 *Itinerário:*\n\n${itineraryText}\n\n` +
+      `📅 *Data:* ${osData.data.split('-').reverse().join('/')}\n` +
+      `🛠️ *Serviço:* ${osData.os}\n\n` +
+      `👇 *CLIQUE NO LINK ABAIXO PARA ACEITAR:*\n` +
+      `${acceptLink}\n\n` +
+      `_Ao clicar, o status será atualizado automaticamente no painel._`;
+
+    setNotifyLoadingKey('driver-whatsapp');
+    try {
+      const response = await fetch('/api/whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, message })
+      });
+
+      if (response.ok) {
+        toast.success("WhatsApp enviado para o motorista!");
+      } else {
+        const data = await response.json();
+        toast.error(`Falha ao enviar: ${data.error || 'Erro desconhecido'}`);
+      }
+    } catch (err) {
+      console.error("Erro na chamada da API de WhatsApp:", err);
+      toast.error("Erro ao conectar com a API de WhatsApp.");
+    } finally {
+      setNotifyLoadingKey(null);
+    }
+  };
+
   useEffect(() => {
     if (!openActionMenuId) return;
 
@@ -434,6 +537,43 @@ export default function OSOperationalPage() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [openActionMenuId]);
+
+  const [openNotifyMenuKey, setOpenNotifyMenuKey] = useState<string | null>(null);
+  const [notifyLoadingKey, setNotifyLoadingKey] = useState<string | null>(null);
+  const [notifyMenuPosition, setNotifyMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [passengerConfirmations, setPassengerConfirmations] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!openNotifyMenuKey) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('[data-notify-menu]') || target.closest('[data-notify-button]')) return;
+      setOpenNotifyMenuKey(null);
+      setNotifyMenuPosition(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openNotifyMenuKey]);
+
+  useEffect(() => {
+    if (!viewingOSId) {
+      setPassengerConfirmations({});
+      return;
+    }
+    supabase
+      .from('os_passenger_confirmations')
+      .select('passageiro_id, aceito')
+      .eq('os_id', viewingOSId)
+      .then(({ data }) => {
+        if (data) {
+          const map: Record<string, boolean> = {};
+          data.forEach((row: { passageiro_id: string | null; aceito: boolean }) => {
+            if (row.passageiro_id) map[row.passageiro_id] = row.aceito;
+          });
+          setPassengerConfirmations(map);
+        }
+      });
+  }, [viewingOSId, supabase]);
 
   const [formData, setFormData] = useState(initialForm);
   const [openWaypointComments, setOpenWaypointComments] = useState<Record<number, boolean>>({});
@@ -502,6 +642,10 @@ export default function OSOperationalPage() {
           celular: passengerRecord?.celular || 'Não informado',
           email: passengerRecord?.email || 'Não informado',
           endereco: passengerRecord?.enderecos?.[0]?.enderecoCompleto || 'Não informado',
+          hasEmail: Boolean(passengerRecord?.email && passengerRecord.email.trim() !== ''),
+          hasPhone: Boolean(passengerRecord?.celular && passengerRecord.celular.replace(/\D/g, '').length > 0),
+          solicitanteId: passenger.solicitanteId || '',
+          waypointIndex,
         };
       })
     );
@@ -2168,106 +2312,227 @@ export default function OSOperationalPage() {
           bodyClassName="p-6 md:p-10 space-y-8"
         >
           <div className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <p className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Cliente</p>
-                <p className="mt-3 text-lg font-black text-slate-900">{clientes.find(c => c.id === viewingOS.clienteId)?.nome || 'N/A'}</p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <p className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Motorista</p>
-                <p className="mt-3 text-lg font-black text-slate-900">{viewingOS.motorista || 'Não definido'}</p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <p className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Status</p>
-                <div className="mt-3 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-wide border-slate-200 bg-white text-slate-700">
-                  {getStatusConfig(viewingOS.status.operacional).icon}
-                  {getStatusConfig(viewingOS.status.operacional).label}
+            {/* Barra de Resumo Compacta */}
+            <div className="flex flex-wrap items-center gap-y-3 gap-x-1 rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3">
+              <div className="flex items-center gap-2 px-3">
+                <Building2 size={14} className="text-slate-400 shrink-0" />
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Cliente</p>
+                  <p className="text-sm font-bold text-slate-800 line-clamp-1">{clientes.find(c => c.id === viewingOS.clienteId)?.nome || 'N/A'}</p>
                 </div>
               </div>
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                <p className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Financeiro</p>
-                <p className="mt-3 text-lg font-black text-slate-900">{formatCurrency(viewingOS.valorBruto)}</p>
-                <p className="text-sm font-semibold text-slate-500">Lucro {formatCurrency(viewingOS.lucro)}</p>
+              <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
+
+              <div className="flex items-center gap-2 px-3">
+                <User size={14} className="text-slate-400 shrink-0" />
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Solicitante</p>
+                  <p className="text-sm font-bold text-slate-800 line-clamp-1">{viewingOS.solicitante || 'N/A'}</p>
+                </div>
+              </div>
+              <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
+
+              <div className="flex items-center gap-2 px-3">
+                <Clock size={14} className="text-slate-400 shrink-0" />
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
+                  <p className="text-sm font-bold text-slate-800">{getStatusConfig(viewingOS.status.operacional).label}</p>
+                </div>
+              </div>
+              <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
+
+              <div className="flex items-center gap-2 px-3">
+                <Car size={14} className="text-slate-400 shrink-0" />
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Motorista</p>
+                  <p className="text-sm font-bold text-slate-800 line-clamp-1">{viewingOS.motorista || 'Não definido'}</p>
+                </div>
+              </div>
+              <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
+
+              <div className="flex items-center gap-2 px-3">
+                <Building size={14} className="text-slate-400 shrink-0" />
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">C. Custo</p>
+                  <p className="text-sm font-bold text-slate-800 line-clamp-1">
+                    {clientes.find(c => c.id === viewingOS.clienteId)?.centrosCusto.find(cc => cc.id === viewingOS.centroCustoId)?.nome || 'Padrão'}
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-[1.3fr_0.9fr] gap-6">
-              <div className="rounded-[2rem] border border-slate-200 bg-white p-6 space-y-6 shadow-sm">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div className="grid grid-cols-1 gap-8">
+              {/* Status da Operação - 100% Width */}
+              <div className="rounded-[2rem] border border-slate-200 bg-white p-8 space-y-8 shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-6">
                   <div>
-                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.08em]">Acompanhamento do Serviço</h3>
-                    <p className="text-sm font-semibold text-slate-400">Visão consolidada do que o sistema já consegue inferir pelo status atual.</p>
+                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-[0.1em]">Status da Operação</h3>
+                    <p className="text-sm font-semibold text-slate-400 mt-1">Acompanhamento em tempo real da jornada do motorista.</p>
                   </div>
-                  <div className="px-4 py-2 rounded-2xl bg-blue-50 text-blue-700 text-xs font-black uppercase tracking-[0.2em]">
-                    Tempo real visual
+                  <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-blue-50 text-blue-700 text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">
+                    <div className="w-2 h-2 rounded-full bg-blue-600"></div>
+                    Em execução
                   </div>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="flex items-start gap-4 rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                    <div className={`mt-0.5 w-10 h-10 rounded-2xl flex items-center justify-center ${driverFlow.received ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>
-                      <MessageCircle size={18} />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-black text-slate-900 uppercase tracking-[0.12em]">Mensagem enviada ao motorista</p>
-                      <p className="text-sm text-slate-500">O fluxo dispara um link automático para o motorista confirmar o atendimento.</p>
-                    </div>
-                    <span className={`text-xs font-black uppercase tracking-[0.18em] ${driverFlow.received ? 'text-emerald-600' : 'text-slate-400'}`}>{driverFlow.received ? 'Enviado' : 'Pendente'}</span>
+                <div className="relative flex justify-between items-start px-4">
+                  {/* Linha de fundo da trilha */}
+                  <div className="absolute top-[26px] left-[60px] right-[60px] h-[3px] bg-slate-100 rounded-full -z-0">
+                    <div 
+                      className="h-full bg-emerald-500 rounded-full transition-all duration-700 ease-out"
+                      style={{ 
+                        width: driverFlow.finished ? '100%' : driverFlow.started ? '66%' : driverFlow.accepted ? '33%' : '0%' 
+                      }}
+                    ></div>
                   </div>
 
-                  <div className="flex items-start gap-4 rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                    <div className={`mt-0.5 w-10 h-10 rounded-2xl flex items-center justify-center ${driverFlow.accepted ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-                      <CheckCircle2 size={18} />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-black text-slate-900 uppercase tracking-[0.12em]">Aceite do motorista</p>
-                      <p className="text-sm text-slate-500">Considerado confirmado quando a OS sai de `Pendente` e entra em etapa operacional posterior.</p>
-                    </div>
-                    <span className={`text-xs font-black uppercase tracking-[0.18em] ${driverFlow.accepted ? 'text-emerald-600' : 'text-slate-500'}`}>{driverFlow.accepted ? 'Confirmado' : 'Aguardando clique'}</span>
-                  </div>
+                  {/* Steps */}
+                  {[
+                    { 
+                      id: 'received', 
+                      icon: <MessageCircle size={20} />, 
+                      label: 'Mensagem', 
+                      sublabel: 'Enviada', 
+                      active: driverFlow.received,
+                      color: 'emerald'
+                    },
+                    { 
+                      id: 'accepted', 
+                      icon: <CheckCircle2 size={20} />, 
+                      label: 'Aceite', 
+                      sublabel: driverFlow.accepted ? 'Confirmado' : 'Aguardando', 
+                      active: driverFlow.accepted,
+                      color: 'emerald'
+                    },
+                    { 
+                      id: 'started', 
+                      icon: <Navigation size={20} />, 
+                      label: 'Em Rota', 
+                      sublabel: driverFlow.started ? 'Iniciado' : 'Pendente', 
+                      active: driverFlow.started,
+                      color: 'blue'
+                    },
+                    { 
+                      id: 'finished', 
+                      icon: <FileText size={20} />, 
+                      label: 'Concluído', 
+                      sublabel: driverFlow.finished ? 'Finalizado' : 'Em aberto', 
+                      active: driverFlow.finished,
+                      color: 'emerald'
+                    }
+                  ].map((step) => (
+                    <button
+                      key={step.id}
+                      type="button"
+                      className="relative z-10 flex flex-col items-center group cursor-pointer"
+                      onClick={() => {
+                        if (step.id === 'received' && viewingOS) {
+                          sendWhatsAppNotification(viewingOS);
+                        } else {
+                          toast.info(`Etapa: ${step.label} - ${step.sublabel}`);
+                        }
+                      }}
+                      disabled={notifyLoadingKey === 'driver-whatsapp'}
+                    >
+                      <div className={`
+                        w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-lg
+                        ${step.active 
+                          ? step.color === 'emerald' ? 'bg-emerald-500 text-white shadow-emerald-200/50' : 'bg-blue-600 text-white shadow-blue-200/50'
+                          : 'bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300'
+                        }
+                        group-hover:scale-110 group-active:scale-95
+                        ${notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? 'animate-pulse' : ''}
+                      `}>
+                        {notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? (
+                          <Loader2 size={24} className="animate-spin" />
+                        ) : step.icon}
+                      </div>
+                      
+                      <div className="mt-4 text-center space-y-1">
+                        <p className={`text-[11px] font-black uppercase tracking-[0.15em] transition-colors ${step.active ? 'text-slate-900' : 'text-slate-400'}`}>
+                          {step.label}
+                        </p>
+                        <p className={`text-[10px] font-bold transition-colors ${step.active ? 'text-slate-500' : 'text-slate-300'}`}>
+                          {step.sublabel}
+                        </p>
+                      </div>
 
-                  <div className="flex items-start gap-4 rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                    <div className={`mt-0.5 w-10 h-10 rounded-2xl flex items-center justify-center ${driverFlow.started ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-400'}`}>
-                      <Navigation size={18} />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-black text-slate-900 uppercase tracking-[0.12em]">Início da rota</p>
-                      <p className="text-sm text-slate-500">Quando o motorista aciona o link operacional de início, a frota entra em trânsito.</p>
-                    </div>
-                    <span className={`text-xs font-black uppercase tracking-[0.18em] ${driverFlow.started ? 'text-blue-600' : 'text-slate-400'}`}>{driverFlow.started ? 'Em deslocamento' : 'Não iniciado'}</span>
-                  </div>
-
-                  <div className="flex items-start gap-4 rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                    <div className={`mt-0.5 w-10 h-10 rounded-2xl flex items-center justify-center ${driverFlow.finished ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>
-                      <FileText size={18} />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-black text-slate-900 uppercase tracking-[0.12em]">Finalização operacional</p>
-                      <p className="text-sm text-slate-500">Visível quando a OS é concluída e já pode seguir para validação administrativa/financeira.</p>
-                    </div>
-                    <span className={`text-xs font-black uppercase tracking-[0.18em] ${driverFlow.finished ? 'text-emerald-600' : 'text-slate-400'}`}>{driverFlow.finished ? 'Finalizado' : 'Em aberto'}</span>
-                  </div>
+                      {step.active && (
+                        <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${step.color === 'emerald' ? 'bg-emerald-500' : 'bg-blue-600'} flex items-center justify-center`}>
+                          <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></div>
+                        </div>
+                      )}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              <div className="rounded-[2rem] border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
-                <div className="flex items-center gap-3">
-                  <Users className="text-blue-600" size={20} />
-                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.08em]">Passageiros e Comunicação</h3>
+              {/* Grid para Trajeto e Resumo - Agora lado a lado */}
+              <div className="grid grid-cols-1 xl:grid-cols-[1.3fr_0.7fr] gap-8 items-stretch">
+                {/* Trajeto do Atendimento */}
+                <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm space-y-6">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                    <div className="flex items-center gap-3">
+                      <MapPin className="text-blue-600" size={22} />
+                      <div>
+                        <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.08em]">Trajeto do Atendimento</h3>
+                        <p className="text-sm font-semibold text-slate-400 mt-1">Pontos de parada e rota definida para esta OS.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="relative flex flex-col gap-8 ml-4">
+                    {/* Linha vertical conectando os pontos */}
+                    <div className="absolute left-[11px] top-2 bottom-2 w-0.5 border-l-2 border-dashed border-slate-200"></div>
+
+                    {(viewingOS.rota?.waypoints || []).map((waypoint, idx) => {
+                      const isFirst = idx === 0;
+                      const isLast = idx === (viewingOS.rota?.waypoints?.length || 0) - 1;
+                      
+                      return (
+                        <div key={idx} className="relative flex items-center gap-6 group">
+                          <div className={`
+                            relative z-10 w-6 h-6 rounded-full border-4 border-white shadow-md transition-all duration-300
+                            ${isFirst ? 'bg-emerald-500 scale-125' : isLast ? 'bg-blue-600 scale-125' : 'bg-slate-300'}
+                            group-hover:scale-150
+                          `}></div>
+                          <div className={`
+                            flex-1 p-4 rounded-2xl border transition-all duration-300
+                            ${isFirst ? 'bg-emerald-50 border-emerald-100' : isLast ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-100'}
+                            group-hover:shadow-md group-hover:bg-white
+                          `}>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
+                              {isFirst ? 'Origem' : isLast ? 'Destino Final' : `Parada ${idx}`}
+                            </p>
+                            <p className="text-sm font-black text-slate-800 uppercase tracking-tight">
+                              {waypoint.label}
+                            </p>
+                            {waypoint.comment && (
+                              <p className="mt-2 text-xs font-semibold text-slate-500 bg-white/50 p-2 rounded-lg border border-slate-100 italic">
+                                &quot;{waypoint.comment}&quot;
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3">
-                  <div className="rounded-2xl bg-blue-50 border border-blue-100 p-4">
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-600">Itinerário</p>
-                    <p className="mt-2 text-sm font-bold text-slate-700 leading-relaxed">{viewingOS.trecho}</p>
+                {/* Resumo de Contatos - Mesma altura que o Trajeto */}
+                <div className="rounded-[2rem] border border-slate-200 bg-white p-8 space-y-6 shadow-sm h-full flex flex-col">
+                  <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+                    <Users className="text-blue-600" size={22} />
+                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.08em]">Resumo do Itinerário</h3>
                   </div>
-                  <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">Solicitante</p>
-                    <p className="mt-2 text-sm font-bold text-slate-700">{viewingOS.solicitante || 'Não informado'}</p>
-                  </div>
-                  <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">Centro de custo</p>
-                    <p className="mt-2 text-sm font-bold text-slate-700">{clientes.find(c => c.id === viewingOS.clienteId)?.centrosCusto.find(cc => cc.id === viewingOS.centroCustoId)?.nome || 'Não informado'}</p>
+                  
+                  <div className="space-y-4 flex-1 flex flex-col">
+                    <div className="p-5 rounded-3xl bg-blue-50 border border-blue-100 h-full flex flex-col justify-center">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400 mb-3">Itinerário Simplificado</p>
+                      <p className="text-sm font-black text-blue-900 leading-relaxed uppercase">
+                        {viewingOS.trecho}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2285,42 +2550,132 @@ export default function OSOperationalPage() {
               </div>
 
               {operationalPassengerList.length > 0 ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {operationalPassengerList.map((passenger) => (
-                    <div key={passenger.key} className="rounded-3xl border border-slate-200 bg-slate-50 p-5 space-y-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-base font-black text-slate-900">{passenger.nome}</p>
-                          <p className="text-sm font-semibold text-slate-500">Embarque relacionado: {passenger.waypointLabel}</p>
-                        </div>
-                        <span className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.16em] ${viewingOS.status.operacional === 'Pendente' ? 'bg-slate-100 text-slate-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                          {viewingOS.status.operacional === 'Pendente' ? 'Aguardando contato' : 'Fluxo ativo'}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-3 text-sm font-semibold text-slate-600">
-                        <div className="flex items-center gap-3 rounded-2xl bg-white border border-slate-200 px-4 py-3">
-                          <User size={16} className="text-slate-400" />
-                          {passenger.email}
-                        </div>
-                        <div className="flex items-center gap-3 rounded-2xl bg-white border border-slate-200 px-4 py-3">
-                          <MessageCircle size={16} className="text-slate-400" />
-                          {passenger.celular}
-                        </div>
-                        <div className="flex items-center gap-2 rounded-2xl bg-white border border-slate-200 px-4 py-3">
-                          <MapPin size={16} className="text-slate-400" />
-                          {passenger.endereco}
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-3 flex items-center justify-between gap-3">
-                        <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Interação do passageiro</p>
-                        <span className={`text-xs font-black uppercase tracking-[0.16em] ${viewingOS.status.operacional === 'Pendente' ? 'text-slate-500' : 'text-emerald-600'}`}>
-                          {viewingOS.status.operacional === 'Pendente' ? 'Mensagem aguardando ação' : 'Notificação considerada entregue no fluxo atual'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-hidden rounded-[2rem] border border-slate-200 shadow-xl shadow-slate-200/40">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-slate-50/80 border-b border-slate-200">
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600">Passageiro</th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600">Contato</th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600">Endereço</th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {operationalPassengerList.map((passenger) => (
+                          <tr
+                            key={passenger.key}
+                            className="hover:bg-slate-50/50 transition-colors cursor-default group"
+                          >
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0">
+                                  <User size={18} className="text-blue-600" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-slate-800">{passenger.nome}</p>
+                                  <p className="text-xs font-semibold text-slate-400 mt-0.5">{passenger.email}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2">
+                                <MessageCircle size={14} className="text-slate-400 shrink-0" />
+                                <p className="text-sm font-semibold text-slate-600">{passenger.celular}</p>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-start gap-2 max-w-[280px]">
+                                <MapPin size={14} className="text-slate-400 shrink-0 mt-0.5" />
+                                <p className="text-sm font-medium text-slate-600 line-clamp-2">{passenger.endereco}</p>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              {passengerConfirmations[passenger.solicitanteId] ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] bg-green-50 border-green-200 text-green-700">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                  Confirmado
+                                </span>
+                              ) : viewingOS.status.operacional === 'Pendente' ? (
+                                <div className="relative inline-block">
+                                  <button
+                                    type="button"
+                                    data-notify-button
+                                    onClick={(e) => {
+                                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                      setNotifyMenuPosition({ x: rect.left, y: rect.top });
+                                      setOpenNotifyMenuKey(openNotifyMenuKey === passenger.key ? null : passenger.key);
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+                                    title="Abrir opções de notificação"
+                                  >
+                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                    Aguardando
+                                    <ChevronDown size={12} />
+                                  </button>
+                                  {openNotifyMenuKey === passenger.key && notifyMenuPosition && (
+                                    <div
+                                      data-notify-menu
+                                      style={{
+                                        position: 'fixed',
+                                        left: notifyMenuPosition.x,
+                                        bottom: typeof window !== 'undefined' ? window.innerHeight - notifyMenuPosition.y + 8 : 0,
+                                        transform: 'translateX(-25%)',
+                                      }}
+                                      className="z-[9999] min-w-[220px] bg-white rounded-2xl border border-slate-200 shadow-xl p-2 space-y-1"
+                                    >
+                                      <p className="px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                                        <Bell size={12} />
+                                        Notificar passageiro
+                                      </p>
+                                      {passenger.hasEmail && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleNotifyPassenger(passenger.key, 'email', passenger)}
+                                          disabled={!!notifyLoadingKey}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                                        >
+                                          <Mail size={14} />
+                                          {notifyLoadingKey === passenger.key ? 'Enviando...' : 'Por e-mail'}
+                                        </button>
+                                      )}
+                                      {passenger.hasPhone && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleNotifyPassenger(passenger.key, 'whatsapp', passenger)}
+                                          disabled={!!notifyLoadingKey}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-green-50 hover:text-green-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                                        >
+                                          <Smartphone size={14} />
+                                          {notifyLoadingKey === passenger.key ? 'Enviando...' : 'Por celular'}
+                                        </button>
+                                      )}
+                                      {passenger.hasEmail && passenger.hasPhone && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleNotifyPassenger(passenger.key, 'both', passenger)}
+                                          disabled={!!notifyLoadingKey}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                                        >
+                                          <Send size={14} />
+                                          {notifyLoadingKey === passenger.key ? 'Enviando...' : 'Ambos'}
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] bg-emerald-50 border-emerald-200 text-emerald-700">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  Ativo
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ) : (
                 <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">

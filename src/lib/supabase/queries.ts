@@ -100,7 +100,7 @@ type OSRow = {
   hora: string | null;
   hora_extra: string | null;
   cliente_id: string | null;
-  centro_custo_id?: string | null;
+  centro_custo?: string | null;
   solicitante: string | null;
   tipo_servico: string | null;
   trecho: string | null;
@@ -615,7 +615,7 @@ export async function fetchOSList(): Promise<OrderService[]> {
       horaExtra: o.hora_extra || '',
       clienteId: o.cliente_id || '',
       solicitante: o.solicitante || '',
-      centroCustoId: o.centro_custo_id || '',
+      centroCustoId: o.centro_custo || '',
       trecho: o.trecho || '',
       motorista: o.motorista || '',
       veiculoId: o.veiculo_id || undefined,
@@ -709,7 +709,7 @@ export async function fetchOSPage({
         horaExtra: o.hora_extra || '',
         clienteId: o.cliente_id || '',
         solicitante: o.solicitante || '',
-        centroCustoId: o.centro_custo_id || '',
+        centroCustoId: o.centro_custo || '',
         trecho: o.trecho || '',
         motorista: o.motorista || '',
         veiculoId: o.veiculo_id || undefined,
@@ -776,7 +776,7 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
         label: wp.label,
         lat: wp.lat || null,
         lng: wp.lng || null,
-        comment: wp.comment?.trim() || null,
+        comment: wp.comment?.trim() || '',
       })
       .select('id')
       .single();
@@ -898,7 +898,7 @@ export async function updateOSInDB(
         label: wp.label,
         lat: wp.lat || null,
         lng: wp.lng || null,
-        comment: wp.comment?.trim() || null,
+        comment: wp.comment?.trim() || '',
       })
       .select('id')
       .single();

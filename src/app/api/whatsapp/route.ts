@@ -5,7 +5,7 @@ export const runtime = 'edge';
 
 // Configurações WASenderAPI
 const WA_SENDER_API_URL = "https://www.wasenderapi.com/api/send-message";
-const WA_SENDER_API_KEY = "1929b24cf117d20488a0520302ca5e00ab36b8025836dad2ac61c5143c383a84";
+const WA_SENDER_API_KEY = "662f06bc6117892fe23d265f39d3ac3b5cac0f79538898361a8ed18c377a0264";
 
 export async function POST(request: Request) {
   try {
