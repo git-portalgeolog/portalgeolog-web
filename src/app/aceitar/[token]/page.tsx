@@ -16,6 +16,7 @@ export default function AceitarViagemPage() {
   useEffect(() => {
     if (!token) return;
 
+    // Tentar primeiro como token de passageiro
     fetch(`/api/passenger-accept?token=${encodeURIComponent(token)}`)
       .then(async (res) => {
         const data = await res.json();
@@ -27,10 +28,26 @@ export default function AceitarViagemPage() {
             setStatus('success');
             setMessage(data.message || 'Viagem confirmada com sucesso! O motorista será notificado.');
           }
-        } else {
-          setStatus('error');
-          setMessage(data.error || 'Não foi possível confirmar a viagem.');
+          return;
         }
+
+        // Se falhou como token de passageiro, tentar como OS ID para motorista
+        return fetch(`/api/os-driver-accept?os_id=${encodeURIComponent(token)}`)
+          .then(async (res2) => {
+            const data2 = await res2.json();
+            if (data2.success) {
+              if (data2.alreadyAccepted) {
+                setStatus('already');
+                setMessage(data2.message || 'Viagem já aceita pelo motorista anteriormente.');
+              } else {
+                setStatus('success');
+                setMessage(data2.message || 'Viagem aceita com sucesso! Aguarde a confirmação dos passageiros.');
+              }
+            } else {
+              setStatus('error');
+              setMessage(data2.error || 'Não foi possível confirmar a viagem.');
+            }
+          });
       })
       .catch(() => {
         setStatus('error');
