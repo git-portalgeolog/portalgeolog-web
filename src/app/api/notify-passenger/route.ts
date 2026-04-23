@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     }
 
     const confirmationLink = token && acceptUrl
-      ? `${acceptUrl}?token=${token}`
+      ? `${acceptUrl}/${token}`
       : undefined;
     console.log('[notify-passenger] confirmationLink:', confirmationLink);
 
@@ -94,8 +94,8 @@ export async function POST(request: Request) {
       }
 
       const text = confirmationLink
-        ? `Olá ${passengerName || 'Passageiro'}! 🚗\n\nSua viagem *${osProtocol || 'N/A'}* está aguardando confirmação.\n\n📍 *Trajeto:* ${osProtocol || 'N/A'}\n\nClique no link abaixo para *CONFIRMAR sua viagem*:\n${confirmationLink}\n\nSe não confirmar, a viagem poderá ser cancelada.`
-        : `Olá ${passengerName || 'Passageiro'}! Sua OS ${osProtocol || 'N/A'} está aguardando confirmação. Em breve mais informações sobre o trajeto.`;
+        ? `Olá, *${passengerName || 'Passageiro'}*! ✨\n\nEsperamos que esteja bem. Estamos entrando em contato para confirmar sua viagem agendada via *Portal Geolog*.\n\n� *Detalhes da Viagem:*\nProtocolo: *${osProtocol || 'N/A'}*\n\nPara garantir sua reserva e nos ajudar na organização do trajeto, pedimos a gentileza de confirmar sua presença clicando no link abaixo:\n\n👉 *CONFIRMAR MINHA VIAGEM:*\n${confirmationLink}\n\nApós clicar, seu status será atualizado automaticamente em nosso sistema. Muito obrigado pela atenção! 🙏`
+        : `Olá, *${passengerName || 'Passageiro'}*! ✨\n\nSua viagem de protocolo *${osProtocol || 'N/A'}* está agendada no Portal Geolog. Em breve enviaremos o link de confirmação com todos os detalhes do trajeto.`;
 
       console.log('[notify-passenger] sending WhatsApp to', cleanPhone, 'text length', text.length);
 

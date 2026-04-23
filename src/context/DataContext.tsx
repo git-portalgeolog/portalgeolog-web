@@ -221,6 +221,7 @@ interface DataContextType {
   parceiros: ParceiroServico[];
   loading: boolean;
 
+  lastOSUpdate: number;
   addCliente: (nome: string, contato?: string) => Promise<Cliente>;
   updateCliente: (id: string, updates: Partial<Cliente>) => Promise<void>;
   deleteCliente: (id: string) => void;
@@ -268,6 +269,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [parceiros, setParceiros] = useState<ParceiroServico[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastOSUpdate, setLastOSUpdate] = useState(0);
   const { user, loading: authLoading } = useAuth();
   const supabase = useMemo(() => createClient(), []);
 
@@ -296,6 +298,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setParceiros(parceirosData);
       setOsList(osData);
       setDrivers(driversData);
+      setLastOSUpdate(Date.now());
     } catch (err) {
       console.error('🔥 CRITICAL: Error refreshing global data:', err);
       toast.error('Erro ao sincronizar dados. Tente atualizar a página.');
@@ -326,7 +329,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       .channel('geolog-realtime-global')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_servico' }, () => {
         console.log('📦 OS Change detected');
-        dbFetchOSList().then(setOsList).catch(() => {});
+        dbFetchOSList().then((data) => {
+          setOsList(data);
+          setLastOSUpdate(Date.now());
+        }).catch(() => {});
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
         dbFetchClientes().then(setClientes).catch(() => {});
@@ -842,6 +848,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         drivers,
         parceiros,
         loading,
+        lastOSUpdate,
         addCliente,
         updateCliente,
         deleteCliente,

@@ -55,7 +55,7 @@ export function useServerPaginatedTable<T>(fetchPage: ServerPaginatedFetch<T>, p
     setPage(Math.max(1, Math.min(nextPage, totalPages)));
   }, [totalPages]);
 
-  return {
+  const result = useMemo(() => ({
     items,
     loading,
     page,
@@ -67,5 +67,7 @@ export function useServerPaginatedTable<T>(fetchPage: ServerPaginatedFetch<T>, p
     setPage: handlePageChange,
     refresh: loadPage,
     error,
-  };
+  }), [items, loading, page, pageSize, totalCount, totalPages, searchTerm, handleSearchChange, handlePageChange, loadPage, error]);
+
+  return result;
 }

@@ -179,7 +179,7 @@ const validarPlacaOS = (placa: string): boolean => {
 };
 
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, refreshData } = useData();
+  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, refreshData, lastOSUpdate } = useData();
   const supabase = createClient();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -196,12 +196,18 @@ export default function OSOperationalPage() {
   const passengerDraftIdRef = useRef(0);
   const osTable = useServerPaginatedTable(fetchOSPage, 10);
   
+  // Sincronizar tabela com atualizações globais de OS
+  useEffect(() => {
+    if (lastOSUpdate > 0) {
+      void osTable.refresh();
+    }
+  }, [lastOSUpdate, osTable]);
+
   // Estados para cadastros rápidos
   const [quickAddModal, setQuickAddModal] = useState<'cliente' | 'motorista' | 'solicitante' | 'centroCusto' | null>(null);
   const [quickAddForm, setQuickAddForm] = useState({ nome: '' });
   const [quickAddDriverForm, setQuickAddDriverForm] = useState<QuickAddDriverForm>(initialQuickAddDriverForm);
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
-  const [vehiclesUnavailable, setVehiclesUnavailable] = useState(false);
   const [quickAddedDriverOptions, setQuickAddedDriverOptions] = useState<{ id: string; nome: string }[]>([]);
   const [driverVehiclesAssoc, setDriverVehiclesAssoc] = useState<{ driver_id: string; vehicle_id: string }[]>([]);
   const [isOsVehicleQuickModalOpen, setIsOsVehicleQuickModalOpen] = useState(false);
@@ -401,6 +407,7 @@ export default function OSOperationalPage() {
 
     try {
       await deleteOS(osId);
+      void osTable.refresh();
       setOpenActionMenuId(null);
       toast.success('OS excluída com sucesso!');
     } catch (error) {
@@ -560,19 +567,43 @@ export default function OSOperationalPage() {
       setPassengerConfirmations({});
       return;
     }
-    supabase
-      .from('os_passenger_confirmations')
-      .select('passageiro_id, aceito')
-      .eq('os_id', viewingOSId)
-      .then(({ data }) => {
-        if (data) {
-          const map: Record<string, boolean> = {};
-          data.forEach((row: { passageiro_id: string | null; aceito: boolean }) => {
-            if (row.passageiro_id) map[row.passageiro_id] = row.aceito;
-          });
-          setPassengerConfirmations(map);
+
+    const fetchConfirmations = async () => {
+      const { data } = await supabase
+        .from('os_passenger_confirmations')
+        .select('passageiro_id, aceito')
+        .eq('os_id', viewingOSId);
+      
+      if (data) {
+        const map: Record<string, boolean> = {};
+        data.forEach((row: { passageiro_id: string | null; aceito: boolean }) => {
+          if (row.passageiro_id) map[row.passageiro_id] = row.aceito;
+        });
+        setPassengerConfirmations(map);
+      }
+    };
+
+    void fetchConfirmations();
+
+    const channel = supabase
+      .channel(`os-confirmations-${viewingOSId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'os_passenger_confirmations',
+          filter: `os_id=eq.${viewingOSId}`,
+        },
+        () => {
+          void fetchConfirmations();
         }
-      });
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
   }, [viewingOSId, supabase]);
 
   const [formData, setFormData] = useState(initialForm);
