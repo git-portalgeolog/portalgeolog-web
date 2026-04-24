@@ -780,8 +780,80 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return cliente?.centrosCusto || [];
   }, [clientes]);
 
+  // ── Helpers de validação de parceiros ──────────────────
+  const findParceiroByDocumento = (
+    documento: string,
+    excludeId?: string
+  ): ParceiroServico | undefined => {
+    const normalizedDoc = normalizeDigitsValue(documento);
+    return parceiros.find(
+      (p) => p.id !== excludeId && normalizeDigitsValue(p.documento) === normalizedDoc
+    );
+  };
+
+  const findParceiroContatoByCelular = (
+    celular: string,
+    excludeParceiroId?: string
+  ): { parceiro: ParceiroServico; contato: { setor: string; responsavel: string } } | undefined => {
+    const normalizedCell = normalizeDigitsValue(celular);
+    for (const parceiro of parceiros) {
+      if (parceiro.id === excludeParceiroId) continue;
+      const contato = parceiro.contatos.find(
+        (c) => normalizeDigitsValue(c.celular) === normalizedCell
+      );
+      if (contato) return { parceiro, contato };
+    }
+    return undefined;
+  };
+
+  const findParceiroContatoByEmail = (
+    email: string,
+    excludeParceiroId?: string
+  ): { parceiro: ParceiroServico; contato: { setor: string; responsavel: string } } | undefined => {
+    const normalizedEmail = normalizeTextValue(email);
+    for (const parceiro of parceiros) {
+      if (parceiro.id === excludeParceiroId) continue;
+      const contato = parceiro.contatos.find(
+        (c) => normalizeTextValue(c.email || '') === normalizedEmail
+      );
+      if (contato) return { parceiro, contato };
+    }
+    return undefined;
+  };
+
   // Funções de Parceiros
   const addParceiro = async (parceiro: NovoParceiroInput): Promise<ParceiroServico> => {
+    const cleanDoc = normalizeDigitsValue(parceiro.documento);
+    if (cleanDoc) {
+      const existingDoc = findParceiroByDocumento(parceiro.documento);
+      if (existingDoc) {
+        throw new Error(
+          `CNPJ/CPF já está sendo usado pelo parceiro "${existingDoc.razaoSocialOuNomeCompleto}".`
+        );
+      }
+    }
+
+    for (const contato of parceiro.contatos) {
+      const cleanCell = normalizeDigitsValue(contato.celular);
+      if (cleanCell) {
+        const existingCell = findParceiroContatoByCelular(contato.celular);
+        if (existingCell) {
+          throw new Error(
+            `Celular ${contato.celular} já está sendo usado no contato "${existingCell.contato.setor}" do parceiro "${existingCell.parceiro.razaoSocialOuNomeCompleto}".`
+          );
+        }
+      }
+      const cleanEmail = normalizeTextValue(contato.email || '');
+      if (cleanEmail) {
+        const existingEmail = findParceiroContatoByEmail(contato.email || '');
+        if (existingEmail) {
+          throw new Error(
+            `E-mail ${contato.email} já está sendo usado no contato "${existingEmail.contato.setor}" do parceiro "${existingEmail.parceiro.razaoSocialOuNomeCompleto}".`
+          );
+        }
+      }
+    }
+
     const result = await insertParceiro(parceiro);
     setParceiros(prev => [...prev, result].sort((a, b) => a.razaoSocialOuNomeCompleto.localeCompare(b.razaoSocialOuNomeCompleto, 'pt-BR')));
     void refreshData();
@@ -789,6 +861,37 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateParceiro = async (id: string, parceiro: NovoParceiroInput): Promise<void> => {
+    const cleanDoc = normalizeDigitsValue(parceiro.documento);
+    if (cleanDoc) {
+      const existingDoc = findParceiroByDocumento(parceiro.documento, id);
+      if (existingDoc) {
+        throw new Error(
+          `CNPJ/CPF já está sendo usado pelo parceiro "${existingDoc.razaoSocialOuNomeCompleto}".`
+        );
+      }
+    }
+
+    for (const contato of parceiro.contatos) {
+      const cleanCell = normalizeDigitsValue(contato.celular);
+      if (cleanCell) {
+        const existingCell = findParceiroContatoByCelular(contato.celular, id);
+        if (existingCell) {
+          throw new Error(
+            `Celular ${contato.celular} já está sendo usado no contato "${existingCell.contato.setor}" do parceiro "${existingCell.parceiro.razaoSocialOuNomeCompleto}".`
+          );
+        }
+      }
+      const cleanEmail = normalizeTextValue(contato.email || '');
+      if (cleanEmail) {
+        const existingEmail = findParceiroContatoByEmail(contato.email || '', id);
+        if (existingEmail) {
+          throw new Error(
+            `E-mail ${contato.email} já está sendo usado no contato "${existingEmail.contato.setor}" do parceiro "${existingEmail.parceiro.razaoSocialOuNomeCompleto}".`
+          );
+        }
+      }
+    }
+
     const updatedParceiro = await updateParceiroInDB(id, parceiro);
     setParceiros(prev => prev.map(p => p.id === id ? updatedParceiro : p));
     void refreshData();

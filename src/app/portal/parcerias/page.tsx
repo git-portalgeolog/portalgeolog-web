@@ -303,16 +303,19 @@ export default function ParceriasPage() {
     return true;
   };
 
+  const normalizeDigits = (value: string): string => value.replace(/\D/g, '');
+  const normalizeText = (value: string): string => value.trim().toLowerCase();
+
   const validateForm = (): string | null => {
     if (!formData.razaoSocialOuNomeCompleto.trim()) {
       return 'Razão Social/Nome completo é obrigatório';
     }
-    
+
     if (!formData.documento.trim()) {
       return 'CNPJ/CPF é obrigatório';
     }
-    
-    const documentoLimpo = formData.documento.replace(/\D/g, '');
+
+    const documentoLimpo = normalizeDigits(formData.documento);
     if (formData.pessoaTipo === 'juridica') {
       if (documentoLimpo.length !== 14) {
         return 'CNPJ deve ter 14 dígitos completos';
@@ -328,7 +331,15 @@ export default function ParceriasPage() {
         return 'CPF inválido';
       }
     }
-    
+
+    // Verificar documento duplicado entre outros parceiros
+    const existingDocParceiro = parceiros.find(
+      (p) => p.id !== editingParceiro?.id && normalizeDigits(p.documento) === documentoLimpo
+    );
+    if (existingDocParceiro) {
+      return `CNPJ/CPF já está sendo usado pelo parceiro "${existingDocParceiro.razaoSocialOuNomeCompleto}".`;
+    }
+
     const primeiroContato = formData.contatos[0];
     if (!primeiroContato.setor.trim()) {
       return 'Setor do primeiro contato é obrigatório';
@@ -339,22 +350,68 @@ export default function ParceriasPage() {
     if (!primeiroContato.responsavel.trim()) {
       return 'Responsável do primeiro contato é obrigatório';
     }
-    
-    const celularLimpo = primeiroContato.celular.replace(/\D/g, '');
+
+    const celularLimpo = normalizeDigits(primeiroContato.celular);
     if (celularLimpo.length !== 11) {
       return 'Celular deve ter 11 dígitos completos: (00) 00000-0000';
     }
     if (!validateCelular(primeiroContato.celular)) {
       return 'Celular inválido';
     }
-    
+
     if (primeiroContato.email && primeiroContato.email.trim()) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(primeiroContato.email.trim())) {
         return 'E-mail inválido';
       }
     }
-    
+
+    // Verificar duplicados entre os próprios contatos do formulário
+    const formCelulares = new Map<string, number>();
+    const formEmails = new Map<string, number>();
+    for (let i = 0; i < formData.contatos.length; i++) {
+      const c = formData.contatos[i];
+      const cell = normalizeDigits(c.celular);
+      if (cell && formCelulares.has(cell)) {
+        return `Celular ${c.celular} está duplicado entre os contatos deste parceiro.`;
+      }
+      formCelulares.set(cell, i);
+
+      const email = normalizeText(c.email || '');
+      if (email && formEmails.has(email)) {
+        return `E-mail ${c.email} está duplicado entre os contatos deste parceiro.`;
+      }
+      formEmails.set(email, i);
+    }
+
+    // Verificar celular/email duplicados em outros parceiros
+    for (const contato of formData.contatos) {
+      const cell = normalizeDigits(contato.celular);
+      if (cell) {
+        for (const parceiro of parceiros) {
+          if (parceiro.id === editingParceiro?.id) continue;
+          const found = parceiro.contatos.find(
+            (c) => normalizeDigits(c.celular) === cell
+          );
+          if (found) {
+            return `Celular ${contato.celular} já está sendo usado no contato "${found.setor}" do parceiro "${parceiro.razaoSocialOuNomeCompleto}".`;
+          }
+        }
+      }
+      const email = normalizeText(contato.email || '');
+      if (email) {
+        for (const parceiro of parceiros) {
+          if (parceiro.id === editingParceiro?.id) continue;
+          const found = parceiro.contatos.find(
+            (c) => normalizeText(c.email || '') === email
+          );
+          if (found) {
+            return `E-mail ${contato.email} já está sendo usado no contato "${found.setor}" do parceiro "${parceiro.razaoSocialOuNomeCompleto}".`;
+          }
+        }
+      }
+    }
+
     return null;
   };
 

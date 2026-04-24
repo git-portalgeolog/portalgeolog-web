@@ -12,7 +12,6 @@ import {
   X,
   PlusCircle,
   FileText,
-  
   MapPin,
   Clock,
   CheckCircle2,
@@ -180,7 +179,7 @@ const validarPlacaOS = (placa: string): boolean => {
 };
 
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, refreshData, lastOSUpdate } = useData();
+  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, addParceiro, refreshData, lastOSUpdate } = useData();
   const supabase = createClient();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -213,6 +212,23 @@ export default function OSOperationalPage() {
   const [quickAddModal, setQuickAddModal] = useState<'cliente' | 'motorista' | 'solicitante' | 'centroCusto' | null>(null);
   const [quickAddForm, setQuickAddForm] = useState({ nome: '' });
   const [quickAddDriverForm, setQuickAddDriverForm] = useState<QuickAddDriverForm>(initialQuickAddDriverForm);
+
+  // Estados para cadastro rápido de parceiro dentro do modal de motorista
+  type QuickParceiroContato = { setor: string; celular: string; email: string; responsavel: string };
+  type QuickParceiroForm = {
+    pessoaTipo: 'fisica' | 'juridica';
+    documento: string;
+    razaoSocialOuNomeCompleto: string;
+    contatos: QuickParceiroContato[];
+  };
+  const [isQuickParceiroModalOpen, setIsQuickParceiroModalOpen] = useState(false);
+  const [quickParceiroForm, setQuickParceiroForm] = useState<QuickParceiroForm>({
+    pessoaTipo: 'juridica',
+    documento: '',
+    razaoSocialOuNomeCompleto: '',
+    contatos: [{ setor: '', celular: '', email: '', responsavel: '' }],
+  });
+
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
   const [vehiclesUnavailable, setVehiclesUnavailable] = useState(false);
   const [quickAddedDriverOptions, setQuickAddedDriverOptions] = useState<{ id: string; nome: string }[]>([]);
@@ -245,7 +261,171 @@ export default function OSOperationalPage() {
     [parceiros]
   );
 
-  const isAnyModalOpen = isModalOpen || isQuickPassengerModalOpen || Boolean(viewingOSId) || Boolean(cancelTargetId) || Boolean(quickAddModal) || isOsVehicleQuickModalOpen || Boolean(quickVehicleModal);
+  const formatParceiroDocument = (value: string, pessoaTipo: 'fisica' | 'juridica'): string => {
+    const digits = value.replace(/\D/g, '').slice(0, pessoaTipo === 'juridica' ? 14 : 11);
+    if (pessoaTipo === 'juridica') {
+      return digits
+        .replace(/(\d{2})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d)/, '$1/$2')
+        .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+    }
+    return digits
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+  };
+
+  const formatParceiroPhone = (value: string): string => {
+    const digits = value.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 10) return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3').trim();
+    return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').trim();
+  };
+
+  const validateParceiroCPF = (cpf: string): boolean => {
+    const cpfClean = cpf.replace(/\D/g, '');
+    if (cpfClean.length !== 11) return false;
+    if (/(\d)\1{10}/.test(cpfClean)) return false;
+    let sum = 0;
+    for (let i = 0; i < 9; i++) sum += parseInt(cpfClean.charAt(i)) * (10 - i);
+    let remainder = (sum * 10) % 11;
+    if (remainder === 10 || remainder === 11) remainder = 0;
+    if (remainder !== parseInt(cpfClean.charAt(9))) return false;
+    sum = 0;
+    for (let i = 0; i < 10; i++) sum += parseInt(cpfClean.charAt(i)) * (11 - i);
+    remainder = (sum * 10) % 11;
+    if (remainder === 10 || remainder === 11) remainder = 0;
+    return remainder === parseInt(cpfClean.charAt(10));
+  };
+
+  const validateParceiroCNPJ = (cnpj: string): boolean => {
+    const cnpjClean = cnpj.replace(/\D/g, '');
+    if (cnpjClean.length !== 14) return false;
+    if (/(\d)\1{13}/.test(cnpjClean)) return false;
+    const weightsFirst = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const weightsSecond = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    let sum = 0;
+    for (let i = 0; i < 12; i++) sum += parseInt(cnpjClean.charAt(i)) * weightsFirst[i];
+    let remainder = sum % 11;
+    const firstDigit = remainder < 2 ? 0 : 11 - remainder;
+    if (firstDigit !== parseInt(cnpjClean.charAt(12))) return false;
+    sum = 0;
+    for (let i = 0; i < 13; i++) sum += parseInt(cnpjClean.charAt(i)) * weightsSecond[i];
+    remainder = sum % 11;
+    const secondDigit = remainder < 2 ? 0 : 11 - remainder;
+    return secondDigit === parseInt(cnpjClean.charAt(13));
+  };
+
+  const validateParceiroCelular = (celular: string): boolean => {
+    const celularClean = celular.replace(/\D/g, '');
+    if (celularClean.length !== 11) return false;
+    if (/(\d)\1{10}/.test(celularClean)) return false;
+    const ddd = celularClean.substring(0, 2);
+    if (ddd < '11' || ddd > '99') return false;
+    return true;
+  };
+
+  const validateQuickParceiro = (): string | null => {
+    if (!quickParceiroForm.razaoSocialOuNomeCompleto.trim()) return 'Razão Social/Nome completo é obrigatório';
+    if (!quickParceiroForm.documento.trim()) return 'CNPJ/CPF é obrigatório';
+    const documentoLimpo = normalizeDigitsValue(quickParceiroForm.documento);
+    if (quickParceiroForm.pessoaTipo === 'juridica') {
+      if (documentoLimpo.length !== 14) return 'CNPJ deve ter 14 dígitos completos';
+      if (!validateParceiroCNPJ(quickParceiroForm.documento)) return 'CNPJ inválido';
+    } else {
+      if (documentoLimpo.length !== 11) return 'CPF deve ter 11 dígitos completos';
+      if (!validateParceiroCPF(quickParceiroForm.documento)) return 'CPF inválido';
+    }
+    const existingDoc = parceiros.find(
+      (p) => normalizeDigitsValue(p.documento) === documentoLimpo
+    );
+    if (existingDoc) return `CNPJ/CPF já está sendo usado pelo parceiro "${existingDoc.razaoSocialOuNomeCompleto}".`;
+
+    const primeiroContato = quickParceiroForm.contatos[0];
+    if (!primeiroContato.setor.trim()) return 'Setor do primeiro contato é obrigatório';
+    if (!primeiroContato.celular.trim()) return 'Celular do primeiro contato é obrigatório';
+    if (!primeiroContato.responsavel.trim()) return 'Responsável do primeiro contato é obrigatório';
+    const celularLimpo = normalizeDigitsValue(primeiroContato.celular);
+    if (celularLimpo.length !== 11) return 'Celular deve ter 11 dígitos completos: (00) 00000-0000';
+    if (!validateParceiroCelular(primeiroContato.celular)) return 'Celular inválido';
+    if (primeiroContato.email && primeiroContato.email.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(primeiroContato.email.trim())) return 'E-mail inválido';
+    }
+
+    const formCelulares = new Map<string, number>();
+    const formEmails = new Map<string, number>();
+    for (let i = 0; i < quickParceiroForm.contatos.length; i++) {
+      const c = quickParceiroForm.contatos[i];
+      const cell = normalizeDigitsValue(c.celular);
+      if (cell && formCelulares.has(cell)) return `Celular ${c.celular} está duplicado entre os contatos deste parceiro.`;
+      formCelulares.set(cell, i);
+      const email = normalizeTextValue(c.email || '');
+      if (email && formEmails.has(email)) return `E-mail ${c.email} está duplicado entre os contatos deste parceiro.`;
+      formEmails.set(email, i);
+    }
+
+    for (const contato of quickParceiroForm.contatos) {
+      const cell = normalizeDigitsValue(contato.celular);
+      if (cell) {
+        for (const parceiro of parceiros) {
+          const found = parceiro.contatos.find(
+            (c) => normalizeDigitsValue(c.celular) === cell
+          );
+          if (found) return `Celular ${contato.celular} já está sendo usado no contato "${found.setor}" do parceiro "${parceiro.razaoSocialOuNomeCompleto}".`;
+        }
+      }
+      const email = normalizeTextValue(contato.email || '');
+      if (email) {
+        for (const parceiro of parceiros) {
+          const found = parceiro.contatos.find(
+            (c) => normalizeTextValue(c.email || '') === email
+          );
+          if (found) return `E-mail ${contato.email} já está sendo usado no contato "${found.setor}" do parceiro "${parceiro.razaoSocialOuNomeCompleto}".`;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const handleQuickParceiroSubmit = async () => {
+    const validationError = validateQuickParceiro();
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+
+    const cleanForm = {
+      pessoaTipo: quickParceiroForm.pessoaTipo,
+      documento: quickParceiroForm.documento.trim(),
+      razaoSocialOuNomeCompleto: quickParceiroForm.razaoSocialOuNomeCompleto.trim(),
+      contatos: quickParceiroForm.contatos.map((contato) => ({
+        setor: contato.setor.trim(),
+        celular: contato.celular.trim(),
+        email: contato.email?.trim() || '',
+        responsavel: contato.responsavel.trim(),
+      })),
+      filiais: [],
+    };
+
+    try {
+      const newParceiro = await addParceiro(cleanForm);
+      toast.success('Parceiro cadastrado com sucesso!');
+      setQuickAddDriverForm(prev => ({ ...prev, parceiro_id: newParceiro.id }));
+      setQuickParceiroForm({
+        pessoaTipo: 'juridica',
+        documento: '',
+        razaoSocialOuNomeCompleto: '',
+        contatos: [{ setor: '', celular: '', email: '', responsavel: '' }],
+      });
+      setIsQuickParceiroModalOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o parceiro.');
+    }
+  };
+
+  const isAnyModalOpen = isModalOpen || isQuickPassengerModalOpen || Boolean(viewingOSId) || Boolean(cancelTargetId) || Boolean(quickAddModal) || isOsVehicleQuickModalOpen || Boolean(quickVehicleModal) || isQuickParceiroModalOpen;
 
   // Lock body scroll when modal is open
   useEffect(() => {
@@ -2914,6 +3094,15 @@ export default function OSOperationalPage() {
                           onChange={(value) => setQuickAddDriverForm(prev => ({ ...prev, parceiro_id: value, vehicle_ids: [] }))}
                           placeholder="Selecione o parceiro..."
                           required
+                          onQuickAdd={() => {
+                            setQuickParceiroForm({
+                              pessoaTipo: 'juridica',
+                              documento: '',
+                              razaoSocialOuNomeCompleto: '',
+                              contatos: [{ setor: '', celular: '', email: '', responsavel: '' }],
+                            });
+                            setIsQuickParceiroModalOpen(true);
+                          }}
                         />
                       </div>
                     )}
@@ -3253,6 +3442,193 @@ export default function OSOperationalPage() {
                 className="flex-1 py-4 bg-green-600 text-white font-black rounded-2xl hover:bg-green-500 shadow-lg shadow-green-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50 uppercase tracking-widest text-xs cursor-pointer"
               >
                 {isSubmittingQuickVehicle ? <Loader2 className="animate-spin" size={18} /> : (quickVehicleModal.mode === 'create' ? 'Cadastrar' : 'Salvar')}
+              </button>
+            </div>
+          </form>
+        </StandardModal>
+      )}
+
+      {/* Modal Cadastro Rápido de Parceiro */}
+      {isQuickParceiroModalOpen && (
+        <StandardModal
+          onClose={() => setIsQuickParceiroModalOpen(false)}
+          title="Novo Parceiro"
+          subtitle="Cadastro rápido de parceiro de serviço"
+          icon={<Handshake size={24} />}
+          maxWidthClassName="max-w-6xl"
+          bodyClassName="p-6 md:p-10 pb-16 space-y-8"
+        >
+          <form onSubmit={(e) => { e.preventDefault(); void handleQuickParceiroSubmit(); }} className="space-y-8">
+            <section className="space-y-6">
+              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
+                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                  <Building2 size={20} className="text-slate-500" /> Dados principais
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-[0.7fr_1.6fr_0.6fr] gap-6">
+                <div className="space-y-2">
+                  <GeologSearchableSelect
+                    label="Tipo de pessoa"
+                    options={[
+                      { id: 'juridica', nome: 'Pessoa jurídica' },
+                      { id: 'fisica', nome: 'Pessoa física' },
+                    ]}
+                    value={quickParceiroForm.pessoaTipo}
+                    onChange={(value) => setQuickParceiroForm(prev => ({
+                      ...prev,
+                      pessoaTipo: value as 'fisica' | 'juridica',
+                      documento: formatParceiroDocument(prev.documento, value as 'fisica' | 'juridica'),
+                      razaoSocialOuNomeCompleto: '',
+                    }))}
+                    triggerClassName="px-5 py-3.5 !bg-slate-50 border-2 !border-slate-200 mt-[5px]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                    {quickParceiroForm.pessoaTipo === 'juridica' ? 'Razão social' : 'Nome completo'}
+                  </label>
+                  <input
+                    required
+                    value={quickParceiroForm.razaoSocialOuNomeCompleto}
+                    onChange={(e) => setQuickParceiroForm(prev => ({ ...prev, razaoSocialOuNomeCompleto: e.target.value }))}
+                    placeholder={quickParceiroForm.pessoaTipo === 'juridica' ? 'Ex: Silva Logística LTDA' : 'Ex: João da Silva'}
+                    className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[2px]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">{quickParceiroForm.pessoaTipo === 'juridica' ? 'CNPJ' : 'CPF'}</label>
+                  <input
+                    required
+                    value={quickParceiroForm.documento}
+                    onChange={(e) => setQuickParceiroForm(prev => ({ ...prev, documento: formatParceiroDocument(e.target.value, prev.pessoaTipo) }))}
+                    placeholder={quickParceiroForm.pessoaTipo === 'juridica' ? '00.000.000/0001-00' : '000.000.000-00'}
+                    className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                  />
+                </div>
+              </div>
+            </section>
+
+            <div className="border-b-2 border-slate-100 my-10"></div>
+
+            <section className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
+                    <Users size={20} className="text-blue-600" /> Contatos por unidade
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setQuickParceiroForm(prev => ({
+                    ...prev,
+                    contatos: [...prev.contatos, { setor: '', celular: '', email: '', responsavel: '' }],
+                  }))}
+                  className="flex items-center gap-3 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer"
+                >
+                  <PlusCircle size={14} /> Novo cadastro
+                </button>
+              </div>
+
+              <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="hidden md:grid grid-cols-[1.2fr_0.8fr_1.2fr_1.1fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                  <span>Setor</span>
+                  <span>Celular</span>
+                  <span>E-mail</span>
+                  <span>Responsável</span>
+                  <span className="text-right">Ações</span>
+                </div>
+                <div className="divide-y divide-slate-100 max-h-[40vh] overflow-y-auto custom-scrollbar">
+                  {quickParceiroForm.contatos.map((contato, index) => (
+                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr_1.2fr_1.1fr_auto] gap-4 items-start px-6 py-5">
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Setor</label>
+                        <input
+                          required
+                          placeholder="Financeiro, Operação, Compras..."
+                          value={contato.setor}
+                          onChange={(e) => setQuickParceiroForm(prev => ({
+                            ...prev,
+                            contatos: prev.contatos.map((c, idx) => idx === index ? { ...c, setor: e.target.value.toUpperCase() } : c),
+                          }))}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Celular</label>
+                        <input
+                          required
+                          placeholder="(00) 00000-0000"
+                          value={contato.celular}
+                          onChange={(e) => setQuickParceiroForm(prev => ({
+                            ...prev,
+                            contatos: prev.contatos.map((c, idx) => idx === index ? { ...c, celular: formatParceiroPhone(e.target.value) } : c),
+                          }))}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">E-mail</label>
+                        <input
+                          type="email"
+                          placeholder="contato@empresa.com"
+                          value={contato.email || ''}
+                          onChange={(e) => setQuickParceiroForm(prev => ({
+                            ...prev,
+                            contatos: prev.contatos.map((c, idx) => idx === index ? { ...c, email: e.target.value.toLowerCase() } : c),
+                          }))}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2 md:space-y-1">
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Responsável</label>
+                        <input
+                          required
+                          placeholder="Nome do responsável"
+                          value={contato.responsavel}
+                          onChange={(e) => setQuickParceiroForm(prev => ({
+                            ...prev,
+                            contatos: prev.contatos.map((c, idx) => idx === index ? { ...c, responsavel: e.target.value.toUpperCase() } : c),
+                          }))}
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        />
+                      </div>
+                      <div className="flex md:pt-1 justify-end">
+                        {quickParceiroForm.contatos.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => setQuickParceiroForm(prev => ({
+                              ...prev,
+                              contatos: prev.contatos.filter((_, idx) => idx !== index),
+                            }))}
+                            className="inline-flex items-center justify-center p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                            aria-label="Remover contato"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 pt-3">Principal</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsQuickParceiroModalOpen(false)}
+                className="px-8 py-4 bg-slate-100 text-slate-700 font-black rounded-xl hover:bg-slate-200 transition-all text-sm uppercase tracking-widest cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="px-12 py-4 bg-[var(--color-geolog-blue)] text-white font-black rounded-xl shadow-xl shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest cursor-pointer"
+              >
+                Salvar parceiro
               </button>
             </div>
           </form>
