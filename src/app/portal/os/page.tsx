@@ -22,6 +22,7 @@ import {
   MoreVertical,
   Eye,
   Pencil,
+  Edit2,
   RotateCcw,
   XOctagon,
   MessageCircle,
@@ -222,6 +223,21 @@ export default function OSOperationalPage() {
     placa: '', modelo: '', marca: '',
     tipo: 'carro' as 'carro' | 'van' | 'onibus' | 'moto' | 'caminhao' | 'outro',
   });
+
+  // Estados para modal de veículo dentro do cadastro rápido de motorista
+  type QuickVehicleMode = { mode: 'create'; rowIndex: number } | { mode: 'edit'; rowIndex: number; vehicleId: string };
+  const [quickVehicleModal, setQuickVehicleModal] = useState<QuickVehicleMode | null>(null);
+  const [isSubmittingQuickVehicle, setIsSubmittingQuickVehicle] = useState(false);
+  const [vehicleQuickForm, setVehicleQuickForm] = useState({
+    placa: '', modelo: '', marca: '',
+    tipo: 'carro' as 'carro' | 'van' | 'onibus' | 'moto' | 'caminhao' | 'outro',
+  });
+
+  const hasDuplicatePlateQuick = (placa: string, excludeId?: string): boolean => {
+    const n = placa.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    return vehicles.some(v => v.id !== excludeId && v.placa.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === n);
+  };
+
   const [quickAddedSolicitantes, setQuickAddedSolicitantes] = useState<Array<{ id: string; nome: string; clienteId: string }>>([]);
   const [quickAddedCentrosCusto, setQuickAddedCentrosCusto] = useState<Array<{ id: string; nome: string; clienteId: string }>>([]);
   const parceiroOptions = useMemo(
@@ -229,7 +245,7 @@ export default function OSOperationalPage() {
     [parceiros]
   );
 
-  const isAnyModalOpen = isModalOpen || isQuickPassengerModalOpen || Boolean(viewingOSId) || Boolean(cancelTargetId) || Boolean(quickAddModal) || isOsVehicleQuickModalOpen;
+  const isAnyModalOpen = isModalOpen || isQuickPassengerModalOpen || Boolean(viewingOSId) || Boolean(cancelTargetId) || Boolean(quickAddModal) || isOsVehicleQuickModalOpen || Boolean(quickVehicleModal);
 
   // Lock body scroll when modal is open
   useEffect(() => {
@@ -931,6 +947,54 @@ export default function OSOperationalPage() {
       toast.error(error instanceof Error ? error.message : 'Erro ao salvar veículo.');
     } finally {
       setIsSubmittingOsVehicle(false);
+    }
+  };
+
+  const handleQuickVehicleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickVehicleModal) return;
+    setIsSubmittingQuickVehicle(true);
+    try {
+      if (!validarPlacaOS(vehicleQuickForm.placa)) {
+        throw new Error('Formato de placa inválido. Use ABC-1234 ou Mercosul ABC-1D23.');
+      }
+      if (quickVehicleModal.mode === 'create') {
+        if (hasDuplicatePlateQuick(vehicleQuickForm.placa)) throw new Error('Já existe um veículo com esta placa.');
+        const { data, error } = await supabase.from('veiculos').insert([{
+          placa: vehicleQuickForm.placa.trim().toUpperCase(),
+          modelo: vehicleQuickForm.modelo.trim(),
+          marca: vehicleQuickForm.marca.trim(),
+          tipo: vehicleQuickForm.tipo,
+          status: 'ativo',
+          ano: new Date().getFullYear(),
+          renavam: '',
+        }]).select('id, placa, modelo, marca').single();
+        if (error) throw error;
+        const newV = data as VehicleOption;
+        setVehicles(prev => [...prev, newV].sort((a, b) => a.marca.localeCompare(b.marca, 'pt-BR') || a.modelo.localeCompare(b.modelo, 'pt-BR')));
+        setQuickAddDriverForm(prev => ({
+          ...prev,
+          vehicle_ids: prev.vehicle_ids.map((id, idx) => idx === quickVehicleModal.rowIndex ? newV.id : id),
+        }));
+        toast.success('Veículo cadastrado e selecionado!');
+      } else {
+        const { vehicleId } = quickVehicleModal;
+        if (hasDuplicatePlateQuick(vehicleQuickForm.placa, vehicleId)) throw new Error('Já existe um veículo com esta placa.');
+        const { data, error } = await supabase.from('veiculos').update({
+          placa: vehicleQuickForm.placa.trim().toUpperCase(),
+          modelo: vehicleQuickForm.modelo.trim(),
+          marca: vehicleQuickForm.marca.trim(),
+          tipo: vehicleQuickForm.tipo,
+        }).eq('id', vehicleId).select('id, placa, modelo, marca').single();
+        if (error) throw error;
+        setVehicles(prev => prev.map(v => v.id === vehicleId ? (data as VehicleOption) : v));
+        toast.success('Veículo atualizado!');
+      }
+      setQuickVehicleModal(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao salvar veículo.');
+    } finally {
+      setIsSubmittingQuickVehicle(false);
     }
   };
 
@@ -2345,7 +2409,7 @@ export default function OSOperationalPage() {
           title={`Visão Operacional ${viewingOS.os || 'Sem OS'}`}
           subtitle={`Protocolo ${viewingOS.protocolo}`}
           icon={<Eye size={24} />}
-          maxWidthClassName="max-w-6xl"
+          maxWidthClassName="max-w-6xl min-[1360px]:max-w-[88vw]"
           bodyClassName="p-6 md:p-10 space-y-8"
         >
           <div className="space-y-8">
@@ -2354,8 +2418,8 @@ export default function OSOperationalPage() {
               <div className="flex items-center gap-2 px-3">
                 <Building2 size={14} className="text-slate-400 shrink-0" />
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Cliente</p>
-                  <p className="text-sm font-bold text-slate-800 line-clamp-1">{clientes.find(c => c.id === viewingOS.clienteId)?.nome || 'N/A'}</p>
+                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Cliente</p>
+                  <p className="text-base font-bold text-slate-800 line-clamp-1">{clientes.find(c => c.id === viewingOS.clienteId)?.nome || 'N/A'}</p>
                 </div>
               </div>
               <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
@@ -2363,8 +2427,8 @@ export default function OSOperationalPage() {
               <div className="flex items-center gap-2 px-3">
                 <User size={14} className="text-slate-400 shrink-0" />
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Solicitante</p>
-                  <p className="text-sm font-bold text-slate-800 line-clamp-1">{viewingOS.solicitante || 'N/A'}</p>
+                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Solicitante</p>
+                  <p className="text-base font-bold text-slate-800 line-clamp-1">{viewingOS.solicitante || 'N/A'}</p>
                 </div>
               </div>
               <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
@@ -2372,8 +2436,8 @@ export default function OSOperationalPage() {
               <div className="flex items-center gap-2 px-3">
                 <Clock size={14} className="text-slate-400 shrink-0" />
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
-                  <p className="text-sm font-bold text-slate-800">{getStatusConfig(viewingOS.status.operacional).label}</p>
+                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
+                  <p className="text-base font-bold text-slate-800">{getStatusConfig(viewingOS.status.operacional).label}</p>
                 </div>
               </div>
               <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
@@ -2381,8 +2445,8 @@ export default function OSOperationalPage() {
               <div className="flex items-center gap-2 px-3">
                 <Car size={14} className="text-slate-400 shrink-0" />
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Motorista</p>
-                  <p className="text-sm font-bold text-slate-800 line-clamp-1">{viewingOS.motorista || 'Não definido'}</p>
+                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Motorista</p>
+                  <p className="text-base font-bold text-slate-800 line-clamp-1">{viewingOS.motorista || 'Não definido'}</p>
                 </div>
               </div>
               <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
@@ -2390,8 +2454,8 @@ export default function OSOperationalPage() {
               <div className="flex items-center gap-2 px-3">
                 <Building size={14} className="text-slate-400 shrink-0" />
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">C. Custo</p>
-                  <p className="text-sm font-bold text-slate-800 line-clamp-1">
+                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">C. Custo</p>
+                  <p className="text-base font-bold text-slate-800 line-clamp-1">
                     {clientes.find(c => c.id === viewingOS.clienteId)?.centrosCusto.find(cc => cc.id === viewingOS.centroCustoId)?.nome || 'Padrão'}
                   </p>
                 </div>
@@ -2592,10 +2656,10 @@ export default function OSOperationalPage() {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-slate-50/80 border-b border-slate-200">
-                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600">Passageiro</th>
-                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600">Contato</th>
-                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600">Endereço</th>
-                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600">Status</th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[25%]">Passageiro</th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[20%]">Contato</th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[40%]">Endereço</th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[15%]">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 bg-white">
@@ -2947,12 +3011,41 @@ export default function OSOperationalPage() {
                           <div className="flex justify-end gap-1">
                             <button
                               type="button"
+                              onClick={() => {
+                                if (!vehicleId) return;
+                                const v = vehicles.find(veh => veh.id === vehicleId);
+                                if (!v) return;
+                                setVehicleQuickForm({ placa: v.placa, modelo: v.modelo, marca: v.marca, tipo: 'carro' });
+                                setQuickVehicleModal({ mode: 'edit', rowIndex: index, vehicleId: v.id });
+                              }}
+                              disabled={!vehicleId}
+                              className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                              aria-label="Editar veículo"
+                              title="Editar veículo"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setVehicleQuickForm({ placa: '', modelo: '', marca: '', tipo: 'carro' });
+                                setQuickVehicleModal({ mode: 'create', rowIndex: index });
+                              }}
+                              className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-xl transition-all cursor-pointer"
+                              aria-label="Cadastrar novo veículo"
+                              title="Cadastrar novo veículo"
+                            >
+                              <Car size={16} />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => setQuickAddDriverForm(prev => ({
                                 ...prev,
                                 vehicle_ids: prev.vehicle_ids.filter((_, idx) => idx !== index)
                               }))}
                               className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
                               aria-label="Remover veículo"
+                              title="Remover veículo"
                             >
                               <Trash2 size={16} />
                             </button>
@@ -3086,6 +3179,80 @@ export default function OSOperationalPage() {
                 className="flex-1 py-4 bg-green-600 text-white font-black rounded-2xl hover:bg-green-500 shadow-lg shadow-green-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50 uppercase tracking-widest text-xs cursor-pointer"
               >
                 {isSubmittingOsVehicle ? <Loader2 className="animate-spin" size={18} /> : 'Cadastrar Veículo'}
+              </button>
+            </div>
+          </form>
+        </StandardModal>
+      )}
+
+      {/* Modal Cadastrar/Editar Veículo (dentro do cadastro rápido de motorista) */}
+      {quickVehicleModal && (
+        <StandardModal
+          onClose={() => setQuickVehicleModal(null)}
+          title={quickVehicleModal.mode === 'create' ? 'Cadastrar Veículo' : 'Editar Veículo'}
+          subtitle={quickVehicleModal.mode === 'create' ? 'Cadastro rápido de novo veículo' : 'Editar informações do veículo'}
+          icon={<Car size={24} />}
+          maxWidthClassName="max-w-6xl"
+        >
+          <form onSubmit={handleQuickVehicleSave} className="space-y-6">
+            <div className="flex flex-wrap gap-3">
+              <div className="w-[140px] space-y-2 flex-shrink-0">
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Placa <RequiredAsterisk /></label>
+                <input
+                  required
+                  value={vehicleQuickForm.placa}
+                  onChange={e => setVehicleQuickForm({ ...vehicleQuickForm, placa: formatarPlacaOS(e.target.value) })}
+                  className="max-w-[140px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
+                  placeholder="ABC-1234"
+                  maxLength={8}
+                />
+              </div>
+              <div className="w-[220px] space-y-2 flex-shrink-0">
+                <GeologSearchableSelect
+                  label="Marca"
+                  options={MARCAS_VEICULOS}
+                  value={vehicleQuickForm.marca}
+                  onChange={value => setVehicleQuickForm({ ...vehicleQuickForm, marca: value })}
+                  required
+                  triggerClassName="mt-[9px] h-[60px]"
+                />
+              </div>
+              <div className="flex-1 space-y-2 min-w-[150px]">
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Modelo <RequiredAsterisk /></label>
+                <input
+                  required
+                  value={vehicleQuickForm.modelo}
+                  onChange={e => setVehicleQuickForm({ ...vehicleQuickForm, modelo: e.target.value })}
+                  className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
+                  placeholder="Ex: Corolla"
+                />
+              </div>
+              <div className="w-[180px] space-y-2 flex-shrink-0">
+                <GeologSearchableSelect
+                  label="Tipo"
+                  options={TIPOS_VEICULO_OS}
+                  value={vehicleQuickForm.tipo}
+                  onChange={value => setVehicleQuickForm({ ...vehicleQuickForm, tipo: value as typeof vehicleQuickForm.tipo })}
+                  required
+                  disableSearch
+                  triggerClassName="mt-[9px] h-[60px]"
+                />
+              </div>
+            </div>
+            <div className="flex gap-4 pt-2">
+              <button
+                type="button"
+                onClick={() => setQuickVehicleModal(null)}
+                className="flex-1 py-4 border-2 border-slate-200 text-slate-500 font-black rounded-2xl hover:bg-slate-50 transition-all uppercase tracking-widest text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmittingQuickVehicle}
+                className="flex-1 py-4 bg-green-600 text-white font-black rounded-2xl hover:bg-green-500 shadow-lg shadow-green-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50 uppercase tracking-widest text-xs cursor-pointer"
+              >
+                {isSubmittingQuickVehicle ? <Loader2 className="animate-spin" size={18} /> : (quickVehicleModal.mode === 'create' ? 'Cadastrar' : 'Salvar')}
               </button>
             </div>
           </form>
