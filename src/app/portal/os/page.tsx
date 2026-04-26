@@ -256,6 +256,49 @@ export default function OSOperationalPage() {
 
   const [quickAddedSolicitantes, setQuickAddedSolicitantes] = useState<Array<{ id: string; nome: string; clienteId: string }>>([]);
   const [quickAddedCentrosCusto, setQuickAddedCentrosCusto] = useState<Array<{ id: string; nome: string; clienteId: string }>>([]);
+  
+  // Status WhatsApp: Realtime (instant via webhook) + polling leve (fallback para detectar queda)
+  const [wppStatus, setWppStatus] = useState<'open' | 'close' | 'connecting' | 'loading'>('loading');
+  const whatsappSessionName = process.env.NEXT_PUBLIC_WAHA_SESSION || 'default';
+
+  useEffect(() => {
+    const applyState = (s: string) => {
+      if (s === 'open') setWppStatus('open');
+      else if (s === 'connecting') setWppStatus('connecting');
+      else setWppStatus('close');
+    };
+
+    // Polling leve a cada 30s — checa WAHA e sincroniza tabela Supabase
+    const pollStatus = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return;
+        const res = await fetch('/api/whatsapp/status', {
+          headers: { 'Authorization': `Bearer ${session.access_token}` },
+        });
+        const json = await res.json();
+        if (json.success) applyState(json.instance?.state ?? 'close');
+      } catch { /* Realtime é a fonte primária, poll é fallback */ }
+    };
+    pollStatus();
+    const interval = setInterval(pollStatus, 30000);
+
+    // Realtime: atualizações instantâneas via webhook → tabela → cliente
+    const channel = supabase
+      .channel('whatsapp-status')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'whatsapp_status', filter: `instance_name=eq.${whatsappSessionName}` },
+        (payload) => applyState((payload.new as { state: string }).state)
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, whatsappSessionName]);
+
   const parceiroOptions = useMemo(
     () => parceiros.map((parceiro: ParceiroServico) => ({ id: parceiro.id, nome: parceiro.razaoSocialOuNomeCompleto })),
     [parceiros]
@@ -634,10 +677,19 @@ export default function OSOperationalPage() {
     setNotifyLoadingKey(passengerKey);
     try {
       const acceptUrl = `${window.location.origin}/aceitar`;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast.error('Sessão expirada. Por favor, faça login novamente.');
+        return;
+      }
+
       console.log('[handleNotifyPassenger] sending', { type, osId: viewingOS.id, passageiroId: passenger.solicitanteId, hasPhone: passenger.hasPhone, celular: passenger.celular });
       const res = await fetch('/api/notify-passenger', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
           type,
           passengerEmail: passenger.hasEmail ? passenger.email : undefined,
@@ -666,14 +718,31 @@ export default function OSOperationalPage() {
   };
 
   const sendWhatsAppNotification = async (osData: OrderService) => {
-    // Buscar o telefone do motorista pelo nome
-    const driverObj = drivers.find(d => d.name === osData.motorista);
+    if (!osData.motorista) {
+      toast.error("Motorista não atribuído a esta OS.");
+      return;
+    }
+
+    // Buscar o telefone do motorista pelo nome (case-insensitive e trimmed)
+    const driverObj = drivers.find(d => 
+      d.name.trim().toLowerCase() === osData.motorista.trim().toLowerCase()
+    );
+    
     let phone = driverObj?.phone || "5522997259180"; 
     
+    if (!driverObj?.phone) {
+      console.warn(`[WhatsApp] Motorista "${osData.motorista}" não encontrado ou sem telefone. Usando fallback.`);
+    }
+
     // Limpeza e formatação do telefone
     phone = phone.replace(/\D/g, '');
-    if (phone.length <= 11 && !phone.startsWith('55')) {
+    if (phone.length > 0 && phone.length <= 11 && !phone.startsWith('55')) {
       phone = `55${phone}`;
+    }
+
+    if (phone.length < 10) {
+      toast.error("Telefone do motorista é inválido ou não cadastrado.");
+      return;
     }
 
     const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
@@ -696,27 +765,41 @@ export default function OSOperationalPage() {
       `🏢 *Empresa:* ${cliente}\n` +
       `📍 *Itinerário:*\n\n${itineraryText}\n\n` +
       `📅 *Data:* ${osData.data.split('-').reverse().join('/')}\n` +
-      `🛠️ *Serviço:* ${osData.os}\n\n` +
+      `🛠️ *Serviço:* ${osData.os || osData.protocolo}\n\n` +
       `👇 *CLIQUE NO LINK ABAIXO PARA ACEITAR:*\n` +
       `${acceptLink}\n\n` +
       `_Ao clicar, o status será atualizado automaticamente no painel._`;
 
     setNotifyLoadingKey('driver-whatsapp');
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        toast.error("Sessão expirada. Por favor, faça login novamente.");
+        return;
+      }
+
+      console.log(`[WhatsApp] Enviando notificação para ${osData.motorista} (${phone})`);
+
       const response = await fetch('/api/whatsapp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({ phone, message })
       });
 
-      if (response.ok) {
+      const data = await response.json();
+
+      if (response.ok && data.success) {
         toast.success("WhatsApp enviado para o motorista!");
       } else {
-        const data = await response.json();
-        toast.error(`Falha ao enviar: ${data.error || 'Erro desconhecido'}`);
+        console.error('[WhatsApp] Erro na API:', data);
+        toast.error(`Falha ao enviar: ${data.error || 'Erro na API WAHA'}`);
       }
     } catch (err) {
-      console.error("Erro na chamada da API de WhatsApp:", err);
+      console.error("[WhatsApp] Erro crítico:", err);
       toast.error("Erro ao conectar com a API de WhatsApp.");
     } finally {
       setNotifyLoadingKey(null);
@@ -1689,6 +1772,28 @@ export default function OSOperationalPage() {
             />
           </div>
         )}
+
+        {/* Status do WhatsApp WAHA */}
+        <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm shrink-0">
+          <div className="flex items-center gap-2.5 px-3 py-1.5 border-r border-slate-100">
+            <div className={`w-2.5 h-2.5 rounded-full ${
+              wppStatus === 'open' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 
+              wppStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : 
+              'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]'
+            }`} />
+            <div className="flex flex-col">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-0.5">WhatsApp</span>
+              <span className={`text-[11px] font-bold leading-none ${
+                wppStatus === 'open' ? 'text-emerald-600' : 
+                wppStatus === 'connecting' ? 'text-amber-600' : 
+                'text-rose-600'
+              }`}>
+                {wppStatus === 'open' ? 'Online' : wppStatus === 'connecting' ? 'Conectando' : 'Offline'}
+              </span>
+            </div>
+          </div>
+          
+        </div>
 
         {/* Toggle Tabela/Calendário */}
         <div className={`flex items-center bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm shrink-0 ${viewMode === 'calendar' ? 'md:ml-0' : ''}`}>
@@ -2708,6 +2813,10 @@ export default function OSOperationalPage() {
                       className="relative z-10 flex flex-col items-center group cursor-pointer"
                       onClick={() => {
                         if (step.id === 'received' && viewingOS) {
+                          if (wppStatus !== 'open') {
+                            toast.error("O WhatsApp da Geolog está offline. Verifique a conexão.");
+                            return;
+                          }
                           sendWhatsAppNotification(viewingOS);
                         } else {
                           toast.info(`Etapa: ${step.label} - ${step.sublabel}`);

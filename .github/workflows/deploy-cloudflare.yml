@@ -48,4 +48,9 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          WPP_CONNECT_URL: ${{ secrets.WPP_CONNECT_URL }}
+          # Use: https://wppconnect.portalgeolog.com.br/api/bot_cnh/send-message
+          WPP_CONNECT_TOKEN: ${{ secrets.WPP_CONNECT_TOKEN }}
+          # Token atual: bot_cnh:$2b$10$3eLGEjaynhqhEtMNN9QQ3eFGupBv.9ZFlPjjpICPYkI1SwN3i9iCC
+          # Se token expirar, rode scripts/fix-wppconnect-vps.sh no VPS
         run: npx wrangler pages deploy cloudflare-output --project-name=portalgeolog-web --branch=main --verbose

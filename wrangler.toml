@@ -12,3 +12,9 @@ pages_build_output_dir = "cloudflare-output"
 # Secrets (use wrangler secret put)
 # wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 # wrangler secret put RESEND_API_KEY
+# wrangler secret put WPP_CONNECT_TOKEN
+# Token atual: bot_cnh:$2b$10$3eLGEjaynhqhEtMNN9QQ3eFGupBv.9ZFlPjjpICPYkI1SwN3i9iCC
+# Se expirar: ssh no VPS e rode: bash /opt/wppconnect/scripts/regenerate-wpp-token.sh
+#
+# Environment variables
+# wrangler pages project env add portalgeolog-web production WPP_CONNECT_URL "https://wppconnect.portalgeolog.com.br/api/bot_cnh/send-message"

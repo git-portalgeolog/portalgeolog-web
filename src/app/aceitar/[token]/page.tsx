@@ -16,10 +16,42 @@ export default function AceitarViagemPage() {
   useEffect(() => {
     if (!token) return;
 
-    // Tentar primeiro como token de passageiro
+    // Se o token é um UUID, é o ID da OS (motorista)
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token);
+
+    if (isUUID) {
+      console.log('[Aceitar] Token é UUID, tentando motorista direto:', token);
+      fetch(`/api/os-driver-accept?os_id=${encodeURIComponent(token)}`)
+        .then(async (res) => {
+          const data = await res.json();
+          console.log('[Aceitar] motorista response:', data);
+          if (data.success) {
+            if (data.alreadyAccepted) {
+              setStatus('already');
+              setMessage(data.message || 'Viagem já aceita pelo motorista anteriormente.');
+            } else {
+              setStatus('success');
+              setMessage(data.message || 'Viagem aceita!');
+            }
+          } else {
+            setStatus('error');
+            setMessage(data.error || 'Não foi possível confirmar a viagem.');
+          }
+        })
+        .catch((err) => {
+          console.error('[Aceitar] Erro motorista:', err);
+          setStatus('error');
+          setMessage('Erro de conexão. Tente novamente mais tarde.');
+        });
+      return;
+    }
+
+    // Caso contrário, tentar como token de passageiro
+    console.log('[Aceitar] Token não é UUID, tentando passageiro:', token);
     fetch(`/api/passenger-accept?token=${encodeURIComponent(token)}`)
       .then(async (res) => {
         const data = await res.json();
+        console.log('[Aceitar] passageiro response:', data);
         if (data.success) {
           if (data.alreadyAccepted) {
             setStatus('already');
@@ -30,26 +62,11 @@ export default function AceitarViagemPage() {
           }
           return;
         }
-
-        // Se falhou como token de passageiro, tentar como OS ID para motorista
-        return fetch(`/api/os-driver-accept?os_id=${encodeURIComponent(token)}`)
-          .then(async (res2) => {
-            const data2 = await res2.json();
-            if (data2.success) {
-              if (data2.alreadyAccepted) {
-                setStatus('already');
-                setMessage(data2.message || 'Viagem já aceita pelo motorista anteriormente.');
-              } else {
-                setStatus('success');
-                setMessage(data2.message || 'Viagem aceita com sucesso! Aguarde a confirmação dos passageiros.');
-              }
-            } else {
-              setStatus('error');
-              setMessage(data2.error || 'Não foi possível confirmar a viagem.');
-            }
-          });
+        setStatus('error');
+        setMessage(data.error || 'Não foi possível confirmar a viagem.');
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('[Aceitar] Erro passageiro:', err);
         setStatus('error');
         setMessage('Erro de conexão. Tente novamente mais tarde.');
       });
@@ -72,7 +89,7 @@ export default function AceitarViagemPage() {
             </div>
             <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Viagem Confirmada</h1>
             <p className="text-sm font-semibold text-slate-500">{message}</p>
-            <p className="text-xs font-medium text-slate-400 pt-2">O motorista foi notificado e em breve estará a caminho.</p>
+            <p className="text-xs font-medium text-slate-400 pt-2">Aguarde a próxima instrução.</p>
           </>
         )}
         {status === 'already' && (

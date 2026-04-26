@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
+import {
+  checkRateLimit,
+  getRateLimitHeaders,
+  rateLimitResponse,
+  sendWhatsAppMessage,
+  unauthorizedResponse,
+  validateAuth,
+} from '@/lib/whatsapp';
 
-// Configurar Edge Runtime para Cloudflare Workers
 export const runtime = 'edge';
-
-// Configurações WASenderAPI
-const WA_SENDER_API_URL = "https://www.wasenderapi.com/api/send-message";
-const WA_SENDER_API_KEY = "662f06bc6117892fe23d265f39d3ac3b5cac0f79538898361a8ed18c377a0264";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -22,6 +25,15 @@ function createResendClient() {
 
 export async function POST(request: Request) {
   try {
+    if (!checkRateLimit(request, 10, 60)) {
+      return rateLimitResponse(request);
+    }
+
+    const auth = await validateAuth(request);
+    if (!auth) {
+      return unauthorizedResponse(request);
+    }
+
     const body = await request.json();
     console.log('[notify-passenger] body:', JSON.stringify(body));
     const { type, passengerEmail, passengerPhone, passengerName, osProtocol, osId, passageiroId, acceptUrl } = body;
@@ -58,6 +70,18 @@ export async function POST(request: Request) {
       : undefined;
     console.log('[notify-passenger] confirmationLink:', confirmationLink);
 
+    if ((type === 'whatsapp' || type === 'both') && !confirmationLink) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Não foi possível gerar o link de confirmação do passageiro.',
+          results,
+          token,
+        },
+        { status: 400, headers: getRateLimitHeaders(request) }
+      );
+    }
+
     if ((type === 'email' || type === 'both') && passengerEmail) {
       const resend = createResendClient();
       if (resend) {
@@ -93,42 +117,30 @@ export async function POST(request: Request) {
         cleanPhone = `55${cleanPhone}`;
       }
 
-      const text = confirmationLink
-        ? `Olá, *${passengerName || 'Passageiro'}*! ✨\n\nEsperamos que esteja bem. Estamos entrando em contato para confirmar sua viagem agendada via *Portal Geolog*.\n\n🚗 *Detalhes da Viagem:*\nProtocolo: *${osProtocol || 'N/A'}*\n\nPara garantir sua reserva e nos ajudar na organização do trajeto, pedimos a gentileza de confirmar sua presença clicando no botão abaixo:\n\n👉 [Aceitar viagem](${confirmationLink})\n\n_Após clicar, seu status será atualizado automaticamente em nosso sistema. Muito obrigado pela atenção! 🙏_`
-        : `Olá, *${passengerName || 'Passageiro'}*! ✨\n\nSua viagem de protocolo *${osProtocol || 'N/A'}* está agendada no Portal Geolog. Em breve enviaremos o link de confirmação com todos os detalhes do trajeto.`;
+      const text = `Olá, *${passengerName || 'Passageiro'}*! ✨\n\nEsperamos que esteja bem. Estamos entrando em contato para confirmar sua viagem agendada via *Portal Geolog*.\n\n🚗 *Detalhes da Viagem:*\nProtocolo: *${osProtocol || 'N/A'}*\n\nPara garantir sua reserva e nos ajudar na organização do trajeto, pedimos a gentileza de confirmar sua presença clicando no botão abaixo:\n\n👉 [Aceitar viagem](${confirmationLink})\n\n_Após clicar, seu status será atualizado automaticamente em nosso sistema. Muito obrigado pela atenção! 🙏_`;
 
-      console.log('[notify-passenger] sending WhatsApp to', cleanPhone, 'text length', text.length);
+      console.log('[notify-passenger] sending WhatsApp to', passengerPhone, 'text length', text.length);
 
-      const response = await fetch(WA_SENDER_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${WA_SENDER_API_KEY}`
-        },
-        body: JSON.stringify({
-          to: cleanPhone,
-          text,
-        })
-      });
-
-      console.log('[notify-passenger] WASenderAPI status:', response.status, response.statusText);
-
-      if (response.ok) {
+      try {
+        await sendWhatsAppMessage(passengerPhone, text);
         results.whatsapp = true;
-      } else {
-        const data = await response.json().catch(() => ({}));
-        console.error('❌ Erro WASenderAPI:', data);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('❌ Erro WAHA:', msg);
         results.whatsapp = false;
         return NextResponse.json(
-          { success: false, error: `WASenderAPI error ${response.status}: ${JSON.stringify(data)}`, results, token },
-          { status: 502 }
+          { success: false, error: msg, results, token },
+          { status: 502, headers: getRateLimitHeaders(request) }
         );
       }
     }
 
-    return NextResponse.json({ success: true, results, token });
+    return NextResponse.json({ success: true, results, token }, { headers: getRateLimitHeaders(request) });
   } catch (error: unknown) {
     console.error('🔥 Erro Crítico notify-passenger:', error);
-    return NextResponse.json({ success: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : String(error) },
+      { status: 500, headers: getRateLimitHeaders(request) }
+    );
   }
 }

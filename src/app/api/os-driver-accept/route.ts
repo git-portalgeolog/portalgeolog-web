@@ -1,16 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-
-export const runtime = 'edge';
-
-const WA_SENDER_API_URL = "https://www.wasenderapi.com/api/send-message";
-const WA_SENDER_API_KEY = "662f06bc6117892fe23d265f39d3ac3b5cac0f79538898361a8ed18c377a0264";
+import { sendWhatsAppMessage } from '@/lib/whatsapp';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
+
 
 export async function GET(request: Request) {
   try {
@@ -27,6 +24,8 @@ export async function GET(request: Request) {
       .select('id, status_operacional, motorista')
       .eq('id', osId)
       .single();
+
+    console.log('[os-driver-accept] OS encontrada:', os?.id, 'motorista:', os?.motorista, 'status:', os?.status_operacional);
 
     if (findError || !os) {
       return NextResponse.json(
@@ -55,49 +54,45 @@ export async function GET(request: Request) {
       );
     }
 
-    // Enviar mensagem de agradecimento para o motorista
+    // Enviar mensagens para o motorista
+    let messageSent = false;
     try {
       if (os.motorista) {
-        const { data: driver } = await supabaseAdmin
+        const { data: driver, error: driverError } = await supabaseAdmin
           .from('drivers')
           .select('phone')
           .eq('name', os.motorista)
           .single();
 
+        console.log('[os-driver-accept] Driver lookup:', { name: os.motorista, phone: driver?.phone, error: driverError?.message });
+
         if (driver?.phone) {
-          let phone = driver.phone.replace(/\D/g, '');
-          if (phone.length <= 11 && !phone.startsWith('55')) {
-            phone = `55${phone}`;
-          }
-
           const startRouteLink = `https://portalgeolog.com.br/iniciar-rota/${osId}`;
-          const thankYouMessage =
-            `✅ *Serviço aceito com sucesso!*\n\n` +
-            `Obrigado por confirmar a viagem.\n\n` +
-            `Quando estiver pronto para iniciar a rota, clique no link abaixo:\n` +
-            `${startRouteLink}\n\n` +
-            `Boa viagem! 🚗`;
 
-          await fetch(WA_SENDER_API_URL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${WA_SENDER_API_KEY}`
-            },
-            body: JSON.stringify({
-              to: phone,
-              text: thankYouMessage
-            })
-          });
+          // Mensagem única: agradecimento + link de início de rota
+          const acceptMessage =
+            `✅ *Viagem aceita!*\n\n` +
+            `Obrigado.\n\n` +
+            `Quando for iniciar a rota, clique aqui:\n` +
+            `${startRouteLink}`;
+
+          console.log('[os-driver-accept] Enviando msg para', driver.phone);
+          await sendWhatsAppMessage(driver.phone, acceptMessage);
+          messageSent = true;
+          console.log('[os-driver-accept] Msg enviada');
+        } else {
+          console.warn('[os-driver-accept] Telefone do motorista não encontrado');
         }
+      } else {
+        console.warn('[os-driver-accept] OS sem motorista definido');
       }
     } catch (notifyErr) {
-      console.error('Erro ao enviar mensagem de agradecimento:', notifyErr);
+      console.error('[os-driver-accept] Erro ao enviar WhatsApp:', notifyErr);
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Viagem aceita com sucesso! Aguarde a confirmação dos passageiros.',
+      message: messageSent ? 'Viagem aceita. Mensagens enviadas ao motorista.' : 'Viagem aceita.',
     });
   } catch (error: unknown) {
     console.error('🔥 Erro os-driver-accept:', error);

@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-
-export const runtime = 'edge';
+import { sendWhatsAppMessage } from '@/lib/whatsapp';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -47,9 +46,34 @@ export async function GET(request: Request) {
       );
     }
 
+    try {
+      if (osId) {
+        const { data: driver } = await supabaseAdmin
+          .from('ordens_servico')
+          .select('motorista')
+          .eq('id', osId)
+          .single();
+
+        if (driver?.motorista) {
+          const { data: driverPhone } = await supabaseAdmin
+            .from('drivers')
+            .select('phone')
+            .eq('name', driver.motorista)
+            .single();
+
+          if (driverPhone?.phone) {
+            const message = `🚗 *Rota iniciada!*\n\nBoa viagem. Se precisar, o sistema já está atualizado.`;
+            await sendWhatsAppMessage(driverPhone.phone, message);
+          }
+        }
+      }
+    } catch (notifyErr) {
+      console.error('Erro ao enviar mensagem de início de rota:', notifyErr);
+    }
+
     return NextResponse.json({
       success: true,
-      message: 'Rota iniciada com sucesso! Boa viagem e dirija com segurança.',
+      message: 'Rota iniciada. Boa viagem!',
     });
   } catch (error: unknown) {
     console.error('🔥 Erro os-start-route:', error);

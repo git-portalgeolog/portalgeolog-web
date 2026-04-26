@@ -3,12 +3,16 @@ import {
   checkRateLimit,
   getRateLimitHeaders,
   rateLimitResponse,
+  startWahaSession,
   unauthorizedResponse,
-  sendWhatsAppMessage,
   validateAuth,
 } from '@/lib/whatsapp';
 
 export const runtime = 'edge';
+
+const WAHA_API_URL = process.env.WAHA_API_URL;
+const WAHA_API_KEY = process.env.WAHA_API_KEY;
+const WAHA_SESSION = process.env.WAHA_SESSION || 'default';
 
 export async function POST(request: Request) {
   try {
@@ -21,16 +25,21 @@ export async function POST(request: Request) {
       return unauthorizedResponse(request);
     }
 
-    const { phone, message } = (await request.json()) as { phone: string; message: string };
+    if (!WAHA_API_URL || !WAHA_API_KEY) {
+      return NextResponse.json(
+        { success: false, error: 'WAHA não configurada' },
+        { status: 500 }
+      );
+    }
 
-    const data = await sendWhatsAppMessage(phone, message);
+    const snapshot = await startWahaSession(WAHA_SESSION);
 
     return NextResponse.json(
-      { success: true, api_response: data },
+      { success: true, instance: snapshot },
       { headers: getRateLimitHeaders(request) }
     );
   } catch (error: unknown) {
-    console.error('🔥 Erro Crítico WAHA:', error);
+    console.error('🔥 Erro Restart WAHA:', error);
     return NextResponse.json(
       {
         success: false,
