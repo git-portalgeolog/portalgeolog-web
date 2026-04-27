@@ -46,8 +46,6 @@ async function main() {
       'node:zlib',
       'node:perf_hooks',
     ],
-    // Manter pacotes npm como externos (disponíveis via node_modules no Worker)
-    packages: 'external',
     minify: false,
     logLevel: 'warning',
   });
