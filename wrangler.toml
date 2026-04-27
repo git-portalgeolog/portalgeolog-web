@@ -1,8 +1,11 @@
-# Cloudflare Pages configuration — vinext
+# Cloudflare Workers + Assets — vinext
 name = "portalgeolog-web"
+main = "dist/server/index.js"
 compatibility_date = "2025-03-31"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = "dist/client"
+
+[assets]
+directory = "dist/client"
 
 [vars]
 NEXT_PUBLIC_SUPABASE_URL = "https://hzpgfapvjwqtjclriisz.supabase.co"

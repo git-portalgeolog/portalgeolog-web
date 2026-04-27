@@ -10,7 +10,7 @@
     "dev": "npx kill-port 3000 3001 2>/dev/null || true && npx -y node@22 ./node_modules/vinext/dist/cli.js dev",
     "dev:next": "npx kill-port 3000 3001 2>/dev/null || true && next dev",
     "dev:fast": "./scripts/dev-optimized.sh",
-    "build": "npx -y node@22 ./node_modules/vinext/dist/cli.js build && npx -y node@22 ./scripts/fix-vinext-wrangler.mjs",
+    "build": "npx -y node@22 ./node_modules/vinext/dist/cli.js build",
     "build:next": "next build",
     "build:cf": "npm run build",
     "build:c": "npm run build:cf",
