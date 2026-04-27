@@ -12,7 +12,11 @@ import type {
   Vehicle
 } from '@/context/DataContext';
 
-const supabase = createClient();
+let _supabase: ReturnType<typeof createClient> | null = null;
+const getSupabase = () => {
+  if (!_supabase) _supabase = createClient();
+  return _supabase;
+};
 
 const trimText = (value?: string): string => value?.trim() ?? '';
 
@@ -152,14 +156,14 @@ type DriverRow = {
 // ── Clientes ──────────────────────────────────────────────
 
 export async function fetchClientes(): Promise<Cliente[]> {
-  const { data: clientesRaw, error } = await supabase
+  const { data: clientesRaw, error } = await getSupabase()
     .from('clientes')
     .select('id, nome, contato')
     .order('nome');
 
   if (error) throw error;
 
-  const { data: centrosRaw } = await supabase
+  const { data: centrosRaw } = await getSupabase()
     .from('centros_custo')
     .select('id, nome, cliente_id')
     .order('nome');
@@ -178,7 +182,7 @@ export async function fetchClientes(): Promise<Cliente[]> {
 }
 
 export async function insertCentroCusto(nome: string, clienteId: string): Promise<CentroCusto> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('centros_custo')
     .insert({ nome, cliente_id: clienteId })
     .select('id, nome, cliente_id')
@@ -189,7 +193,7 @@ export async function insertCentroCusto(nome: string, clienteId: string): Promis
 }
 
 export async function updateCentroCustoInDB(id: string, updates: Partial<CentroCusto>): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('centros_custo')
     .update({ nome: updates.nome, cliente_id: updates.clienteId })
     .eq('id', id);
@@ -197,12 +201,12 @@ export async function updateCentroCustoInDB(id: string, updates: Partial<CentroC
 }
 
 export async function deleteCentroCustoFromDB(id: string): Promise<void> {
-  const { error } = await supabase.from('centros_custo').delete().eq('id', id);
+  const { error } = await getSupabase().from('centros_custo').delete().eq('id', id);
   if (error) throw error;
 }
 
 export async function insertCliente(nome: string, contato?: string): Promise<Cliente> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('clientes')
     .insert({ nome: trimText(nome), contato: trimText(contato) || null })
     .select('id, nome, contato')
@@ -223,7 +227,7 @@ export async function updateClienteInDB(id: string, updates: Partial<Cliente>): 
     payload.contato = trimText(updates.contato) || null;
   }
 
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('clientes')
     .update(payload)
     .eq('id', id);
@@ -232,7 +236,7 @@ export async function updateClienteInDB(id: string, updates: Partial<Cliente>): 
 }
 
 export async function deleteClienteFromDB(id: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('clientes')
     .delete()
     .eq('id', id);
@@ -243,7 +247,7 @@ export async function deleteClienteFromDB(id: string): Promise<void> {
 // ── Solicitantes ──────────────────────────────────────────
 
 export async function fetchSolicitantes(): Promise<Solicitante[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('solicitantes')
     .select('id, nome, cliente_id, centro_custo_id')
     .order('nome');
@@ -258,7 +262,7 @@ export async function fetchSolicitantes(): Promise<Solicitante[]> {
 }
 
 export async function insertSolicitante(nome: string, clienteId: string, centroCustoId?: string): Promise<Solicitante> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('solicitantes')
     .insert({ nome, cliente_id: clienteId, centro_custo_id: centroCustoId })
     .select('id, nome, cliente_id, centro_custo_id')
@@ -274,7 +278,7 @@ export async function insertSolicitante(nome: string, clienteId: string, centroC
 }
 
 export async function updateSolicitanteInDB(id: string, updates: Partial<Solicitante>): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('solicitantes')
     .update({ 
       nome: updates.nome, 
@@ -287,7 +291,7 @@ export async function updateSolicitanteInDB(id: string, updates: Partial<Solicit
 }
 
 export async function deleteSolicitanteFromDB(id: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('solicitantes')
     .delete()
     .eq('id', id);
@@ -298,14 +302,14 @@ export async function deleteSolicitanteFromDB(id: string): Promise<void> {
 // ── Passageiros ───────────────────────────────────────────
 
 export async function fetchPassageiros(): Promise<Passageiro[]> {
-  const { data: passRaw, error } = await supabase
+  const { data: passRaw, error } = await getSupabase()
     .from('passageiros')
     .select('id, nome_completo, email, celular, cpf, notificar, genero')
     .order('nome_completo');
 
   if (error) throw error;
 
-  const { data: endRaw } = await supabase
+  const { data: endRaw } = await getSupabase()
     .from('passageiro_enderecos')
     .select('id, passageiro_id, rotulo, endereco_completo, referencia');
 
@@ -332,7 +336,7 @@ export async function fetchPassageiros(): Promise<Passageiro[]> {
 }
 
 export async function insertPassageiro(input: NovoPassageiroInput): Promise<Passageiro> {
-  const { data: passRow, error: passError } = await supabase
+  const { data: passRow, error: passError } = await getSupabase()
     .from('passageiros')
     .insert({
       nome_completo: trimText(input.nomeCompleto),
@@ -350,7 +354,7 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
   const enderecos: PassageiroEndereco[] = [];
 
   if (input.enderecos.length > 0) {
-    const { data: endRows, error: endError } = await supabase
+    const { data: endRows, error: endError } = await getSupabase()
       .from('passageiro_enderecos')
       .insert(
         input.enderecos.map((e) => ({
@@ -387,7 +391,7 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
 }
 
 export async function updatePassageiroInDB(id: string, input: NovoPassageiroInput): Promise<Passageiro> {
-  const { data: passRow, error: passError } = await supabase
+  const { data: passRow, error: passError } = await getSupabase()
     .from('passageiros')
     .update({
       nome_completo: trimText(input.nomeCompleto),
@@ -404,13 +408,13 @@ export async function updatePassageiroInDB(id: string, input: NovoPassageiroInpu
   if (passError) throw passError;
 
   // Deletar endereços antigos
-  await supabase.from('passageiro_enderecos').delete().eq('passageiro_id', id);
+  await getSupabase().from('passageiro_enderecos').delete().eq('passageiro_id', id);
 
   // Inserir novos endereços
   const enderecos: PassageiroEndereco[] = [];
 
   if (input.enderecos.length > 0) {
-    const { data: endRows, error: endError } = await supabase
+    const { data: endRows, error: endError } = await getSupabase()
       .from('passageiro_enderecos')
       .insert(
         input.enderecos.map((e) => ({
@@ -447,7 +451,7 @@ export async function updatePassageiroInDB(id: string, input: NovoPassageiroInpu
 }
 
 export async function deletePassageiroFromDB(id: string): Promise<void> {
-  const { error } = await supabase.from('passageiros').delete().eq('id', id);
+  const { error } = await getSupabase().from('passageiros').delete().eq('id', id);
 
   if (error) throw error;
 }
@@ -481,7 +485,7 @@ export async function fetchPassageirosPage({
 
   let endRaw: PassageiroEnderecoRow[] = [];
   if (passengerIds.length > 0) {
-    const { data: endData } = await supabase
+    const { data: endData } = await getSupabase()
       .from('passageiro_enderecos')
       .select('id, passageiro_id, rotulo, endereco_completo, referencia')
       .in('passageiro_id', passengerIds);
@@ -514,7 +518,7 @@ export async function fetchPassageirosPage({
 // ── Veículos ───────────────────────────────────────────
 
 export async function updateVeiculoInDB(id: string, input: Partial<Vehicle>): Promise<Vehicle> {
-  const { data: vehRow, error: vehError } = await supabase
+  const { data: vehRow, error: vehError } = await getSupabase()
     .from('veiculos')
     .update({
       placa: input.placa?.trim().toUpperCase(),
@@ -549,7 +553,7 @@ export async function updateVeiculoInDB(id: string, input: Partial<Vehicle>): Pr
 }
 
 export async function deleteVeiculoFromDB(id: string): Promise<void> {
-  const { error } = await supabase.from('veiculos').delete().eq('id', id);
+  const { error } = await getSupabase().from('veiculos').delete().eq('id', id);
 
   if (error) throw error;
 }
@@ -557,7 +561,7 @@ export async function deleteVeiculoFromDB(id: string): Promise<void> {
 // ── Ordens de Serviço ─────────────────────────────────────
 
 export async function fetchOSList(): Promise<OrderService[]> {
-  const { data: osRaw, error } = await supabase
+  const { data: osRaw, error } = await getSupabase()
     .from('ordens_servico')
     .select('*')
     .order('created_at', { ascending: false });
@@ -570,7 +574,7 @@ export async function fetchOSList(): Promise<OrderService[]> {
   let wpPassRaw: OSWaypointPassengerRow[] = [];
 
   if (osIds.length > 0) {
-    const { data: wpData } = await supabase
+    const { data: wpData } = await getSupabase()
       .from('os_waypoints')
       .select('id, ordem_servico_id, position, label, lat, lng, comment')
       .in('ordem_servico_id', osIds)
@@ -580,7 +584,7 @@ export async function fetchOSList(): Promise<OrderService[]> {
     const wpIds = wpRaw.map((w) => w.id);
 
     if (wpIds.length > 0) {
-      const { data: passData } = await supabase
+      const { data: passData } = await getSupabase()
         .from('os_waypoint_passengers')
         .select('id, waypoint_id, passageiro_id, nome')
         .in('waypoint_id', wpIds);
@@ -663,7 +667,7 @@ export async function fetchOSPage({
   let wpPassRaw: OSWaypointPassengerRow[] = [];
 
   if (osIds.length > 0) {
-    const { data: wpData } = await supabase
+    const { data: wpData } = await getSupabase()
       .from('os_waypoints')
       .select('id, ordem_servico_id, position, label, lat, lng, comment')
       .in('ordem_servico_id', osIds)
@@ -673,7 +677,7 @@ export async function fetchOSPage({
     const wpIds = wpRaw.map((w) => w.id);
 
     if (wpIds.length > 0) {
-      const { data: passData } = await supabase
+      const { data: passData } = await getSupabase()
         .from('os_waypoint_passengers')
         .select('id, waypoint_id, passageiro_id, nome')
         .in('waypoint_id', wpIds);
@@ -736,7 +740,7 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
   const lucro = osData.valorBruto - imposto - osData.custo;
   const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
 
-  const { data: osRow, error: osError } = await supabase
+  const { data: osRow, error: osError } = await getSupabase()
     .from('ordens_servico')
     .insert({
       protocolo: '', // trigger will generate
@@ -768,7 +772,7 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
 
   for (let i = 0; i < waypoints.length; i++) {
     const wp = waypoints[i];
-    const { data: wpRow, error: wpError } = await supabase
+    const { data: wpRow, error: wpError } = await getSupabase()
       .from('os_waypoints')
       .insert({
         ordem_servico_id: osRow.id,
@@ -787,7 +791,7 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
     const insertedPassengers: { id: string; solicitanteId: string; nome: string }[] = [];
 
     if (passengers.length > 0) {
-      const { data: passRows } = await supabase
+      const { data: passRows } = await getSupabase()
         .from('os_waypoint_passengers')
         .insert(
           passengers.map((p) => ({
@@ -811,7 +815,7 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
 
     const cleanComment = wp.comment?.trim() || '';
     if (cleanComment) {
-      await supabase.from('os_waypoint_comments').insert({
+      await getSupabase().from('os_waypoint_comments').insert({
         ordem_servico_id: osRow.id,
         waypoint_position: i,
         waypoint_label: wp.label,
@@ -861,7 +865,7 @@ export async function updateOSInDB(
   const lucro = osData.valorBruto - imposto - osData.custo;
   const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
 
-  const { error: osError } = await supabase
+  const { error: osError } = await getSupabase()
     .from('ordens_servico')
     .update({
       data: osData.data,
@@ -884,13 +888,13 @@ export async function updateOSInDB(
   if (osError) throw osError;
 
   // Delete old waypoints (cascade deletes passengers too)
-  await supabase.from('os_waypoints').delete().eq('ordem_servico_id', id);
+  await getSupabase().from('os_waypoints').delete().eq('ordem_servico_id', id);
 
   // Re-insert waypoints
   const waypoints = osData.rota?.waypoints || [];
   for (let i = 0; i < waypoints.length; i++) {
     const wp = waypoints[i];
-    const { data: wpRow } = await supabase
+    const { data: wpRow } = await getSupabase()
       .from('os_waypoints')
       .insert({
         ordem_servico_id: id,
@@ -904,7 +908,7 @@ export async function updateOSInDB(
       .single();
 
     if (wpRow && wp.passengers && wp.passengers.length > 0) {
-      await supabase.from('os_waypoint_passengers').insert(
+      await getSupabase().from('os_waypoint_passengers').insert(
         wp.passengers.map((p) => ({
           waypoint_id: wpRow.id,
           passageiro_id: p.solicitanteId || null,
@@ -915,7 +919,7 @@ export async function updateOSInDB(
 
     const cleanComment = wp.comment?.trim() || '';
     if (cleanComment) {
-      await supabase.from('os_waypoint_comments').insert({
+      await getSupabase().from('os_waypoint_comments').insert({
         ordem_servico_id: id,
         waypoint_position: i,
         waypoint_label: wp.label,
@@ -933,7 +937,7 @@ export async function updateOSStatusInDB(
   if (updates.operacional) updatePayload.status_operacional = updates.operacional;
   if (updates.financeiro) updatePayload.status_financeiro = updates.financeiro;
 
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('ordens_servico')
     .update(updatePayload)
     .eq('id', id);
@@ -942,7 +946,7 @@ export async function updateOSStatusInDB(
 }
 
 export async function deleteOSFromDB(id: string): Promise<void> {
-  const { data: waypoints, error: waypointsError } = await supabase
+  const { data: waypoints, error: waypointsError } = await getSupabase()
     .from('os_waypoints')
     .select('id')
     .eq('ordem_servico_id', id);
@@ -952,14 +956,14 @@ export async function deleteOSFromDB(id: string): Promise<void> {
   const waypointIds = (waypoints || []).map((waypoint) => waypoint.id);
 
   if (waypointIds.length > 0) {
-    const { error: passengersError } = await supabase
+    const { error: passengersError } = await getSupabase()
       .from('os_waypoint_passengers')
       .delete()
       .in('waypoint_id', waypointIds);
 
     if (passengersError) throw passengersError;
 
-    const { error: deleteWaypointsError } = await supabase
+    const { error: deleteWaypointsError } = await getSupabase()
       .from('os_waypoints')
       .delete()
       .eq('ordem_servico_id', id);
@@ -967,7 +971,7 @@ export async function deleteOSFromDB(id: string): Promise<void> {
     if (deleteWaypointsError) throw deleteWaypointsError;
   }
 
-  const { error: osError } = await supabase
+  const { error: osError } = await getSupabase()
     .from('ordens_servico')
     .delete()
     .eq('id', id);
@@ -978,7 +982,7 @@ export async function deleteOSFromDB(id: string): Promise<void> {
 // ── Centros de Custo ──────────────────────────────────────
 
 export async function fetchCentrosCustoByCliente(clienteId: string): Promise<CentroCusto[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('centros_custo')
     .select('id, nome')
     .eq('cliente_id', clienteId)
@@ -991,7 +995,7 @@ export async function fetchCentrosCustoByCliente(clienteId: string): Promise<Cen
 // ── Motoristas ────────────────────────────────────────────
 
 export async function fetchDrivers(): Promise<Driver[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('drivers')
     .select('*')
     .order('name');
@@ -1082,7 +1086,7 @@ export async function fetchVeiculosPage({
 }
 
 export async function insertDriver(driver: Omit<Driver, 'id' | 'created_at'>): Promise<Driver> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('drivers')
     .insert(driver)
     .select('*')
@@ -1093,7 +1097,7 @@ export async function insertDriver(driver: Omit<Driver, 'id' | 'created_at'>): P
 }
 
 export async function updateDriverInDB(id: string, driver: Partial<Driver>): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('drivers')
     .update(driver)
     .eq('id', id);
@@ -1102,7 +1106,7 @@ export async function updateDriverInDB(id: string, driver: Partial<Driver>): Pro
 }
 
 export async function deleteDriverFromDB(id: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('drivers')
     .delete()
     .eq('id', id);
@@ -1234,7 +1238,7 @@ const mapParceiroPayload = (
 };
 
 export async function fetchParceiros(): Promise<ParceiroServico[]> {
-  const { data: parceirosData, error: parceirosError } = await supabase
+  const { data: parceirosData, error: parceirosError } = await getSupabase()
     .from('parceiros_servico')
     .select('*')
     .order('nome');
@@ -1249,7 +1253,7 @@ export async function fetchParceiros(): Promise<ParceiroServico[]> {
   let filiais: ParceiroFilialRow[] = [];
   
   if (parceirosIds.length > 0) {
-    const { data: contatosData, error: contatosError } = await supabase
+    const { data: contatosData, error: contatosError } = await getSupabase()
       .from('parceiros_contatos')
       .select('*')
       .in('parceiro_id', parceirosIds);
@@ -1257,7 +1261,7 @@ export async function fetchParceiros(): Promise<ParceiroServico[]> {
     if (contatosError) throw contatosError;
     contatos = contatosData as ParceiroContatoRow[];
     
-    const { data: filiaisData, error: filiaisError } = await supabase
+    const { data: filiaisData, error: filiaisError } = await getSupabase()
       .from('parceiros_filiais')
       .select('*')
       .in('parceiro_id', parceirosIds);
@@ -1302,7 +1306,7 @@ export async function fetchParceirosPage({
   let filiais: ParceiroFilialRow[] = [];
 
   if (parceirosIds.length > 0) {
-    const { data: contatosData, error: contatosError } = await supabase
+    const { data: contatosData, error: contatosError } = await getSupabase()
       .from('parceiros_contatos')
       .select('*')
       .in('parceiro_id', parceirosIds);
@@ -1310,7 +1314,7 @@ export async function fetchParceirosPage({
     if (contatosError) throw contatosError;
     contatos = contatosData as ParceiroContatoRow[];
 
-    const { data: filiaisData, error: filiaisError } = await supabase
+    const { data: filiaisData, error: filiaisError } = await getSupabase()
       .from('parceiros_filiais')
       .select('*')
       .in('parceiro_id', parceirosIds);
@@ -1330,7 +1334,7 @@ export async function fetchParceirosPage({
 }
 
 export async function fetchParceiroById(id: string): Promise<ParceiroServico> {
-  const { data: parceiroData, error: parceiroError } = await supabase
+  const { data: parceiroData, error: parceiroError } = await getSupabase()
     .from('parceiros_servico')
     .select('*')
     .eq('id', id)
@@ -1340,7 +1344,7 @@ export async function fetchParceiroById(id: string): Promise<ParceiroServico> {
   const parceiro = parceiroData as ParceiroRow;
 
   // Buscar contatos
-  const { data: contatosData, error: contatosError } = await supabase
+  const { data: contatosData, error: contatosError } = await getSupabase()
     .from('parceiros_contatos')
     .select('*')
     .eq('parceiro_id', id);
@@ -1349,7 +1353,7 @@ export async function fetchParceiroById(id: string): Promise<ParceiroServico> {
   const contatos = contatosData as ParceiroContatoRow[];
   
   // Buscar filiais
-  const { data: filiaisData, error: filiaisError } = await supabase
+  const { data: filiaisData, error: filiaisError } = await getSupabase()
     .from('parceiros_filiais')
     .select('*')
     .eq('parceiro_id', id);
@@ -1362,7 +1366,7 @@ export async function fetchParceiroById(id: string): Promise<ParceiroServico> {
 
 export async function insertParceiro(input: NovoParceiroInput): Promise<ParceiroServico> {
   // Inserir parceiro principal
-  const { data: parceiroData, error: parceiroError } = await supabase
+  const { data: parceiroData, error: parceiroError } = await getSupabase()
     .from('parceiros_servico')
     .insert({
       nome: trimText(input.razaoSocialOuNomeCompleto),
@@ -1387,7 +1391,7 @@ export async function insertParceiro(input: NovoParceiroInput): Promise<Parceiro
   }));
 
   if (contatosToInsert.length > 0) {
-    const { error: contatosError } = await supabase
+    const { error: contatosError } = await getSupabase()
       .from('parceiros_contatos')
       .insert(contatosToInsert);
 
@@ -1403,7 +1407,7 @@ export async function insertParceiro(input: NovoParceiroInput): Promise<Parceiro
   }));
 
   if (filiaisToInsert.length > 0) {
-    const { error: filiaisError } = await supabase
+    const { error: filiaisError } = await getSupabase()
       .from('parceiros_filiais')
       .insert(filiaisToInsert);
 
@@ -1416,7 +1420,7 @@ export async function insertParceiro(input: NovoParceiroInput): Promise<Parceiro
 
 export async function updateParceiroInDB(id: string, input: NovoParceiroInput): Promise<ParceiroServico> {
   // Atualizar parceiro principal
-  const { error: parceiroError } = await supabase
+  const { error: parceiroError } = await getSupabase()
     .from('parceiros_servico')
     .update({
       nome: trimText(input.razaoSocialOuNomeCompleto),
@@ -1430,8 +1434,8 @@ export async function updateParceiroInDB(id: string, input: NovoParceiroInput): 
   if (parceiroError) throw parceiroError;
 
   // Remover contatos e filiais existentes
-  await supabase.from('parceiros_contatos').delete().eq('parceiro_id', id);
-  await supabase.from('parceiros_filiais').delete().eq('parceiro_id', id);
+  await getSupabase().from('parceiros_contatos').delete().eq('parceiro_id', id);
+  await getSupabase().from('parceiros_filiais').delete().eq('parceiro_id', id);
 
   // Inserir novos contatos
   const contatosToInsert = input.contatos.map((contato) => ({
@@ -1443,7 +1447,7 @@ export async function updateParceiroInDB(id: string, input: NovoParceiroInput): 
   }));
 
   if (contatosToInsert.length > 0) {
-    const { error: contatosError } = await supabase
+    const { error: contatosError } = await getSupabase()
       .from('parceiros_contatos')
       .insert(contatosToInsert);
 
@@ -1459,7 +1463,7 @@ export async function updateParceiroInDB(id: string, input: NovoParceiroInput): 
   }));
 
   if (filiaisToInsert.length > 0) {
-    const { error: filiaisError } = await supabase
+    const { error: filiaisError } = await getSupabase()
       .from('parceiros_filiais')
       .insert(filiaisToInsert);
 
@@ -1471,7 +1475,7 @@ export async function updateParceiroInDB(id: string, input: NovoParceiroInput): 
 }
 
 export async function deleteParceiroFromDB(id: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('parceiros_servico')
     .delete()
     .eq('id', id);
