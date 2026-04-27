@@ -7,18 +7,18 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "npx kill-port 3000 3001 2>/dev/null || true && vinext dev",
+    "dev": "npx kill-port 3000 3001 2>/dev/null || true && npx -y node@22 ./node_modules/vinext/dist/cli.js dev",
     "dev:next": "npx kill-port 3000 3001 2>/dev/null || true && next dev",
     "dev:fast": "./scripts/dev-optimized.sh",
-    "build": "vinext build && node scripts/fix-vinext-wrangler.mjs && rm -rf cloudflare-output && mkdir -p cloudflare-output && cp -r dist/* cloudflare-output/",
+    "build": "npx -y node@22 ./node_modules/vinext/dist/cli.js build && npx -y node@22 ./scripts/fix-vinext-wrangler.mjs && rm -rf cloudflare-output && mkdir -p cloudflare-output && cp -r dist/* cloudflare-output/",
     "build:next": "next build",
     "build:cf": "npm run build",
     "build:c": "npm run build:cf",
-    "start": "vinext start",
+    "start": "npx -y node@22 ./node_modules/vinext/dist/cli.js start",
     "start:next": "next start",
     "lint": "eslint",
     "kill-port": "npx kill-port 3000 3001",
-    "deploy:cf": "vinext deploy"
+    "deploy:cf": "npx -y node@22 ./node_modules/vinext/dist/cli.js deploy"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.20",
