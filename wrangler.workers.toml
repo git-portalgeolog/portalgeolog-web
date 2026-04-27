@@ -1,7 +1,7 @@
 # Cloudflare Workers + Assets — config de DEPLOY
 # Usado após o build: npx wrangler deploy --config wrangler.workers.toml
 name = "portalgeolog-web"
-main = "dist/server/index.js"
+main = "worker/index.js"
 compatibility_date = "2025-03-31"
 compatibility_flags = ["nodejs_compat"]
 
