@@ -26,11 +26,14 @@ import {
   insertOS,
   updateOSInDB,
   updateOSStatusInDB,
-  deleteOSFromDB,
+  archiveOSFromDB,
   fetchParceiros,
   insertParceiro,
   updateParceiroInDB,
+  toggleParceiroStatus,
   deleteParceiroFromDB,
+  getImpostoPercentual,
+  setAppSetting,
   type ParceiroServico,
   type NovoParceiroInput,
 } from '@/lib/supabase/queries';
@@ -220,6 +223,8 @@ interface DataContextType {
   drivers: Driver[];
   parceiros: ParceiroServico[];
   loading: boolean;
+  impostoPercentual: number;
+  setImpostoPercentual: (value: number) => Promise<void>;
 
   lastOSUpdate: number;
   addCliente: (nome: string, contato?: string) => Promise<Cliente>;
@@ -241,6 +246,7 @@ interface DataContextType {
   // Parceiros
   addParceiro: (parceiro: NovoParceiroInput) => Promise<ParceiroServico>;
   updateParceiro: (id: string, parceiro: NovoParceiroInput) => Promise<void>;
+  toggleParceiro: (id: string) => Promise<void>;
   deleteParceiro: (id: string) => void;
   
   // Centros de Custo
@@ -269,6 +275,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [parceiros, setParceiros] = useState<ParceiroServico[]>([]);
   const [loading, setLoading] = useState(true);
+  const [impostoPercentual, setImpostoPercentualState] = useState<number>(12);
   const [lastOSUpdate, setLastOSUpdate] = useState(0);
   const { user, loading: authLoading } = useAuth();
   const supabase = useMemo(() => createClient(), []);
@@ -283,13 +290,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const refreshData = useCallback(async () => {
     try {
-      const [clientesData, solicitantesData, passageirosData, parceirosData, osData, driversData] = await Promise.all([
+      const [clientesData, solicitantesData, passageirosData, parceirosData, osData, driversData, impostoPct] = await Promise.all([
         dbFetchClientes(),
         dbFetchSolicitantes(),
         dbFetchPassageiros(),
         dbFetchParceiros(),
         dbFetchOSList(),
         dbFetchDrivers(),
+        getImpostoPercentual(),
       ]);
 
       setClientes(clientesData);
@@ -298,6 +306,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setParceiros(parceirosData);
       setOsList(osData);
       setDrivers(driversData);
+      setImpostoPercentualState(impostoPct);
       setLastOSUpdate(Date.now());
     } catch (err) {
       console.error('🔥 CRITICAL: Error refreshing global data:', err);
@@ -346,6 +355,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, () => {
         dbFetchDrivers().then(setDrivers).catch(() => {});
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'parceiros_servico' }, () => {
+        console.log('🏢 Parceiro Change detected');
+        dbFetchParceiros().then(setParceiros).catch(() => {});
+      })
       .subscribe((status: string) => {
         if (status === 'SUBSCRIBED') {
            console.log('✅ Real-time ativado.');
@@ -361,6 +374,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     dbFetchClientes,
     dbFetchDrivers,
     dbFetchOSList,
+    dbFetchParceiros,
     dbFetchPassageiros,
     dbFetchSolicitantes,
     supabase,
@@ -689,7 +703,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addOS = (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>): OrderService => {
-    const imposto = osData.valorBruto * 0.12;
+    const taxa = impostoPercentual / 100;
+    const imposto = osData.valorBruto * taxa;
     const lucro = osData.valorBruto - imposto - osData.custo;
     const tempId = `temp-${Date.now()}`;
 
@@ -722,7 +737,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const updateOS = (id: string, osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => {
     const currentOS = osList.find((os) => os.id === id);
     if (currentOS) {
-      const imposto = osData.valorBruto * 0.12;
+      const taxa = impostoPercentual / 100;
+      const imposto = osData.valorBruto * taxa;
       const lucro = osData.valorBruto - imposto - osData.custo;
 
       setOsList((prev) => prev.map((os) => (os.id === id ? {
@@ -762,10 +778,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setOsList((prev) => prev.filter((os) => os.id !== id));
 
     try {
-      await deleteOSFromDB(id);
+      await archiveOSFromDB(id);
       void refreshData();
     } catch (err) {
-      console.error('Error deleteOSFromDB:', err);
+      console.error('Error archiveOSFromDB:', err);
       void refreshData();
       throw err;
     }
@@ -897,6 +913,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     void refreshData();
   };
 
+  const toggleParceiro = async (id: string): Promise<void> => {
+    const parceiro = parceiros.find(p => p.id === id);
+    if (!parceiro) return;
+    await toggleParceiroStatus(id, parceiro.status);
+    setParceiros(prev => prev.map(p => p.id === id ? { ...p, status: p.status === 'ativo' ? 'inativo' : 'ativo' } : p));
+    void refreshData();
+  };
+
   const deleteParceiro = (id: string) => {
     deleteParceiroFromDB(id)
       .then(() => {
@@ -941,6 +965,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       .catch(err => console.error('Error deleteCentroCustoFromDB:', err));
   };
 
+  const setImpostoPercentual = async (value: number): Promise<void> => {
+    const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
+    await setAppSetting('imposto_percentual', String(safeValue));
+    setImpostoPercentualState(safeValue);
+  };
+
   return (
     <DataContext.Provider
       value={{
@@ -951,6 +981,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         drivers,
         parceiros,
         loading,
+        impostoPercentual,
+        setImpostoPercentual,
         lastOSUpdate,
         addCliente,
         updateCliente,
@@ -966,6 +998,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         deleteVeiculo,
         addParceiro,
         updateParceiro,
+        toggleParceiro,
         deleteParceiro,
         addCentroCusto,
         updateCentroCusto,

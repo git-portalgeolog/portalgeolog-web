@@ -220,6 +220,7 @@ Certifique-se de que o `user.name` e `user.email` no repositório local (`git co
 ### Cloudflare CLI (Wrangler)
 - **Autenticação:** Configure via `wrangler login` ou use `CLOUDFLARE_API_TOKEN`.
 - **Controle de Deploy:** Agentes NUNCA devem realizar deploys (seja para `test` ou `main`) sem a solicitação explícita do usuário no chat.
+- **REGRA DE OURO:** Só faça deploy quando o usuário pedir explicitamente no chat. Nunca inicie um deploy por conta própria.
 - **Comandos Principais:**
   - `wrangler pages project create portalgeolog-web` (cria projeto no Cloudflare).
   - `wrangler pages deploy cloudflare-output` (deploy manual).

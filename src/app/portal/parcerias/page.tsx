@@ -1,16 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ParceiroServico, NovoParceiroInput, useData } from '@/context/DataContext';
 import StandardModal from '@/components/StandardModal';
-import { Building2, Edit2, Eye, Handshake, Mail, MapPin, Phone, PlusCircle, Trash2, Users, Briefcase, Plus } from 'lucide-react';
+import { Building2, Briefcase, Edit2, Eye, Handshake, Mail, MapPin, Phone, PlusCircle, Power, Trash2, Users, Plus } from 'lucide-react';
 import { DataTable } from '@/components/ui/DataTable';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useConfirm } from '@/hooks/useConfirm';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { fetchParceirosPage } from '@/lib/supabase/queries';
+import { fetchParceirosPage, checkParceiroVinculos } from '@/lib/supabase/queries';
 import { useServerPaginatedTable } from '@/hooks/useServerPaginatedTable';
 
 const PESSOA_TIPO_OPTIONS = [
@@ -108,7 +108,7 @@ const initialForm = (): ParceiroFormData => ({
 });
 
 export default function ParceriasPage() {
-  const { parceiros, addParceiro, updateParceiro, deleteParceiro } = useData();
+  const { parceiros, addParceiro, updateParceiro, toggleParceiro, deleteParceiro } = useData();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingParceiro, setEditingParceiro] = useState<ParceiroServico | null>(null);
@@ -116,6 +116,12 @@ export default function ParceriasPage() {
   const [formData, setFormData] = useState<ParceiroFormData>(initialForm());
   const parceiroTable = useServerPaginatedTable(fetchParceirosPage, 10);
   const searchTerm = parceiroTable.searchTerm;
+
+  // Refresh automático da tabela quando dados mudam via realtime
+  useEffect(() => {
+    void parceiroTable.refresh();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parceiros.length]);
 
   const resetForm = () => {
     setEditingParceiro(null);
@@ -446,7 +452,24 @@ export default function ParceriasPage() {
   const handleDelete = async (id: string) => {
     const parceiro = parceiros.find(p => p.id === id);
     if (!parceiro) return;
-    
+
+    try {
+      const vinculos = await checkParceiroVinculos(id);
+      if (vinculos.length > 0) {
+        const mensagens = vinculos.map(
+          (v) => `${v.tabela}: ${v.registros.map((r) => r.nome).join(', ')}`
+        );
+        toast.error(
+          `Não é possível excluir este parceiro. Existem vínculos ativos: ${mensagens.join('; ')}`
+        );
+        return;
+      }
+    } catch (err) {
+      console.error('Erro ao verificar vínculos do parceiro:', err);
+      toast.error('Não foi possível verificar os vínculos. Tente novamente.');
+      return;
+    }
+
     const confirmed = await confirm({
       title: 'Excluir Parceiro',
       message: `Tem certeza que deseja excluir o parceiro "${parceiro.razaoSocialOuNomeCompleto}"? Esta ação não pode ser desfeita.`,
@@ -454,7 +477,7 @@ export default function ParceriasPage() {
       cancelText: 'Cancelar',
       type: 'danger'
     });
-    
+
     if (confirmed) {
       await deleteParceiro(id);
       await parceiroTable.refresh();
@@ -494,30 +517,21 @@ export default function ParceriasPage() {
           {
             key: 'razaoSocialOuNomeCompleto',
             title: 'Nome',
-            render: (value: unknown, item: ParceiroServico) => (
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <Briefcase size={18} />
-                </div>
-                <div>
-                  <span className="font-bold text-slate-800 text-base">{highlightText(String(value), searchTerm)}</span>
-                  <p className="text-xs text-slate-500">{item.pessoaTipo === 'juridica' ? 'Pessoa Jurídica' : 'Pessoa Física'}</p>
-                </div>
+            render: (value: unknown) => (
+              <div>
+                <span className="font-bold text-slate-800 text-base">{highlightText(String(value), searchTerm)}</span>
               </div>
             )
           },
           {
-            key: 'pessoaTipo',
-            title: 'Pessoa',
-            render: (value: unknown) => (
-              <span className="text-sm font-bold text-slate-600 uppercase tracking-[0.2em]">{String(value) === 'juridica' ? 'Jurídica' : 'Física'}</span>
-            )
-          },
-          {
             key: 'documento',
-            title: 'Documento',
-            render: (value: unknown) => (
-              <p className="text-sm font-bold text-slate-700">{String(value)}</p>
+            title: 'Tipo / Doc',
+            width: '140px',
+            render: (value: unknown, item: ParceiroServico) => (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">{item.pessoaTipo === 'juridica' ? 'Jurídica' : 'Física'}</span>
+                <p className="text-sm font-bold text-slate-700 whitespace-nowrap">{String(value)}</p>
+              </div>
             )
           },
           {
@@ -527,21 +541,20 @@ export default function ParceriasPage() {
               void value;
 
               return (
-                <div className="space-y-2 text-sm">
+                <div className="text-sm">
                   {item.contatos.slice(0, 1).map((contato) => (
-                    <div key={contato.id} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 space-y-1">
+                    <div key={contato.id} className="flex flex-col gap-1.5">
                       <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
-                        <Users size={12} className="text-blue-500" />
                         {highlightText(contato.setor, searchTerm)}
                       </div>
-                      <p className="font-bold text-slate-700">{highlightText(contato.responsavel, searchTerm)}</p>
-                      <div className="flex flex-wrap gap-3 text-xs text-slate-500 font-medium">
-                        <span className="inline-flex items-center gap-1"><Phone size={12} className="text-blue-500" /> {highlightText(contato.celular, searchTerm)}</span>
-                        {contato.email && <span className="inline-flex items-center gap-1"><Mail size={12} className="text-blue-500" /> {highlightText(contato.email, searchTerm)}</span>}
+                      <p className="font-bold text-slate-700 text-sm leading-snug">{highlightText(contato.responsavel, searchTerm)}</p>
+                      <div className="flex items-center gap-4 text-xs text-slate-500 font-medium whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1"><Phone size={12} className="text-blue-500 shrink-0" /> {highlightText(contato.celular, searchTerm)}</span>
+                        {contato.email && <span className="inline-flex items-center gap-1"><Mail size={12} className="text-blue-500 shrink-0" /> {highlightText(contato.email, searchTerm)}</span>}
                       </div>
                       {item.contatos.length > 1 && (
                         <div
-                          className="pt-1 text-[11px] font-black uppercase tracking-[0.2em] text-blue-500 cursor-pointer hover:text-blue-700 transition-colors"
+                          className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-500 cursor-pointer hover:text-blue-700 transition-colors pt-0.5"
                           onClick={() => setViewingParceiro(item)}
                         >
                           +{item.contatos.length - 1} contato(s)
@@ -589,6 +602,24 @@ export default function ParceriasPage() {
             }
           },
           {
+            key: 'status',
+            title: 'Status',
+            align: 'center',
+            render: (value: unknown) => {
+              const status = String(value) as 'ativo' | 'inativo';
+              return (
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-[0.15em] ${
+                  status === 'ativo'
+                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                    : 'bg-red-50 text-red-500 border border-red-200'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${status === 'ativo' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  {status === 'ativo' ? 'Ativo' : 'Inativo'}
+                </span>
+              );
+            }
+          },
+          {
             key: 'acoes',
             title: 'Ações',
             align: 'center',
@@ -601,14 +632,32 @@ export default function ParceriasPage() {
                 >
                   <Eye size={18} />
                 </button>
-                <button 
+                <button
                   onClick={() => handleOpenModal(item)}
                   className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
                   title="Editar Parceiro"
                 >
                   <Edit2 size={18} />
                 </button>
-                <button 
+                <button
+                  onClick={async () => {
+                    try {
+                      await toggleParceiro(item.id);
+                      toast.success(`Parceiro ${item.status === 'ativo' ? 'inativado' : 'ativado'} com sucesso!`);
+                    } catch {
+                      toast.error('Erro ao alterar status do parceiro.');
+                    }
+                  }}
+                  className={`p-2 rounded-lg transition-all cursor-pointer ${
+                    item.status === 'ativo'
+                      ? 'text-slate-400 hover:text-orange-500 hover:bg-orange-50'
+                      : 'text-slate-400 hover:text-emerald-500 hover:bg-emerald-50'
+                  }`}
+                  title={item.status === 'ativo' ? 'Inativar Parceiro' : 'Ativar Parceiro'}
+                >
+                  <Power size={18} />
+                </button>
+                <button
                   onClick={() => handleDelete(item.id)}
                   className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
                   title="Excluir Parceiro"

@@ -22,7 +22,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: 'Token não informado.' }, { status: 400 });
     }
 
-    const { data: confirmation, error: findError } = await supabaseAdmin
+    const { data: confirmation, error: findError } = await getAdmin()
       .from('os_passenger_confirmations')
       .select('id, os_id, aceito, aceito_em')
       .eq('token', token)
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
 
     const now = new Date().toISOString();
 
-    const { error: updateError } = await supabaseAdmin
+    const { error: updateError } = await getAdmin()
       .from('os_passenger_confirmations')
       .update({ aceito: true, aceito_em: now })
       .eq('id', confirmation.id);
@@ -53,7 +53,7 @@ export async function GET(request: Request) {
       );
     }
 
-    const { error: osError } = await supabaseAdmin
+    const { error: osError } = await getAdmin()
       .from('ordens_servico')
       .update({ status_operacional: 'Aguardando' })
       .eq('id', confirmation.os_id);

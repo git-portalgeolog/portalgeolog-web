@@ -26,19 +26,25 @@ import {
   X,
   Edit2,
   CheckCircle,
+  DollarSign,
+  Percent,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import GeologSearchableSelect from "@/components/ui/GeologSearchableSelect";
 import StandardModal from "@/components/StandardModal";
 import { AvatarUploader } from "@/components/ui/AvatarUploader";
+import { useData } from "@/context/DataContext";
 
-type TabType = "acesso" | "perfil" | "historico";
+type TabType = "acesso" | "perfil" | "historico" | "financeiro";
 
 export default function ConfigPage() {
   const { user, profile, logout } = useAuth();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
+  const { impostoPercentual, setImpostoPercentual } = useData();
   const [activeTab, setActiveTab] = useState<TabType>("acesso");
   const [users, setUsers] = useState<UserWithAuth[]>([]);
+  const [jurosInput, setJurosInput] = useState(String(impostoPercentual));
+  const [isSavingJuros, setIsSavingJuros] = useState(false);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -239,6 +245,7 @@ export default function ConfigPage() {
     { id: "acesso", label: "Gestão de Acessos", icon: Shield },
     { id: "perfil", label: "Meu Perfil", icon: User },
     { id: "historico", label: "Histórico de Logs", icon: History },
+    { id: "financeiro", label: "Financeiro", icon: DollarSign },
   ];
 
   return (
@@ -698,6 +705,81 @@ export default function ConfigPage() {
                   <div className="pt-4 text-center">
                     <button className="text-blue-600 font-black text-sm hover:underline cursor-pointer">
                       Carregar períodos anteriores...
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "financeiro" && (
+              <div className="max-w-2xl mx-auto">
+                <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 p-10 space-y-10">
+                  <div className="flex items-center gap-4 pb-6 border-b-2 border-slate-50">
+                    <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg">
+                      <Percent size={28} />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-black text-slate-800">
+                        Configurações Financeiras
+                      </h2>
+                      <p className="text-slate-500 font-bold">
+                        Controle global de taxas e deduções das ordens de serviço.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">
+                        Porcentagem de Juros / Dedução (%)
+                      </label>
+                      <div className="relative group">
+                        <Percent
+                          className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors"
+                          size={18}
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.01}
+                          className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-xl font-bold text-base outline-none focus:border-blue-600 transition-colors"
+                          value={jurosInput}
+                          onChange={(e) => setJurosInput(e.target.value)}
+                          placeholder="Ex: 12"
+                        />
+                      </div>
+                      <p className="text-sm font-semibold text-slate-400 ml-1">
+                        Este valor será aplicado automaticamente no cálculo de impostos/deduções da Nova OS.
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        try {
+                          setIsSavingJuros(true);
+                          await setImpostoPercentual(Number(jurosInput));
+                          toast.success("Porcentagem de juros atualizada com sucesso!");
+                        } catch (err: unknown) {
+                          toast.error("Erro ao salvar: " + (err instanceof Error ? err.message : String(err)));
+                        } finally {
+                          setIsSavingJuros(false);
+                        }
+                      }}
+                      disabled={isSavingJuros}
+                      className="w-full py-4 bg-blue-600 text-white font-black rounded-xl shadow-lg hover:bg-blue-700 hover:scale-[1.01] active:scale-[0.98] transition-all text-sm uppercase tracking-widest cursor-pointer disabled:opacity-70 flex justify-center items-center gap-3"
+                    >
+                      {isSavingJuros ? (
+                        <>
+                          <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                          Salvando...
+                        </>
+                      ) : (
+                        <>
+                          <Check size={18} />
+                          Salvar Configuração
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

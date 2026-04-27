@@ -11,3 +11,5 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOi
 NEXT_PUBLIC_WAHA_SESSION = "default"
 WAHA_API_URL = "https://wppconnect.portalgeolog.com.br"
 WAHA_SESSION = "default"
+# Secrets abaixo são gerenciados via: wrangler secret put <KEY>
+# WAHA_API_KEY, SUPABASE_SERVICE_ROLE_KEY, WHATSAPP_HOOK_HMAC_KEY, RESEND_API_KEY

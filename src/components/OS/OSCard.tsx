@@ -39,7 +39,7 @@ export default function OSCard({ os, onClick }: OSCardProps) {
         </span>
       </div>
       
-      <div className="grid grid-cols-2 gap-3 text-sm">
+      <div className="grid grid-cols-[auto_1fr] gap-3 text-sm">
         <div className="flex items-center gap-2 text-slate-600">
           <Calendar size={16} />
           <span>{os.data}</span>
@@ -50,11 +50,11 @@ export default function OSCard({ os, onClick }: OSCardProps) {
         </div>
         <div className="flex items-center gap-2 text-slate-600">
           <User size={16} />
-          <span>{os.motorista}</span>
+          <span className="truncate">{os.motorista}</span>
         </div>
         <div className="flex items-center gap-2 text-slate-600">
           <Building size={16} />
-          <span>{os.centroCustoId || 'N/A'}</span>
+          <span className="truncate">{os.centroCustoId || 'N/A'}</span>
         </div>
       </div>
     </div>

@@ -41,6 +41,8 @@ import {
   Smartphone,
   Bell,
   Send,
+  Filter,
+  FilterX,
 } from 'lucide-react';
 import { useData, type OrderService, type ParceiroServico } from '@/context/DataContext';
 import { fetchOSPage } from '@/lib/supabase/queries';
@@ -179,7 +181,7 @@ const validarPlacaOS = (placa: string): boolean => {
 };
 
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, addParceiro, refreshData, lastOSUpdate } = useData();
+  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, addParceiro, refreshData, lastOSUpdate, impostoPercentual } = useData();
   const supabase = createClient();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -194,6 +196,38 @@ export default function OSOperationalPage() {
   const actionMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const calendarMenuRef = useRef<HTMLDivElement | null>(null);
   const passengerDraftIdRef = useRef(0);
+
+  type AdvancedFilters = {
+    osNumber: string;
+    clienteId: string;
+    centroCustoId: string;
+    solicitante: string;
+    motorista: string;
+    veiculoId: string;
+    passageiro: string;
+    dataInicio: string;
+    dataFim: string;
+    statusOperacional: '' | 'Pendente' | 'Aguardando' | 'Em Rota' | 'Finalizado' | 'Cancelado';
+    statusFinanceiro: '' | 'Pendente' | 'Pago' | 'Faturado';
+  };
+
+  const defaultAdvancedFilters: AdvancedFilters = {
+    osNumber: '',
+    clienteId: '',
+    centroCustoId: '',
+    solicitante: '',
+    motorista: '',
+    veiculoId: '',
+    passageiro: '',
+    dataInicio: '',
+    dataFim: '',
+    statusOperacional: '',
+    statusFinanceiro: '',
+  };
+
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>(defaultAdvancedFilters);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [clientPage, setClientPage] = useState(1);
   const osTable = useServerPaginatedTable(fetchOSPage, 10);
   const osTableRefreshRef = useRef(osTable.refresh);
   
@@ -207,6 +241,11 @@ export default function OSOperationalPage() {
       void osTableRefreshRef.current();
     }
   }, [lastOSUpdate]);
+
+  // Resetar paginação cliente quando filtros ou busca mudam
+  useEffect(() => {
+    setClientPage(1);
+  }, [advancedFilters, osTable.searchTerm]);
 
   // Estados para cadastros rápidos
   const [quickAddModal, setQuickAddModal] = useState<'cliente' | 'motorista' | 'solicitante' | 'centroCusto' | null>(null);
@@ -268,6 +307,19 @@ export default function OSOperationalPage() {
       else setWppStatus('close');
     };
 
+    // Leitura inicial imediata do banco (estado já sincronizado pelo webhook)
+    const loadInitial = async () => {
+      try {
+        const { data } = await supabase
+          .from('whatsapp_status')
+          .select('state')
+          .eq('instance_name', whatsappSessionName)
+          .maybeSingle();
+        if (data?.state) applyState(data.state);
+      } catch { /* fallback para poll/realtime */ }
+    };
+    loadInitial();
+
     // Polling leve a cada 30s — checa WAHA e sincroniza tabela Supabase
     const pollStatus = async () => {
       try {
@@ -288,7 +340,7 @@ export default function OSOperationalPage() {
       .channel('whatsapp-status')
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'whatsapp_status', filter: `instance_name=eq.${whatsappSessionName}` },
+        { event: '*', schema: 'public', table: 'whatsapp_status', filter: `instance_name=eq.${whatsappSessionName}` },
         (payload) => applyState((payload.new as { state: string }).state)
       )
       .subscribe();
@@ -641,9 +693,9 @@ export default function OSOperationalPage() {
     if (!targetOS) return;
 
     const confirmed = await confirm({
-      title: 'Excluir OS',
-      message: `Tem certeza que deseja excluir a OS "${targetOS.protocolo || targetOS.os || 'sem protocolo'}"? Esta ação não pode ser desfeita.`,
-      confirmText: 'Sim, excluir',
+      title: 'Arquivar OS',
+      message: `Tem certeza que deseja arquivar a OS "${targetOS.protocolo || targetOS.os || 'sem protocolo'}"? Ela não aparecerá mais na lista, mas poderá ser recuperada posteriormente.`,
+      confirmText: 'Sim, arquivar',
       cancelText: 'Cancelar',
       type: 'danger',
     });
@@ -654,10 +706,10 @@ export default function OSOperationalPage() {
       await deleteOS(osId);
       void osTable.refresh();
       setOpenActionMenuId(null);
-      toast.success('OS excluída com sucesso!');
+      toast.success('OS arquivada com sucesso!');
     } catch (error) {
-      console.error('Erro ao excluir OS:', error);
-      toast.error('Erro ao excluir OS.');
+      console.error('Erro ao arquivar OS:', error);
+      toast.error('Erro ao arquivar OS.');
     }
   };
 
@@ -1543,7 +1595,7 @@ export default function OSOperationalPage() {
     }).format(value);
   };
 
-  const currentImposto = formData.valorBruto * 0.15;
+  const currentImposto = formData.valorBruto * (impostoPercentual / 100);
   const currentLucro = formData.valorBruto - currentImposto - formData.custo;
 
   const availableSolicitantes = useMemo(() => {
@@ -1602,14 +1654,43 @@ export default function OSOperationalPage() {
   const filteredData = useMemo(() => {
     return osList.filter(item => {
       const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || '';
-      const searchValue = osTable.searchTerm.toLowerCase();
-      const matchSearch = searchValue === '' || 
-        item.os.includes(osTable.searchTerm) || 
+      const searchValue = osTable.searchTerm.toLowerCase().trim();
+      const matchSearch = searchValue === '' ||
+        item.os.toLowerCase().includes(searchValue) ||
+        item.protocolo.toLowerCase().includes(searchValue) ||
         clienteNome.toLowerCase().includes(searchValue) ||
-        item.trecho.toLowerCase().includes(searchValue);
-      return matchSearch;
+        item.trecho.toLowerCase().includes(searchValue) ||
+        item.motorista.toLowerCase().includes(searchValue);
+      if (!matchSearch) return false;
+
+      if (advancedFilters.osNumber && !item.os.toLowerCase().includes(advancedFilters.osNumber.toLowerCase())) return false;
+      if (advancedFilters.clienteId && item.clienteId !== advancedFilters.clienteId) return false;
+      if (advancedFilters.centroCustoId && item.centroCustoId !== advancedFilters.centroCustoId) return false;
+      if (advancedFilters.solicitante && !item.solicitante.toLowerCase().includes(advancedFilters.solicitante.toLowerCase())) return false;
+      if (advancedFilters.motorista && !item.motorista.toLowerCase().includes(advancedFilters.motorista.toLowerCase())) return false;
+      if (advancedFilters.veiculoId && item.veiculoId !== advancedFilters.veiculoId) return false;
+      if (advancedFilters.passageiro) {
+        const passageirosOS = item.rota?.waypoints?.flatMap(w => w.passengers.map(p => p.nome.toLowerCase())) || [];
+        if (!passageirosOS.some(p => p.includes(advancedFilters.passageiro.toLowerCase()))) return false;
+      }
+      if (advancedFilters.dataInicio && item.data < advancedFilters.dataInicio) return false;
+      if (advancedFilters.dataFim && item.data > advancedFilters.dataFim) return false;
+      if (advancedFilters.statusOperacional && item.status.operacional !== advancedFilters.statusOperacional) return false;
+      if (advancedFilters.statusFinanceiro && item.status.financeiro !== advancedFilters.statusFinanceiro) return false;
+
+      return true;
     });
-  }, [osList, clientes, osTable.searchTerm]);
+  }, [osList, clientes, osTable.searchTerm, advancedFilters]);
+
+  const hasActiveAdvancedFilters = useMemo(() => {
+    return Object.values(advancedFilters).some(v => v !== '');
+  }, [advancedFilters]);
+
+  const clientPageSize = 10;
+  const clientPaginatedItems = useMemo(() => {
+    const start = (clientPage - 1) * clientPageSize;
+    return filteredData.slice(start, start + clientPageSize);
+  }, [filteredData, clientPage]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -1755,9 +1836,9 @@ export default function OSOperationalPage() {
       </div>
 
       {/* Header com Toggle e Botão Nova OS */}
-      <div className={`flex flex-col md:flex-row gap-3 items-stretch md:items-center ${viewMode === 'calendar' ? 'md:justify-end' : ''}`}>
-        {/* Campo de busca (apenas em modo tabela) */}
-        {viewMode === 'table' && (
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
+          {/* Campo de busca (sempre visível) */}
           <div className="relative group flex-1">
             <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8"></circle>
@@ -1771,11 +1852,28 @@ export default function OSOperationalPage() {
               onChange={(e) => osTable.setSearchTerm(e.target.value)}
             />
           </div>
-        )}
 
-        {/* Status do WhatsApp WAHA */}
-        <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm shrink-0">
-          <div className="flex items-center gap-2.5 px-3 py-1.5 border-r border-slate-100">
+          {/* Botão Filtros Avançados */}
+          <button
+            onClick={() => setShowAdvancedFilters(prev => !prev)}
+            className={`flex items-center gap-2 px-4 py-3.5 rounded-2xl font-bold text-sm uppercase tracking-widest transition-all shadow-sm border cursor-pointer shrink-0 ${
+              hasActiveAdvancedFilters || showAdvancedFilters
+                ? 'bg-blue-50 border-blue-200 text-blue-700'
+                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {hasActiveAdvancedFilters ? <Filter size={16} /> : <FilterX size={16} />}
+            Filtros
+            {hasActiveAdvancedFilters && (
+              <span className="ml-1 inline-flex items-center justify-center w-5 h-5 bg-blue-600 text-white text-[10px] font-black rounded-full">
+                {Object.values(advancedFilters).filter(v => v !== '').length}
+              </span>
+            )}
+          </button>
+
+          {/* Status do WhatsApp WAHA */}
+          <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm shrink-0">
+          <div className="flex items-center gap-2.5 px-3 py-1.5">
             <div className={`w-2.5 h-2.5 rounded-full ${
               wppStatus === 'open' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 
               wppStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : 
@@ -1830,14 +1928,170 @@ export default function OSOperationalPage() {
           Nova OS
         </button>
       </div>
+      </div>
+
+      {/* Painel de Filtros Avançados */}
+      {showAdvancedFilters && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 md:p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-black uppercase tracking-widest text-slate-600">Filtros Avançados</h3>
+            {hasActiveAdvancedFilters && (
+              <button
+                onClick={() => setAdvancedFilters(defaultAdvancedFilters)}
+                className="text-xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+              >
+                Limpar filtros
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {/* OS */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">Número OS</label>
+              <input
+                type="text"
+                value={advancedFilters.osNumber}
+                onChange={(e) => setAdvancedFilters(prev => ({ ...prev, osNumber: e.target.value }))}
+                placeholder="Ex: 00123"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
+              />
+            </div>
+            {/* Empresa */}
+            <GeologSearchableSelect
+              label="Empresa"
+              options={[{ id: '', nome: 'Todas' }, ...clientes.map(c => ({ id: c.id, nome: c.nome }))]}
+              value={advancedFilters.clienteId}
+              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, clienteId: id, centroCustoId: '' }))}
+              compact
+              disableSearch={false}
+            />
+            {/* Centro de Custo */}
+            <GeologSearchableSelect
+              label="Centro de Custo"
+              options={[
+                { id: '', nome: 'Todos' },
+                ...(advancedFilters.clienteId ? getCentrosCustoByCliente(advancedFilters.clienteId) : []).map(cc => ({ id: cc.id, nome: cc.nome }))
+              ]}
+              value={advancedFilters.centroCustoId}
+              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, centroCustoId: id }))}
+              disabled={!advancedFilters.clienteId}
+              compact
+              disableSearch={false}
+            />
+            {/* Solicitante */}
+            <GeologSearchableSelect
+              label="Solicitante"
+              options={[
+                { id: '', nome: 'Todos' },
+                ...solicitantes
+                  .filter(s => !advancedFilters.clienteId || s.clienteId === advancedFilters.clienteId)
+                  .map(s => ({ id: s.nome, nome: s.nome }))
+              ]}
+              value={advancedFilters.solicitante}
+              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, solicitante: id }))}
+              compact
+              disableSearch={false}
+            />
+            {/* Motorista */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">Motorista</label>
+              <input
+                type="text"
+                value={advancedFilters.motorista}
+                onChange={(e) => setAdvancedFilters(prev => ({ ...prev, motorista: e.target.value }))}
+                placeholder="Nome do motorista..."
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
+              />
+            </div>
+            {/* Veículo */}
+            <GeologSearchableSelect
+              label="Veículo"
+              options={[
+                { id: '', nome: 'Todos' },
+                ...vehicles.map(v => ({ id: v.id, nome: `${v.marca} ${v.modelo} — ${v.placa}` }))
+              ]}
+              value={advancedFilters.veiculoId}
+              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, veiculoId: id }))}
+              compact
+              disableSearch={false}
+            />
+            {/* Passageiro */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">Passageiro</label>
+              <input
+                type="text"
+                value={advancedFilters.passageiro}
+                onChange={(e) => setAdvancedFilters(prev => ({ ...prev, passageiro: e.target.value }))}
+                placeholder="Nome do passageiro..."
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
+              />
+            </div>
+            {/* Data Início */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">Data Início</label>
+              <input
+                type="date"
+                value={advancedFilters.dataInicio}
+                onChange={(e) => setAdvancedFilters(prev => ({ ...prev, dataInicio: e.target.value }))}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
+              />
+            </div>
+            {/* Data Fim */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">Data Fim</label>
+              <input
+                type="date"
+                value={advancedFilters.dataFim}
+                onChange={(e) => setAdvancedFilters(prev => ({ ...prev, dataFim: e.target.value }))}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
+              />
+            </div>
+            {/* Status Operacional */}
+            <GeologSearchableSelect
+              label="Status Operacional"
+              options={[
+                { id: '', nome: 'Todos' },
+                { id: 'Pendente', nome: 'Pendente' },
+                { id: 'Aguardando', nome: 'Aguardando' },
+                { id: 'Em Rota', nome: 'Em Rota' },
+                { id: 'Finalizado', nome: 'Finalizado' },
+                { id: 'Cancelado', nome: 'Cancelado' },
+              ]}
+              value={advancedFilters.statusOperacional}
+              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, statusOperacional: id as AdvancedFilters['statusOperacional'] }))}
+              compact
+              disableSearch={false}
+            />
+            {/* Status Financeiro */}
+            <GeologSearchableSelect
+              label="Status Financeiro"
+              options={[
+                { id: '', nome: 'Todos' },
+                { id: 'Pendente', nome: 'Pendente' },
+                { id: 'Pago', nome: 'Pago' },
+                { id: 'Faturado', nome: 'Faturado' },
+              ]}
+              value={advancedFilters.statusFinanceiro}
+              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, statusFinanceiro: id as AdvancedFilters['statusFinanceiro'] }))}
+              compact
+              disableSearch={false}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Conteúdo: Tabela ou Calendário */}
       {viewMode === 'table' ? (
         <DataTable
-          data={osTable.items}
-          loading={osTable.loading}
+          data={hasActiveAdvancedFilters ? clientPaginatedItems : osTable.items}
+          loading={osTable.loading && !hasActiveAdvancedFilters}
           disableClientSearch
-          pagination={{
+          pagination={hasActiveAdvancedFilters ? {
+            page: clientPage,
+            pageSize: clientPageSize,
+            totalItems: filteredData.length,
+            onPageChange: setClientPage,
+          } : {
             page: osTable.page,
             pageSize: osTable.pageSize,
             totalItems: osTable.totalCount,
@@ -2512,7 +2766,7 @@ export default function OSOperationalPage() {
                               <div className="flex items-center gap-2">
                                  <span className="text-xs font-bold uppercase opacity-80 tracking-[0.2em]">Lucro Líquido Estimado</span>
                                  <div className="px-3 py-1.5 bg-white/20 rounded-full backdrop-blur-md">
-                                    <span className="text-[12px] font-black">-15% taxa</span>
+                                    <span className="text-[12px] font-black">-{impostoPercentual}% taxa</span>
                                  </div>
                               </div>
                               <p className="text-4xl font-black tracking-tighter tabular-nums leading-none">{formatCurrency(currentLucro)}</p>
@@ -2698,51 +2952,98 @@ export default function OSOperationalPage() {
           bodyClassName="p-6 md:p-10 space-y-8"
         >
           <div className="space-y-8">
-            {/* Barra de Resumo Compacta */}
-            <div className="flex flex-wrap items-center gap-y-3 gap-x-1 rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3">
-              <div className="flex items-center gap-2 px-3">
-                <Building2 size={14} className="text-slate-400 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Cliente</p>
-                  <p className="text-base font-bold text-slate-800 line-clamp-1">{clientes.find(c => c.id === viewingOS.clienteId)?.nome || 'N/A'}</p>
+            {/* Barra de Resumo: Dados + Status/Horário separados */}
+            <div className="flex flex-col md:flex-row gap-3">
+              {/* Coluna principal — dados da OS */}
+              <div className="flex-1 flex flex-wrap items-center gap-y-3 gap-x-1 rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3">
+                <div className="flex items-center gap-2 px-3">
+                  <Building2 size={14} className="text-slate-400 shrink-0" />
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Cliente</p>
+                    <p className="text-base font-bold text-slate-800 line-clamp-1">{clientes.find(c => c.id === viewingOS.clienteId)?.nome || 'N/A'}</p>
+                  </div>
+                </div>
+                <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block" />
+
+                <div className="flex items-center gap-2 px-3">
+                  <User size={14} className="text-slate-400 shrink-0" />
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Solicitante</p>
+                    <p className="text-base font-bold text-slate-800 line-clamp-1">{viewingOS.solicitante || 'N/A'}</p>
+                  </div>
+                </div>
+                <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block" />
+
+                <div className="flex items-center gap-2 px-3">
+                  <Car size={14} className="text-slate-400 shrink-0" />
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Motorista</p>
+                    <p className="text-base font-bold text-slate-800 line-clamp-1">{viewingOS.motorista || 'Não definido'}</p>
+                  </div>
+                </div>
+                <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block" />
+
+                <div className="flex items-center gap-2 px-3">
+                  <Building size={14} className="text-slate-400 shrink-0" />
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">C. Custo</p>
+                    <p className="text-base font-bold text-slate-800 line-clamp-1">
+                      {clientes.find(c => c.id === viewingOS.clienteId)?.centrosCusto.find(cc => cc.id === viewingOS.centroCustoId)?.nome || 'Padrão'}
+                    </p>
+                  </div>
                 </div>
               </div>
-              <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
 
-              <div className="flex items-center gap-2 px-3">
-                <User size={14} className="text-slate-400 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Solicitante</p>
-                  <p className="text-base font-bold text-slate-800 line-clamp-1">{viewingOS.solicitante || 'N/A'}</p>
+              {/* Coluna lateral — Status + Horário em cards */}
+              <div className="flex items-stretch gap-3">
+                {/* Card de Status */}
+                <div className={`flex items-center gap-3 px-5 py-3 rounded-2xl border shadow-sm ${
+                  viewingOS.status.operacional === 'Pendente' ? 'bg-yellow-50 border-yellow-200' :
+                  viewingOS.status.operacional === 'Aguardando' ? 'bg-indigo-50 border-indigo-200' :
+                  viewingOS.status.operacional === 'Em Rota' ? 'bg-sky-50 border-sky-200' :
+                  viewingOS.status.operacional === 'Finalizado' ? 'bg-emerald-50 border-emerald-200' :
+                  viewingOS.status.operacional === 'Cancelado' ? 'bg-rose-50 border-rose-200' :
+                  'bg-slate-50 border-slate-200'
+                }`}>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                    viewingOS.status.operacional === 'Pendente' ? 'bg-yellow-100' :
+                    viewingOS.status.operacional === 'Aguardando' ? 'bg-indigo-100' :
+                    viewingOS.status.operacional === 'Em Rota' ? 'bg-sky-100' :
+                    viewingOS.status.operacional === 'Finalizado' ? 'bg-emerald-100' :
+                    viewingOS.status.operacional === 'Cancelado' ? 'bg-rose-100' :
+                    'bg-slate-100'
+                  }`}>
+                    <CheckCircle2 size={18} className={
+                      viewingOS.status.operacional === 'Pendente' ? 'text-yellow-600' :
+                      viewingOS.status.operacional === 'Aguardando' ? 'text-indigo-600' :
+                      viewingOS.status.operacional === 'Em Rota' ? 'text-sky-600' :
+                      viewingOS.status.operacional === 'Finalizado' ? 'text-emerald-600' :
+                      viewingOS.status.operacional === 'Cancelado' ? 'text-rose-600' :
+                      'text-slate-600'
+                    } />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
+                    <p className={`text-base font-black ${
+                      viewingOS.status.operacional === 'Pendente' ? 'text-yellow-700' :
+                      viewingOS.status.operacional === 'Aguardando' ? 'text-indigo-700' :
+                      viewingOS.status.operacional === 'Em Rota' ? 'text-sky-700' :
+                      viewingOS.status.operacional === 'Finalizado' ? 'text-emerald-700' :
+                      viewingOS.status.operacional === 'Cancelado' ? 'text-rose-700' :
+                      'text-slate-700'
+                    }`}>{getStatusConfig(viewingOS.status.operacional).label}</p>
+                  </div>
                 </div>
-              </div>
-              <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
 
-              <div className="flex items-center gap-2 px-3">
-                <Clock size={14} className="text-slate-400 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
-                  <p className="text-base font-bold text-slate-800">{getStatusConfig(viewingOS.status.operacional).label}</p>
-                </div>
-              </div>
-              <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
-
-              <div className="flex items-center gap-2 px-3">
-                <Car size={14} className="text-slate-400 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Motorista</p>
-                  <p className="text-base font-bold text-slate-800 line-clamp-1">{viewingOS.motorista || 'Não definido'}</p>
-                </div>
-              </div>
-              <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block" />
-
-              <div className="flex items-center gap-2 px-3">
-                <Building size={14} className="text-slate-400 shrink-0" />
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">C. Custo</p>
-                  <p className="text-base font-bold text-slate-800 line-clamp-1">
-                    {clientes.find(c => c.id === viewingOS.clienteId)?.centrosCusto.find(cc => cc.id === viewingOS.centroCustoId)?.nome || 'Padrão'}
-                  </p>
+                {/* Card de Horário */}
+                <div className="flex items-center gap-3 px-5 py-3 rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
+                  <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+                    <Clock size={18} className="text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Horário</p>
+                    <p className="text-base font-black text-slate-800">{viewingOS.hora ? viewingOS.hora.slice(0, 5) : '--:--'}</p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2765,9 +3066,10 @@ export default function OSOperationalPage() {
                   {/* Linha de fundo da trilha */}
                   <div className="absolute top-[26px] left-[60px] right-[60px] h-[3px] bg-slate-100 rounded-full -z-0">
                     <div 
-                      className="h-full bg-emerald-500 rounded-full transition-all duration-700 ease-out"
+                      className="h-full rounded-full transition-all duration-700 ease-out shadow-[0_0_10px_rgba(81,222,255,0.3)]"
                       style={{ 
-                        width: driverFlow.finished ? '100%' : driverFlow.started ? '66%' : driverFlow.accepted ? '33%' : '0%' 
+                        width: driverFlow.finished ? '100%' : driverFlow.started ? '66%' : driverFlow.accepted ? '33%' : driverFlow.received ? '0%' : '0%',
+                        background: 'linear-gradient(to right, rgb(81, 222, 255), rgb(26, 238, 172), #2563eb, #10b981)'
                       }}
                     ></div>
                   </div>
@@ -2780,7 +3082,7 @@ export default function OSOperationalPage() {
                       label: 'Mensagem', 
                       sublabel: 'Enviada', 
                       active: driverFlow.received,
-                      color: 'emerald'
+                      color: 'blue-light'
                     },
                     { 
                       id: 'accepted', 
@@ -2788,7 +3090,7 @@ export default function OSOperationalPage() {
                       label: 'Aceite', 
                       sublabel: driverFlow.accepted ? 'Confirmado' : 'Aguardando', 
                       active: driverFlow.accepted,
-                      color: 'emerald'
+                      color: 'emerald-light'
                     },
                     { 
                       id: 'started', 
@@ -2824,15 +3126,26 @@ export default function OSOperationalPage() {
                       }}
                       disabled={notifyLoadingKey === 'driver-whatsapp'}
                     >
-                      <div className={`
-                        w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-lg
-                        ${step.active 
-                          ? step.color === 'emerald' ? 'bg-emerald-500 text-white shadow-emerald-200/50' : 'bg-blue-600 text-white shadow-blue-200/50'
-                          : 'bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300'
-                        }
-                        group-hover:scale-110 group-active:scale-95
-                        ${notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? 'animate-pulse' : ''}
-                      `}>
+                      <div 
+                        className={`
+                          w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-lg
+                          ${!step.active ? 'bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300' : 'text-white'}
+                          group-hover:scale-110 group-active:scale-95
+                          ${notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? 'animate-pulse' : ''}
+                        `}
+                        style={step.active ? {
+                          backgroundColor: step.color === 'blue-light' ? 'rgb(81, 222, 255)' 
+                            : step.color === 'emerald-light' ? 'rgb(26, 238, 172)'
+                            : step.color === 'blue' ? '#2563eb'
+                            : '#10b981',
+                          boxShadow: `0 10px 15px -3px ${
+                            step.color === 'blue-light' ? 'rgba(81, 222, 255, 0.4)' 
+                            : step.color === 'emerald-light' ? 'rgba(26, 238, 172, 0.4)'
+                            : step.color === 'blue' ? 'rgba(37, 99, 235, 0.4)'
+                            : 'rgba(16, 185, 129, 0.4)'
+                          }`
+                        } : {}}
+                      >
                         {notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? (
                           <Loader2 size={24} className="animate-spin" />
                         ) : step.icon}
@@ -2848,7 +3161,15 @@ export default function OSOperationalPage() {
                       </div>
 
                       {step.active && (
-                        <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${step.color === 'emerald' ? 'bg-emerald-500' : 'bg-blue-600'} flex items-center justify-center`}>
+                        <div 
+                          className="absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center"
+                          style={{
+                            backgroundColor: step.color === 'blue-light' ? 'rgb(81, 222, 255)' 
+                              : step.color === 'emerald-light' ? 'rgb(26, 238, 172)'
+                              : step.color === 'blue' ? '#2563eb'
+                              : '#10b981'
+                          }}
+                        >
                           <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></div>
                         </div>
                       )}

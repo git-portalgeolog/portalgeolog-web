@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const WAHA_API_URL = process.env.WAHA_API_URL;
-const WAHA_API_KEY = process.env.WAHA_API_KEY;
-const WAHA_SESSION = process.env.WAHA_SESSION || 'default';
 const WAHA_STATUS_TIMEOUT_MS = 8000;
 const WAHA_SEND_TIMEOUT_MS = 15000;
+
+function getWahaConfig() {
+  return {
+    url: process.env.WAHA_API_URL,
+    key: process.env.WAHA_API_KEY,
+    session: process.env.WAHA_SESSION || 'default',
+  };
+}
 
 interface RateLimitEntry {
   count: number;
@@ -114,7 +119,9 @@ export function normalizeWahaConnectionState(
   return 'close';
 }
 
-export async function fetchWahaSessionState(sessionName = WAHA_SESSION): Promise<WahaSessionSnapshot> {
+export async function fetchWahaSessionState(sessionName?: string): Promise<WahaSessionSnapshot> {
+  const { url: WAHA_API_URL, key: WAHA_API_KEY, session: WAHA_SESSION } = getWahaConfig();
+  const resolvedSession = sessionName ?? WAHA_SESSION;
   if (!WAHA_API_URL || !WAHA_API_KEY) {
     throw new Error('WAHA não configurada (faltam variáveis de ambiente)');
   }
@@ -147,13 +154,13 @@ export async function fetchWahaSessionState(sessionName = WAHA_SESSION): Promise
   }>;
 
   const session =
-    sessions.find((item) => item?.name === sessionName) ??
+    sessions.find((item) => item?.name === resolvedSession) ??
     sessions.find((item) => item?.name === 'default') ??
     sessions[0];
 
   if (!session) {
     return {
-      sessionName,
+      sessionName: resolvedSession,
       state: 'close',
       rawStatus: null,
       ownerJid: null,
@@ -166,7 +173,7 @@ export async function fetchWahaSessionState(sessionName = WAHA_SESSION): Promise
   const meId = session.me?.id ?? null;
 
   return {
-    sessionName: session.name ?? sessionName,
+    sessionName: session.name ?? resolvedSession,
     state: normalizeWahaConnectionState(rawStatus, rawEngineState),
     rawStatus,
     ownerJid: meId,
@@ -178,6 +185,7 @@ export async function sendWhatsAppMessage(
   phone: string,
   message: string
 ): Promise<unknown> {
+  const { url: WAHA_API_URL, key: WAHA_API_KEY, session: WAHA_SESSION } = getWahaConfig();
   if (!WAHA_API_URL || !WAHA_API_KEY) {
     throw new Error('WAHA não configurada (faltam variáveis de ambiente)');
   }
@@ -232,12 +240,14 @@ export async function sendWhatsAppMessage(
   return data;
 }
 
-export async function startWahaSession(sessionName = WAHA_SESSION): Promise<WahaSessionSnapshot> {
+export async function startWahaSession(sessionName?: string): Promise<WahaSessionSnapshot> {
+  const { url: WAHA_API_URL, key: WAHA_API_KEY, session: WAHA_SESSION } = getWahaConfig();
+  const resolvedSession = sessionName ?? WAHA_SESSION;
   if (!WAHA_API_URL || !WAHA_API_KEY) {
     throw new Error('WAHA não configurada (faltam variáveis de ambiente)');
   }
 
-  const response = await fetch(`${WAHA_API_URL}/api/sessions/${encodeURIComponent(sessionName)}/start`, {
+  const response = await fetch(`${WAHA_API_URL}/api/sessions/${encodeURIComponent(resolvedSession)}/start`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -253,7 +263,7 @@ export async function startWahaSession(sessionName = WAHA_SESSION): Promise<Waha
     throw new Error(`Não foi possível iniciar a sessão WAHA (${response.status}): ${text || 'sem detalhes'}`);
   }
 
-  return fetchWahaSessionState(sessionName);
+  return fetchWahaSessionState(resolvedSession);
 }
 
 export async function validateAuth(request: Request): Promise<{ userId: string } | null> {

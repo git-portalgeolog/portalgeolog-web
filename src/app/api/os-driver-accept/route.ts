@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     }
 
     // Buscar a OS
-    const { data: os, error: findError } = await supabaseAdmin
+    const { data: os, error: findError } = await getAdmin()
       .from('ordens_servico')
       .select('id, status_operacional, motorista')
       .eq('id', osId)
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
     }
 
     // Atualizar OS: motorista aceitou, muda status de Pendente para Aguardando
-    const { error: updateError } = await supabaseAdmin
+    const { error: updateError } = await getAdmin()
       .from('ordens_servico')
       .update({
         status_operacional: 'Aguardando',
@@ -74,7 +74,7 @@ export async function GET(request: Request) {
       if (os.motorista) {
         const motoristaNormalized = normalizeName(os.motorista);
 
-        const { data: driverCandidates, error: driverError } = await supabaseAdmin
+        const { data: driverCandidates, error: driverError } = await getAdmin()
           .from('drivers')
           .select('name, phone')
           .ilike('name', `%${escapeLikePattern(os.motorista.trim())}%`)

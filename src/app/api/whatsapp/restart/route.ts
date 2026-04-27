@@ -10,10 +10,6 @@ import {
 
 export const runtime = 'edge';
 
-const WAHA_API_URL = process.env.WAHA_API_URL;
-const WAHA_API_KEY = process.env.WAHA_API_KEY;
-const WAHA_SESSION = process.env.WAHA_SESSION || 'default';
-
 export async function POST(request: Request) {
   try {
     if (!checkRateLimit(request, 5, 60)) {
@@ -24,6 +20,10 @@ export async function POST(request: Request) {
     if (!auth) {
       return unauthorizedResponse(request);
     }
+
+    const WAHA_API_URL = process.env.WAHA_API_URL;
+    const WAHA_API_KEY = process.env.WAHA_API_KEY;
+    const WAHA_SESSION = process.env.WAHA_SESSION || 'default';
 
     if (!WAHA_API_URL || !WAHA_API_KEY) {
       return NextResponse.json(

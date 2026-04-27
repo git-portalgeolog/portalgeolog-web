@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     let token: string | undefined;
 
     if (osId && passageiroId) {
-      const { data: existing, error: existingError } = await supabaseAdmin
+      const { data: existing, error: existingError } = await getAdmin()
         .from('os_passenger_confirmations')
         .select('id, token')
         .eq('os_id', osId)
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       if (existing) {
         token = existing.token;
       } else {
-        const { data: inserted, error: insertError } = await supabaseAdmin
+        const { data: inserted, error: insertError } = await getAdmin()
           .from('os_passenger_confirmations')
           .insert({ os_id: osId, passageiro_id: passageiroId })
           .select('token')

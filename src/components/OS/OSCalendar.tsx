@@ -36,37 +36,38 @@ interface OSCalendarProps {
   onEventClick: (osId: string, position?: { x: number; y: number }) => void;
 }
 
-// Cores por status
-const statusColors: Record<string, { bg: string; border: string; text: string; dot: string }> = {
+// Cores por status — backgrounds mais saturados para legibilidade no calendário
+const statusColors: Record<string, { bg: string; border: string; text: string; dot: string; clockColor?: string }> = {
   'Pendente': {
-    bg: '#f8fafc',
-    border: '#94a3b8',
-    text: '#475569',
-    dot: '#64748b'
+    bg: '#f1f5f9',
+    border: '#64748b',
+    text: '#1e293b',
+    dot: '#cbd5e1',
+    clockColor: '#64748b'
   },
   'Aguardando': {
-    bg: '#eef2ff',
-    border: '#818cf8',
-    text: '#3730a3',
-    dot: '#6366f1'
+    bg: '#e0e7ff',
+    border: '#4f46e5',
+    text: '#312e81',
+    dot: '#4338ca'
   },
   'Em Rota': {
-    bg: '#eff6ff',
-    border: '#60a5fa',
-    text: '#1e40af',
-    dot: '#3b82f6'
+    bg: '#e0f6ff',
+    border: '#7dd3fc',
+    text: '#0c4a6e',
+    dot: '#38bdf8'
   },
   'Finalizado': {
-    bg: '#ecfdf5',
-    border: '#34d399',
-    text: '#065f46',
-    dot: '#10b981'
+    bg: '#d1fae5',
+    border: '#059669',
+    text: '#064e3b',
+    dot: '#047857'
   },
   'Cancelado': {
-    bg: '#fff1f2',
-    border: '#fb7185',
-    text: '#9f1239',
-    dot: '#f43f5e'
+    bg: '#ffe4e6',
+    border: '#e11d48',
+    text: '#881337',
+    dot: '#be123c'
   }
 };
 
@@ -85,16 +86,16 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
   const trajeto = os.trecho || '';
 
   return (
-    <div 
+    <div
       className="fc-event-custom group transition-all duration-200 hover:shadow-md"
       style={{
         backgroundColor: colors.bg,
         borderLeft: `4px solid ${colors.dot}`,
-        padding: '5px 8px',
-        borderRadius: '10px',
-        fontSize: '10px',
-        lineHeight: '1.3',
-        color: '#334155',
+        padding: '5px 20px',
+        borderRadius: '12px 8px 8px 12px',
+        fontSize: '11px',
+        lineHeight: '1.2',
+        color: colors.text,
         cursor: 'pointer',
         height: '100%',
         display: 'flex',
@@ -102,17 +103,16 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
         justifyContent: 'center',
         gap: '2px',
         overflow: 'hidden',
-        boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
-        border: `1px solid ${colors.dot}20`
+        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
       }}
     >
       {/* Linha 1: Cliente */}
-      <div style={{ 
-        fontWeight: 900, 
-        textTransform: 'uppercase', 
-        color: '#0f172a', 
-        whiteSpace: 'nowrap', 
-        overflow: 'hidden', 
+      <div style={{
+        fontWeight: 800,
+        textTransform: 'uppercase',
+        color: '#0f172a',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
         textOverflow: 'ellipsis',
         fontSize: '11px',
         letterSpacing: '0.01em'
@@ -120,82 +120,76 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
         {clienteNome}
       </div>
 
-      {/* Linha 2: Solicitante (No lugar dos passageiros) */}
-      <div style={{ 
-        color: '#64748b', 
-        fontWeight: 700, 
-        whiteSpace: 'nowrap', 
-        overflow: 'hidden', 
+      {/* Linha 2: Solicitante */}
+      <div style={{
+        color: '#475569',
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
         textOverflow: 'ellipsis',
-        fontSize: '10px',
+        fontSize: '9.5px',
         display: 'flex',
         alignItems: 'center',
         gap: '4px'
       }}>
-        <div style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#94a3b8' }} />
+        <div style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: colors.dot }} />
         {os.solicitante.toUpperCase()}
       </div>
 
-      {/* Linha 3: Trajeto (Endereço) - Font weight menor */}
+      {/* Linha 3: Trajeto */}
       {trajeto && (
-        <div style={{ 
-          fontWeight: 500, 
-          textTransform: 'uppercase', 
-          color: '#64748b', 
-          whiteSpace: 'nowrap', 
-          overflow: 'hidden', 
+        <div style={{
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          color: '#64748b',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
           textOverflow: 'ellipsis',
-          fontSize: '9.5px',
+          fontSize: '8.5px',
           display: 'flex',
           alignItems: 'center',
           gap: '4px'
         }}>
-          <Navigation size={9} strokeWidth={3} className="text-slate-400" />
+          <Navigation size={10} strokeWidth={2.5} style={{ color: colors.dot, flexShrink: 0 }} />
           {trajeto}
         </div>
       )}
 
       {/* Linha 4: Horário e Motorista */}
-      <div style={{ 
-        color: '#475569', 
-        fontWeight: 600, 
-        fontSize: '9px',
-        whiteSpace: 'nowrap', 
-        overflow: 'hidden', 
+      <div style={{
+        color: '#475569',
+        fontWeight: 600,
+        fontSize: '8.5px',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
         textOverflow: 'ellipsis',
         display: 'flex',
         alignItems: 'center',
-        gap: '4px',
-        marginTop: '2px'
+        gap: '6px',
+        marginTop: '1px'
       }}>
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
           gap: '2px',
-          color: '#0ea5e9',
+          color: colors.clockColor || colors.dot,
           fontWeight: 800,
-          backgroundColor: '#f0f9ff',
-          padding: '1px 4px',
-          borderRadius: '4px',
-          fontSize: '8.5px'
+          fontSize: '9px'
         }}>
-          <Clock size={8} strokeWidth={3} />
-          {startTime}
+          <Clock size={10} strokeWidth={3} />
+          {startTime || '--:--'}
         </div>
 
         {os.motorista && (
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
             gap: '2px',
             color: '#6366f1',
             fontWeight: 800,
-            backgroundColor: '#f5f3ff',
-            padding: '1px 4px',
-            borderRadius: '4px',
-            fontSize: '8.5px'
+            fontSize: '9px'
           }}>
-            <User size={8} strokeWidth={3} />
+            <User size={10} strokeWidth={3} />
             {os.motorista.split(' ').slice(0, 2).join(' ').toUpperCase()}
           </div>
         )}
@@ -229,8 +223,8 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
         start: startDateTime,
         end: endDateTime,
         allDay: !os.hora,
-        backgroundColor: colors.bg,
-        borderColor: colors.dot,
+        backgroundColor: 'transparent',
+        borderColor: 'transparent',
         textColor: colors.text,
         extendedProps: {
           os,

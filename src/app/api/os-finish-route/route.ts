@@ -36,58 +36,32 @@ export async function GET(request: Request) {
       );
     }
 
-    if (os.status_operacional === 'Em Rota' || os.status_operacional === 'Finalizado') {
-      return NextResponse.json({ success: true, alreadyStarted: true, message: 'Rota já iniciada anteriormente.' });
+    if (os.status_operacional === 'Finalizado') {
+      return NextResponse.json({ success: true, alreadyFinished: true, message: 'Rota já finalizada anteriormente.' });
+    }
+
+    if (os.status_operacional !== 'Em Rota') {
+      return NextResponse.json({ success: false, error: 'A viagem ainda não foi iniciada.' }, { status: 400 });
     }
 
     const { error: updateError } = await getAdmin()
       .from('ordens_servico')
-      .update({ status_operacional: 'Em Rota' })
+      .update({ status_operacional: 'Finalizado' })
       .eq('id', osId);
 
     if (updateError) {
       return NextResponse.json(
-        { success: false, error: 'Erro ao iniciar a rota.' },
+        { success: false, error: 'Erro ao finalizar a rota.' },
         { status: 500 }
       );
     }
 
-    try {
-      if (osId) {
-        const { data: driver } = await getAdmin()
-          .from('ordens_servico')
-          .select('motorista')
-          .eq('id', osId)
-          .single();
-
-        if (driver?.motorista) {
-          const { data: driverPhone } = await getAdmin()
-            .from('drivers')
-            .select('phone')
-            .eq('name', driver.motorista)
-            .single();
-
-          if (driverPhone?.phone) {
-            const finishLink = `https://portalgeolog.com.br/finalizar-rota/${osId}`;
-            const message =
-              `🚗 *Rota iniciada!*\n\nBoa viagem.\n\n` +
-              `Quando chegar ao destino, clique no link abaixo para finalizar a rota:\n` +
-              `${finishLink}\n\n` +
-              `_Após clicar, o status será atualizado automaticamente no painel._`;
-            await sendWhatsAppMessage(driverPhone.phone, message);
-          }
-        }
-      }
-    } catch (notifyErr) {
-      console.error('Erro ao enviar mensagem de início de rota:', notifyErr);
-    }
-
     return NextResponse.json({
       success: true,
-      message: 'Rota iniciada. Boa viagem!',
+      message: 'Rota finalizada! Obrigado.',
     });
   } catch (error: unknown) {
-    console.error('🔥 Erro os-start-route:', error);
+    console.error('Erro os-finish-route:', error);
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : String(error) },
       { status: 500 }

@@ -117,6 +117,7 @@ type OSRow = {
   status_operacional: OrderService['status']['operacional'];
   status_financeiro: OrderService['status']['financeiro'];
   distancia: string | null;
+  arquivado: boolean;
 };
 type OSWaypointRow = {
   id: string;
@@ -465,7 +466,7 @@ export async function fetchPassageirosPage({
   const term = searchTerm.trim();
   const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
 
-  let query = supabase
+  let query = getSupabase()
     .from('passageiros')
     .select('*', { count: 'exact' })
     .order('nome_completo', { ascending: true })
@@ -564,6 +565,7 @@ export async function fetchOSList(): Promise<OrderService[]> {
   const { data: osRaw, error } = await getSupabase()
     .from('ordens_servico')
     .select('*')
+    .eq('arquivado', false)
     .order('created_at', { ascending: false });
 
   if (error) throw error;
@@ -646,9 +648,10 @@ export async function fetchOSPage({
   const term = searchTerm.trim();
   const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
 
-  let query = supabase
+  let query = getSupabase()
     .from('ordens_servico')
     .select('*', { count: 'exact' })
+    .eq('arquivado', false)
     .order('created_at', { ascending: false })
     .range(from, to);
 
@@ -736,7 +739,8 @@ export async function fetchOSPage({
 type OSInput = Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>;
 
 export async function insertOS(osData: OSInput): Promise<OrderService> {
-  const imposto = osData.valorBruto * 0.12;
+  const impostoPercentual = await getImpostoPercentual();
+  const imposto = osData.valorBruto * (impostoPercentual / 100);
   const lucro = osData.valorBruto - imposto - osData.custo;
   const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
 
@@ -861,7 +865,8 @@ export async function updateOSInDB(
   id: string,
   osData: OSInput
 ): Promise<void> {
-  const imposto = osData.valorBruto * 0.12;
+  const impostoPercentual = await getImpostoPercentual();
+  const imposto = osData.valorBruto * (impostoPercentual / 100);
   const lucro = osData.valorBruto - imposto - osData.custo;
   const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
 
@@ -945,38 +950,13 @@ export async function updateOSStatusInDB(
   if (error) throw error;
 }
 
-export async function deleteOSFromDB(id: string): Promise<void> {
-  const { data: waypoints, error: waypointsError } = await getSupabase()
-    .from('os_waypoints')
-    .select('id')
-    .eq('ordem_servico_id', id);
-
-  if (waypointsError) throw waypointsError;
-
-  const waypointIds = (waypoints || []).map((waypoint) => waypoint.id);
-
-  if (waypointIds.length > 0) {
-    const { error: passengersError } = await getSupabase()
-      .from('os_waypoint_passengers')
-      .delete()
-      .in('waypoint_id', waypointIds);
-
-    if (passengersError) throw passengersError;
-
-    const { error: deleteWaypointsError } = await getSupabase()
-      .from('os_waypoints')
-      .delete()
-      .eq('ordem_servico_id', id);
-
-    if (deleteWaypointsError) throw deleteWaypointsError;
-  }
-
-  const { error: osError } = await getSupabase()
+export async function archiveOSFromDB(id: string): Promise<void> {
+  const { error } = await getSupabase()
     .from('ordens_servico')
-    .delete()
+    .update({ arquivado: true })
     .eq('id', id);
 
-  if (osError) throw osError;
+  if (error) throw error;
 }
 
 // ── Centros de Custo ──────────────────────────────────────
@@ -1021,7 +1001,7 @@ export async function fetchDriversPage({
   const term = searchTerm.trim();
   const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
 
-  let query = supabase
+  let query = getSupabase()
     .from('drivers')
     .select(`*, driver_vehicles(id, vehicle_id, vehicle:veiculos(id, placa, modelo, marca))`, { count: 'exact' })
     .order('name', { ascending: true })
@@ -1065,7 +1045,7 @@ export async function fetchVeiculosPage({
   const term = searchTerm.trim();
   const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
 
-  let query = supabase
+  let query = getSupabase()
     .from('veiculos')
     .select('*', { count: 'exact' })
     .order('marca', { ascending: true })
@@ -1121,6 +1101,7 @@ export interface ParceiroServico {
   pessoaTipo: 'fisica' | 'juridica';
   documento: string;
   razaoSocialOuNomeCompleto: string;
+  status: 'ativo' | 'inativo';
   contatos: ParceiroContato[];
   filiais: ParceiroFilial[];
   searchIndex: string;
@@ -1166,6 +1147,7 @@ type ParceiroRow = {
   documento: string | null;
   razao_social_ou_nome_completo: string | null;
   telefone: string | null;
+  status: 'ativo' | 'inativo';
   search_index: string;
 };
 
@@ -1227,6 +1209,7 @@ const mapParceiroPayload = (
     pessoaTipo: parceiro.pessoa_tipo,
     documento: parceiro.documento || '',
     razaoSocialOuNomeCompleto: parceiro.razao_social_ou_nome_completo || parceiro.nome || '',
+    status: parceiro.status || 'ativo',
     contatos: mappedContatos,
     filiais: mappedFiliais,
   };
@@ -1287,7 +1270,7 @@ export async function fetchParceirosPage({
   const term = searchTerm.trim();
   const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
 
-  let query = supabase
+  let query = getSupabase()
     .from('parceiros_servico')
     .select('*', { count: 'exact' })
     .order('nome', { ascending: true })
@@ -1474,6 +1457,43 @@ export async function updateParceiroInDB(id: string, input: NovoParceiroInput): 
   return fetchParceiroById(id);
 }
 
+export interface ParceiroVinculo {
+  tabela: string;
+  campo: string;
+  registros: { id: string; nome: string }[];
+}
+
+export async function checkParceiroVinculos(parceiroId: string): Promise<ParceiroVinculo[]> {
+  const vinculos: ParceiroVinculo[] = [];
+
+  const { data: driversData, error: driversError } = await getSupabase()
+    .from('drivers')
+    .select('id, name')
+    .eq('parceiro_id', parceiroId);
+
+  if (driversError) throw driversError;
+
+  if (driversData && driversData.length > 0) {
+    vinculos.push({
+      tabela: 'Motoristas',
+      campo: 'parceiro_id',
+      registros: driversData.map((d) => ({ id: d.id, nome: d.name })),
+    });
+  }
+
+  return vinculos;
+}
+
+export async function toggleParceiroStatus(id: string, currentStatus: 'ativo' | 'inativo'): Promise<void> {
+  const novoStatus = currentStatus === 'ativo' ? 'inativo' : 'ativo';
+  const { error } = await getSupabase()
+    .from('parceiros_servico')
+    .update({ status: novoStatus })
+    .eq('id', id);
+
+  if (error) throw error;
+}
+
 export async function deleteParceiroFromDB(id: string): Promise<void> {
   const { error } = await getSupabase()
     .from('parceiros_servico')
@@ -1481,4 +1501,31 @@ export async function deleteParceiroFromDB(id: string): Promise<void> {
     .eq('id', id);
 
   if (error) throw error;
+}
+
+// ── App Settings ────────────────────────────────────────
+
+export async function getAppSetting(key: string): Promise<string | null> {
+  const { data, error } = await getSupabase()
+    .from('app_settings')
+    .select('value')
+    .eq('key', key)
+    .single();
+
+  if (error || !data) return null;
+  return data.value;
+}
+
+export async function setAppSetting(key: string, value: string): Promise<void> {
+  const { error } = await getSupabase()
+    .from('app_settings')
+    .upsert({ key, value, updated_at: new Date().toISOString() });
+
+  if (error) throw error;
+}
+
+export async function getImpostoPercentual(): Promise<number> {
+  const raw = await getAppSetting('imposto_percentual');
+  const parsed = parseFloat(raw || '');
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 12;
 }

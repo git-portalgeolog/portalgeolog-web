@@ -13,7 +13,7 @@ import { useAuth } from '@/context/AuthContext';
 import { DataTable } from '@/components/ui/DataTable';
 
 export default function MedicaoFinanceiraPage() {
-  const { osList, clientes, updateOSStatus } = useData();
+  const { osList, clientes, updateOSStatus, impostoPercentual } = useData();
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
@@ -157,7 +157,7 @@ export default function MedicaoFinanceiraPage() {
           },
           {
             key: 'imposto',
-            title: 'Deduções (12%)',
+            title: `Deduções (${impostoPercentual}%)`,
             align: 'right',
             render: (value: unknown) => (
               <span className="text-right font-bold text-red-500 tabular-nums text-sm">

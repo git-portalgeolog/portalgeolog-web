@@ -11,15 +11,13 @@ import {
 
 export const runtime = 'edge';
 
-const WAHA_API_URL = process.env.WAHA_API_URL;
-const WAHA_API_KEY = process.env.WAHA_API_KEY;
-const WAHA_SESSION = process.env.WAHA_SESSION || 'default';
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
 async function syncTable(state: 'open' | 'connecting' | 'close', ownerJid: string | null): Promise<void> {
+  const WAHA_SESSION = process.env.WAHA_SESSION || 'default';
   try {
-    const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const sb = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
     await sb.from('whatsapp_status').upsert(
       {
         instance_name: WAHA_SESSION,
@@ -44,6 +42,10 @@ export async function GET(request: Request) {
     if (!auth) {
       return unauthorizedResponse(request);
     }
+
+    const WAHA_API_URL = process.env.WAHA_API_URL;
+    const WAHA_API_KEY = process.env.WAHA_API_KEY;
+    const WAHA_SESSION = process.env.WAHA_SESSION || 'default';
 
     if (!WAHA_API_URL || !WAHA_API_KEY) {
       return NextResponse.json(
