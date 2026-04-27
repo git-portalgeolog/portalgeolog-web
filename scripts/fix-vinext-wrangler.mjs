@@ -22,6 +22,33 @@ async function main() {
   const raw = await readFile(wranglerConfigPath, 'utf8');
   const config = JSON.parse(raw);
 
+  const unsupportedTopLevelFields = [
+    'definedEnvironments',
+    'ai_search_namespaces',
+    'ai_search',
+    'secrets_store_secrets',
+    'artifacts',
+    'unsafe_hello_world',
+    'flagship',
+    'worker_loaders',
+    'ratelimits',
+    'vpc_services',
+    'vpc_networks',
+    'python_modules',
+    'assets',
+  ];
+
+  for (const field of unsupportedTopLevelFields) {
+    if (field in config) {
+      delete config[field];
+    }
+  }
+
+  if (config.dev && typeof config.dev === 'object' && !Array.isArray(config.dev)) {
+    delete config.dev.enable_containers;
+    delete config.dev.generate_types;
+  }
+
   const triggers = config.triggers;
   if (!triggers || typeof triggers !== 'object' || Array.isArray(triggers)) {
     config.triggers = { crons: [] };
@@ -30,7 +57,7 @@ async function main() {
   }
 
   await writeFile(wranglerConfigPath, `${JSON.stringify(config)}\n`, 'utf8');
-  console.log('[fix-vinext-wrangler] wrangler.json ajustado com triggers.crons.');
+  console.log('[fix-vinext-wrangler] wrangler.json ajustado para compatibilidade com Pages.');
 }
 
 await main();
