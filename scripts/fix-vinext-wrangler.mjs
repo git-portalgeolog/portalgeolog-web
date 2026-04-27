@@ -1,7 +1,8 @@
-import { readFile, writeFile, copyFile, mkdir, cp } from 'node:fs/promises';
+import { writeFile, cp, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -14,26 +15,51 @@ async function main() {
     process.exit(1);
   }
 
-  // 1. Copiar entry do Worker como _worker.js no output do Pages
-  await copyFile(
-    path.join(distServer, 'index.js'),
-    path.join(distClient, '_worker.js')
-  );
-  console.log('[fix-vinext] Copiado dist/server/index.js → dist/client/_worker.js');
+  // 1. Bundlar dist/server/index.js (+ ssr/ + assets) em um único _worker.js
+  //    O Cloudflare Pages exige um _worker.js autocontido — sem imports relativos externos.
+  console.log('[fix-vinext] Bundlando servidor para _worker.js...');
+  await build({
+    entryPoints: [path.join(distServer, 'index.js')],
+    bundle: true,
+    outfile: path.join(distClient, '_worker.js'),
+    format: 'esm',
+    platform: 'browser',
+    target: 'es2022',
+    conditions: ['workerd', 'worker', 'browser'],
+    // Manter módulos Node.js como externos (resolvidos via nodejs_compat)
+    external: [
+      'node:async_hooks',
+      'node:buffer',
+      'node:crypto',
+      'node:events',
+      'node:fs',
+      'node:http',
+      'node:https',
+      'node:net',
+      'node:os',
+      'node:path',
+      'node:process',
+      'node:stream',
+      'node:string_decoder',
+      'node:url',
+      'node:util',
+      'node:zlib',
+      'node:perf_hooks',
+    ],
+    // Manter pacotes npm como externos (disponíveis via node_modules no Worker)
+    packages: 'external',
+    minify: false,
+    logLevel: 'warning',
+  });
+  console.log('[fix-vinext] _worker.js bundlado com sucesso.');
 
-  // 2. Copiar manifest do servidor (importado pelo Worker)
-  await copyFile(
-    path.join(distServer, '__vite_rsc_assets_manifest.js'),
-    path.join(distClient, '__vite_rsc_assets_manifest.js')
-  );
-  console.log('[fix-vinext] Copiado __vite_rsc_assets_manifest.js');
+  // 2. Limpar ssr/ que não deve ficar no output final
+  const ssrDir = path.join(distClient, 'ssr');
+  if (existsSync(ssrDir)) {
+    await rm(ssrDir, { recursive: true, force: true });
+  }
 
-  // 3. Copiar módulo SSR completo (importado dinamicamente pelo Worker)
-  const ssrDest = path.join(distClient, 'ssr');
-  await cp(path.join(distServer, 'ssr'), ssrDest, { recursive: true });
-  console.log('[fix-vinext] Copiado dist/server/ssr/ → dist/client/ssr/');
-
-  // 4. Substituir wrangler.json por config mínima válida para Cloudflare Pages
+  // 3. Escrever wrangler.json mínimo e válido para Cloudflare Pages
   const cleanConfig = {
     name: 'portalgeolog-web',
     compatibility_date: '2025-03-31',
@@ -46,7 +72,7 @@ async function main() {
     `${JSON.stringify(cleanConfig, null, 2)}\n`,
     'utf8'
   );
-  console.log('[fix-vinext] wrangler.json substituído por config limpa para Pages.');
+  console.log('[fix-vinext] wrangler.json gerado para Pages.');
 }
 
 await main();
