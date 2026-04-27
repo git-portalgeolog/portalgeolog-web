@@ -1,20 +1,12 @@
-# Cloudflare Pages configuration for Next.js
-# Uses @cloudflare/next-on-pages for Edge Runtime support
+# Cloudflare Pages configuration — vinext
 name = "portalgeolog-web"
 compatibility_date = "2025-03-31"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "dist/client"
 
-# Environment variables (set these via Cloudflare dashboard or wrangler)
-# wrangler pages project env add portalgeolog-web production NEXT_PUBLIC_SUPABASE_URL "your-url"
-# wrangler pages project env add portalgeolog-web production NEXT_PUBLIC_SUPABASE_ANON_KEY "your-key"
-
-# Secrets (use wrangler secret put)
-# wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-# wrangler secret put RESEND_API_KEY
-# wrangler secret put WPP_CONNECT_TOKEN
-# Token atual: bot_cnh:$2b$10$3eLGEjaynhqhEtMNN9QQ3eFGupBv.9ZFlPjjpICPYkI1SwN3i9iCC
-# Se expirar: ssh no VPS e rode: bash /opt/wppconnect/scripts/regenerate-wpp-token.sh
-#
-# Environment variables
-# wrangler pages project env add portalgeolog-web production WPP_CONNECT_URL "https://wppconnect.portalgeolog.com.br/api/bot_cnh/send-message"
+[vars]
+NEXT_PUBLIC_SUPABASE_URL = "https://hzpgfapvjwqtjclriisz.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cGdmYXB2andxdGpjbHJpaXN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0NjkzMzksImV4cCI6MjA5MDA0NTMzOX0.bBxEZTNuPuIcXE-eCTewsULdlHyLaoMU3HtqA3qSriA"
+NEXT_PUBLIC_WAHA_SESSION = "default"
+WAHA_API_URL = "https://wppconnect.portalgeolog.com.br"
+WAHA_SESSION = "default"
