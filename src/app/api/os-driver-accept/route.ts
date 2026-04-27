@@ -10,6 +10,14 @@ const supabaseAdmin = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
+function normalizeName(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[%_\\]/g, '\\$&');
+}
+
 
 export async function GET(request: Request) {
   try {
@@ -60,15 +68,29 @@ export async function GET(request: Request) {
     let messageSent = false;
     try {
       if (os.motorista) {
-        const { data: driver, error: driverError } = await supabaseAdmin
+        const motoristaNormalized = normalizeName(os.motorista);
+
+        const { data: driverCandidates, error: driverError } = await supabaseAdmin
           .from('drivers')
-          .select('phone')
-          .eq('name', os.motorista)
-          .single();
+          .select('name, phone')
+          .ilike('name', `%${escapeLikePattern(os.motorista.trim())}%`)
+          .limit(10);
 
-        console.log('[os-driver-accept] Driver lookup:', { name: os.motorista, phone: driver?.phone, error: driverError?.message });
+        const matchedDriver =
+          driverCandidates?.find((candidate) => normalizeName(candidate.name || '') === motoristaNormalized) ||
+          driverCandidates?.find((candidate) => normalizeName(candidate.name || '').includes(motoristaNormalized));
 
-        if (driver?.phone) {
+        const driverPhone = matchedDriver?.phone?.trim();
+
+        console.log('[os-driver-accept] Driver lookup:', {
+          name: os.motorista,
+          matchedName: matchedDriver?.name,
+          phone: driverPhone,
+          candidates: driverCandidates?.length || 0,
+          error: driverError?.message,
+        });
+
+        if (driverPhone) {
           const startRouteLink = `https://portalgeolog.com.br/iniciar-rota/${osId}`;
 
           // Mensagem única: agradecimento + link de início de rota
@@ -78,12 +100,15 @@ export async function GET(request: Request) {
             `Quando for iniciar a rota, clique aqui:\n` +
             `${startRouteLink}`;
 
-          console.log('[os-driver-accept] Enviando msg para', driver.phone);
-          await sendWhatsAppMessage(driver.phone, acceptMessage);
+          console.log('[os-driver-accept] Enviando msg para', driverPhone);
+          await sendWhatsAppMessage(driverPhone, acceptMessage);
           messageSent = true;
           console.log('[os-driver-accept] Msg enviada');
         } else {
-          console.warn('[os-driver-accept] Telefone do motorista não encontrado');
+          console.warn('[os-driver-accept] Telefone do motorista não encontrado', {
+            motorista: os.motorista,
+            candidates: driverCandidates?.map((candidate) => candidate.name),
+          });
         }
       } else {
         console.warn('[os-driver-accept] OS sem motorista definido');

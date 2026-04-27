@@ -2,16 +2,23 @@
   "name": "web",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "dev": "npx kill-port 3000 3001 2>/dev/null || true && next dev",
+    "dev": "npx kill-port 3000 3001 2>/dev/null || true && vinext dev",
+    "dev:next": "npx kill-port 3000 3001 2>/dev/null || true && next dev",
     "dev:fast": "./scripts/dev-optimized.sh",
-    "build": "next build",
-    "build:cf": "npx @cloudflare/next-on-pages@1 && node scripts/prepare-cloudflare-output.mjs",
+    "build": "vinext build",
+    "build:next": "next build",
+    "build:cf": "vinext build",
     "build:c": "npm run build:cf",
-    "start": "next start",
+    "start": "vinext start",
+    "start:next": "next start",
     "lint": "eslint",
     "kill-port": "npx kill-port 3000 3001",
-    "deploy:cf": "npm run build:cf && wrangler pages deploy cloudflare-output --project-name=portalgeolog-web"
+    "deploy:cf": "vinext deploy"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.20",
@@ -29,24 +36,30 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^0.577.0",
     "next": "15.5.2",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
     "react-leaflet": "^5.0.0",
     "resend": "^6.9.4",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
-    "@cloudflare/next-on-pages": "^1.13.12",
+    "@cloudflare/vite-plugin": "^1.33.2",
     "@tailwindcss/postcss": "^4",
+    "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5.1.4",
+    "@vitejs/plugin-rsc": "^0.5.24",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "pg": "^8.20.0",
+    "react-server-dom-webpack": "^19.2.5",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vinext": "^0.0.44",
+    "vite": "^8.0.0",
     "wrangler": "^4.0.0"
   }
 }
