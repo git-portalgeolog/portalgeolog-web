@@ -3,12 +3,16 @@ import tailwindcss from '@tailwindcss/vite';
 import vinext from 'vinext';
 import { defineConfig } from 'vite';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     vinext(),
     tailwindcss(),
-    cloudflare({
-      viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
-    }),
+    ...(command === 'build'
+      ? [
+          cloudflare({
+            viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
+          }),
+        ]
+      : []),
   ],
-});
+}));
