@@ -38,7 +38,7 @@ async function main() {
     name: 'portalgeolog-web',
     compatibility_date: '2025-03-31',
     compatibility_flags: ['nodejs_compat'],
-    pages_build_output_dir: 'dist/client',
+    pages_build_output_dir: '.',
     triggers: { crons: [] },
   };
   await writeFile(
