@@ -12,7 +12,7 @@ export const runtime = 'edge';
 
 export async function POST(request: Request) {
   try {
-    if (!checkRateLimit(request, 5, 60)) {
+    if (!checkRateLimit(request, 30, 60)) {
       return rateLimitResponse(request);
     }
 

@@ -16,6 +16,7 @@ import {
   History,
   ChevronRight,
   Clock,
+  Calendar,
   LogOut,
   Fingerprint,
   ShieldCheck,
@@ -28,14 +29,16 @@ import {
   CheckCircle,
   DollarSign,
   Percent,
+  Smartphone,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import GeologSearchableSelect from "@/components/ui/GeologSearchableSelect";
 import StandardModal from "@/components/StandardModal";
 import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { useData } from "@/context/DataContext";
+import WahaConnectionsPanel from "@/components/WahaConnectionsPanel";
 
-type TabType = "acesso" | "perfil" | "historico" | "financeiro";
+type TabType = "acesso" | "perfil" | "historico" | "financeiro" | "conexoes";
 
 export default function ConfigPage() {
   const { user, profile, logout } = useAuth();
@@ -45,6 +48,8 @@ export default function ConfigPage() {
   const [users, setUsers] = useState<UserWithAuth[]>([]);
   const [jurosInput, setJurosInput] = useState(String(impostoPercentual));
   const [isSavingJuros, setIsSavingJuros] = useState(false);
+  const [isDateModalOpen, setIsDateModalOpen] = useState(false);
+  const [effectiveDate, setEffectiveDate] = useState(new Date().toISOString().split('T')[0]);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -246,6 +251,7 @@ export default function ConfigPage() {
     { id: "perfil", label: "Meu Perfil", icon: User },
     { id: "historico", label: "Histórico de Logs", icon: History },
     { id: "financeiro", label: "Financeiro", icon: DollarSign },
+    { id: "conexoes", label: "Conexões", icon: Smartphone },
   ];
 
   return (
@@ -711,6 +717,12 @@ export default function ConfigPage() {
               </div>
             )}
 
+            {activeTab === "conexoes" && (
+              <div>
+                <WahaConnectionsPanel />
+              </div>
+            )}
+
             {activeTab === "financeiro" && (
               <div className="max-w-2xl mx-auto">
                 <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 p-10 space-y-10">
@@ -755,31 +767,14 @@ export default function ConfigPage() {
                     </div>
 
                     <button
-                      onClick={async () => {
-                        try {
-                          setIsSavingJuros(true);
-                          await setImpostoPercentual(Number(jurosInput));
-                          toast.success("Porcentagem de juros atualizada com sucesso!");
-                        } catch (err: unknown) {
-                          toast.error("Erro ao salvar: " + (err instanceof Error ? err.message : String(err)));
-                        } finally {
-                          setIsSavingJuros(false);
-                        }
+                      onClick={() => {
+                        setIsDateModalOpen(true);
+                        setEffectiveDate(new Date().toISOString().split('T')[0]);
                       }}
-                      disabled={isSavingJuros}
                       className="w-full py-4 bg-blue-600 text-white font-black rounded-xl shadow-lg hover:bg-blue-700 hover:scale-[1.01] active:scale-[0.98] transition-all text-sm uppercase tracking-widest cursor-pointer disabled:opacity-70 flex justify-center items-center gap-3"
                     >
-                      {isSavingJuros ? (
-                        <>
-                          <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                          Salvando...
-                        </>
-                      ) : (
-                        <>
-                          <Check size={18} />
-                          Salvar Configuração
-                        </>
-                      )}
+                      <Check size={18} />
+                      Salvar Configuração
                     </button>
                   </div>
                 </div>
@@ -961,7 +956,78 @@ export default function ConfigPage() {
           </form>
         </StandardModal>
       )}
-      
+
+      {/* Modal Data de Vigência */}
+      {isDateModalOpen && (
+        <StandardModal
+          title="Data de Vigência"
+          subtitle="A partir de qual dia a nova configuração deve valer?"
+          icon={<Calendar size={24} />}
+          onClose={() => setIsDateModalOpen(false)}
+          maxWidthClassName="max-w-md"
+        >
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">
+                Aplicar a partir de
+              </label>
+              <div className="relative group">
+                <Calendar
+                  className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors"
+                  size={18}
+                />
+                <input
+                  type="date"
+                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-xl font-bold text-base outline-none focus:border-blue-600 transition-colors"
+                  value={effectiveDate}
+                  onChange={(e) => setEffectiveDate(e.target.value)}
+                />
+              </div>
+              <p className="text-sm font-semibold text-slate-400 ml-1">
+                Alterações retroativas afetam o cálculo de impostos de OS criadas a partir desta data.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsDateModalOpen(false)}
+                className="flex-1 py-4 bg-slate-100 text-slate-600 font-black rounded-xl hover:bg-slate-200 transition-all text-sm uppercase tracking-widest cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    setIsSavingJuros(true);
+                    setIsDateModalOpen(false);
+                    await setImpostoPercentual(Number(jurosInput), effectiveDate);
+                    toast.success(`Porcentagem de juros atualizada com sucesso! Vigente a partir de ${new Date(effectiveDate + 'T00:00:00').toLocaleDateString('pt-BR')}.`);
+                  } catch (err: unknown) {
+                    toast.error("Erro ao salvar: " + (err instanceof Error ? err.message : String(err)));
+                  } finally {
+                    setIsSavingJuros(false);
+                  }
+                }}
+                disabled={isSavingJuros || !effectiveDate}
+                className="flex-1 py-4 bg-blue-600 text-white font-black rounded-xl shadow-lg hover:bg-blue-700 hover:scale-[1.01] active:scale-[0.98] transition-all text-sm uppercase tracking-widest cursor-pointer disabled:opacity-70 flex justify-center items-center gap-3"
+              >
+                {isSavingJuros ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Check size={18} />
+                    Aplicar Retroativo
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </StandardModal>
+      )}
+
       <ConfirmDialog
         isOpen={confirmState.isOpen}
         onClose={closeConfirm}

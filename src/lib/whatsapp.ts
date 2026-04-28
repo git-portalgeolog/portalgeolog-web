@@ -247,16 +247,29 @@ export async function startWahaSession(sessionName?: string): Promise<WahaSessio
     throw new Error('WAHA não configurada (faltam variáveis de ambiente)');
   }
 
-  const response = await fetch(`${WAHA_API_URL}/api/sessions/${encodeURIComponent(resolvedSession)}/start`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Api-Key': WAHA_API_KEY,
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({}),
-    signal: AbortSignal.timeout(WAHA_STATUS_TIMEOUT_MS),
-  });
+  const startSession = async (endpoint: string, body: unknown) => {
+    return fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': WAHA_API_KEY,
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(WAHA_STATUS_TIMEOUT_MS),
+    });
+  };
+
+  let response = await startSession(
+    `${WAHA_API_URL}/api/sessions/${encodeURIComponent(resolvedSession)}/start`,
+    {}
+  );
+
+  if (response.status === 404) {
+    response = await startSession(`${WAHA_API_URL}/api/sessions/start`, {
+      name: resolvedSession,
+    });
+  }
 
   if (!response.ok && response.status !== 422) {
     const text = await response.text().catch(() => '');

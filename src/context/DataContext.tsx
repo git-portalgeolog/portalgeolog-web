@@ -33,7 +33,7 @@ import {
   toggleParceiroStatus,
   deleteParceiroFromDB,
   getImpostoPercentual,
-  setAppSetting,
+  setFinancialConfig,
   type ParceiroServico,
   type NovoParceiroInput,
 } from '@/lib/supabase/queries';
@@ -224,7 +224,7 @@ interface DataContextType {
   parceiros: ParceiroServico[];
   loading: boolean;
   impostoPercentual: number;
-  setImpostoPercentual: (value: number) => Promise<void>;
+  setImpostoPercentual: (value: number, effectiveFrom?: string) => Promise<void>;
 
   lastOSUpdate: number;
   addCliente: (nome: string, contato?: string) => Promise<Cliente>;
@@ -268,6 +268,7 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const hasLoadedData = useRef(false);
+  const debounceTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [solicitantes, setSolicitantes] = useState<Solicitante[]>([]);
   const [passageiros, setPassageiros] = useState<Passageiro[]>([]);
@@ -334,30 +335,70 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     console.log('🔌 Supabase Real-time: Conectando canal central...');
 
+    const debouncedFetch = (key: string, fetchFn: () => Promise<void>) => {
+      const existing = debounceTimers.current.get(key);
+      if (existing) clearTimeout(existing);
+      debounceTimers.current.set(
+        key,
+        setTimeout(() => {
+          debounceTimers.current.delete(key);
+          void fetchFn();
+        }, 300)
+      );
+    };
+
     const channel = supabase
       .channel('geolog-realtime-global')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ordens_servico' }, () => {
-        console.log('📦 OS Change detected');
-        dbFetchOSList().then((data) => {
+        debouncedFetch('os', async () => {
+          const data = await dbFetchOSList();
           setOsList(data);
           setLastOSUpdate(Date.now());
-        }).catch(() => {});
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'os_waypoints' }, () => {
+        debouncedFetch('os', async () => {
+          const data = await dbFetchOSList();
+          setOsList(data);
+          setLastOSUpdate(Date.now());
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'os_waypoint_passengers' }, () => {
+        debouncedFetch('os', async () => {
+          const data = await dbFetchOSList();
+          setOsList(data);
+          setLastOSUpdate(Date.now());
+        });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
-        dbFetchClientes().then(setClientes).catch(() => {});
+        debouncedFetch('clientes', async () => {
+          const data = await dbFetchClientes();
+          setClientes(data);
+        });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'solicitantes' }, () => {
-        dbFetchSolicitantes().then(setSolicitantes).catch(() => {});
+        debouncedFetch('solicitantes', async () => {
+          const data = await dbFetchSolicitantes();
+          setSolicitantes(data);
+        });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'passageiros' }, () => {
-        dbFetchPassageiros().then(setPassageiros).catch(() => {});
+        debouncedFetch('passageiros', async () => {
+          const data = await dbFetchPassageiros();
+          setPassageiros(data);
+        });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, () => {
-        dbFetchDrivers().then(setDrivers).catch(() => {});
+        debouncedFetch('drivers', async () => {
+          const data = await dbFetchDrivers();
+          setDrivers(data);
+        });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'parceiros_servico' }, () => {
-        console.log('🏢 Parceiro Change detected');
-        dbFetchParceiros().then(setParceiros).catch(() => {});
+        debouncedFetch('parceiros', async () => {
+          const data = await dbFetchParceiros();
+          setParceiros(data);
+        });
       })
       .subscribe((status: string) => {
         if (status === 'SUBSCRIBED') {
@@ -965,9 +1006,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       .catch(err => console.error('Error deleteCentroCustoFromDB:', err));
   };
 
-  const setImpostoPercentual = async (value: number): Promise<void> => {
+  const setImpostoPercentual = async (value: number, effectiveFrom?: string): Promise<void> => {
     const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
-    await setAppSetting('imposto_percentual', String(safeValue));
+    const effectiveDate = effectiveFrom || new Date().toISOString().split('T')[0];
+    await setFinancialConfig('imposto_percentual', String(safeValue), effectiveDate);
     setImpostoPercentualState(safeValue);
   };
 

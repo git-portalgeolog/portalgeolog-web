@@ -154,31 +154,72 @@ type DriverRow = {
   }>;
 };
 
+const mapOSRecord = (
+  o: OSRow,
+  wpRaw: OSWaypointRow[],
+  wpPassRaw: OSWaypointPassengerRow[]
+): OrderService => {
+  const waypoints: Waypoint[] = wpRaw
+    .filter((w) => w.ordem_servico_id === o.id)
+    .map((w) => ({
+      label: w.label,
+      lat: w.lat,
+      lng: w.lng,
+      comment: w.comment || undefined,
+      passengers: wpPassRaw
+        .filter((p) => p.waypoint_id === w.id)
+        .map((p) => ({
+          id: p.id,
+          solicitanteId: p.passageiro_id || '',
+          nome: p.nome || '',
+        })),
+    }));
+
+  return {
+    id: o.id,
+    protocolo: o.protocolo || '',
+    os: o.os_number || '',
+    data: o.data || '',
+    hora: o.hora || '',
+    horaExtra: o.hora_extra || '',
+    clienteId: o.cliente_id || '',
+    solicitante: o.solicitante || '',
+    centroCustoId: o.centro_custo || '',
+    trecho: o.trecho || '',
+    motorista: o.motorista || '',
+    veiculoId: o.veiculo_id || undefined,
+    valorBruto: Number(o.valor_bruto),
+    imposto: Number(o.imposto),
+    custo: Number(o.custo),
+    lucro: Number(o.lucro),
+    status: {
+      operacional: o.status_operacional as OrderService['status']['operacional'],
+      financeiro: o.status_financeiro as OrderService['status']['financeiro'],
+    },
+    distancia: o.distancia ? Number(o.distancia) : undefined,
+    rota: waypoints.length > 0 ? { waypoints } : undefined,
+  };
+};
+
 // ── Clientes ──────────────────────────────────────────────
 
 export async function fetchClientes(): Promise<Cliente[]> {
   const { data: clientesRaw, error } = await getSupabase()
     .from('clientes')
-    .select('id, nome, contato')
+    .select('id, nome, contato, centros_custo(id, nome, cliente_id)')
     .order('nome');
 
   if (error) throw error;
 
-  const { data: centrosRaw } = await getSupabase()
-    .from('centros_custo')
-    .select('id, nome, cliente_id')
-    .order('nome');
-
-  const typedClientes = (clientesRaw || []) as ClienteRow[];
-  const typedCentros = (centrosRaw || []) as CentroCustoRow[];
-
-  return typedClientes.map((c) => ({
+  return (clientesRaw || []).map((c: any) => ({
     id: c.id,
     nome: c.nome,
     contato: c.contato || undefined,
-    centrosCusto: typedCentros
-      .filter((cc) => cc.cliente_id === c.id)
-      .map((cc) => ({ id: cc.id, nome: cc.nome, clienteId: cc.cliente_id })),
+    centrosCusto: (c.centros_custo || []).map((cc: any) => ({
+      id: cc.id,
+      nome: cc.nome,
+      clienteId: cc.cliente_id,
+    })),
   }));
 }
 
@@ -305,19 +346,12 @@ export async function deleteSolicitanteFromDB(id: string): Promise<void> {
 export async function fetchPassageiros(): Promise<Passageiro[]> {
   const { data: passRaw, error } = await getSupabase()
     .from('passageiros')
-    .select('id, nome_completo, email, celular, cpf, notificar, genero')
+    .select('id, nome_completo, email, celular, cpf, notificar, genero, passageiro_enderecos(id, rotulo, endereco_completo, referencia)')
     .order('nome_completo');
 
   if (error) throw error;
 
-  const { data: endRaw } = await getSupabase()
-    .from('passageiro_enderecos')
-    .select('id, passageiro_id, rotulo, endereco_completo, referencia');
-
-  const typedPassengers = (passRaw || []) as PassageiroRow[];
-  const typedAddresses = (endRaw || []) as PassageiroEnderecoRow[];
-
-  return typedPassengers.map((p) => ({
+  return (passRaw || []).map((p: any) => ({
     id: p.id,
     nomeCompleto: p.nome_completo,
     email: p.email || undefined,
@@ -325,14 +359,12 @@ export async function fetchPassageiros(): Promise<Passageiro[]> {
     cpf: p.cpf || undefined,
     notificar: p.notificar ?? undefined,
     genero: p.genero ?? undefined,
-    enderecos: typedAddresses
-      .filter((e) => e.passageiro_id === p.id)
-      .map((e) => ({
-        id: e.id,
-        rotulo: e.rotulo,
-        enderecoCompleto: e.endereco_completo,
-        referencia: e.referencia || undefined,
-      })),
+    enderecos: (p.passageiro_enderecos || []).map((e: any) => ({
+      id: e.id,
+      rotulo: e.rotulo,
+      enderecoCompleto: e.endereco_completo,
+      referencia: e.referencia || undefined,
+    })),
   }));
 }
 
@@ -566,7 +598,8 @@ export async function fetchOSList(): Promise<OrderService[]> {
     .from('ordens_servico')
     .select('*')
     .eq('arquivado', false)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(500);
 
   if (error) throw error;
 
@@ -595,48 +628,42 @@ export async function fetchOSList(): Promise<OrderService[]> {
     }
   }
 
-  return typedOrders.map((o) => {
-    const waypoints: Waypoint[] = wpRaw
-      .filter((w) => w.ordem_servico_id === o.id)
-      .map((w) => ({
-        label: w.label,
-        lat: w.lat,
-        lng: w.lng,
-        comment: w.comment || undefined,
-        passengers: wpPassRaw
-          .filter((p) => p.waypoint_id === w.id)
-          .map((p) => ({
-            id: p.id,
-            solicitanteId: p.passageiro_id || '',
-            nome: p.nome || '',
-          })),
-      }));
+  return typedOrders.map((o) => mapOSRecord(o, wpRaw, wpPassRaw));
+}
 
-    return {
-      id: o.id,
-      protocolo: o.protocolo || '',
-      os: o.os_number || '',
-      data: o.data || '',
-      hora: o.hora || '',
-      horaExtra: o.hora_extra || '',
-      clienteId: o.cliente_id || '',
-      solicitante: o.solicitante || '',
-      centroCustoId: o.centro_custo || '',
-      trecho: o.trecho || '',
-      motorista: o.motorista || '',
-      veiculoId: o.veiculo_id || undefined,
-      valorBruto: Number(o.valor_bruto),
-      imposto: Number(o.imposto),
-      custo: Number(o.custo),
-      lucro: Number(o.lucro),
-      status: {
-        operacional: o.status_operacional as OrderService['status']['operacional'],
-        financeiro: o.status_financeiro as OrderService['status']['financeiro'],
-      },
-      distancia: o.distancia ? Number(o.distancia) : undefined,
-      rota: waypoints.length > 0 ? { waypoints } : undefined,
-    };
-  });
+export async function fetchOSById(id: string): Promise<OrderService | null> {
+  const { data: osRaw, error } = await getSupabase()
+    .from('ordens_servico')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!osRaw) return null;
+
+  const { data: wpData, error: wpError } = await getSupabase()
+    .from('os_waypoints')
+    .select('id, ordem_servico_id, position, label, lat, lng, comment')
+    .eq('ordem_servico_id', id)
+    .order('position');
+
+  if (wpError) throw wpError;
+
+  const wpRaw = (wpData || []) as OSWaypointRow[];
+  const wpIds = wpRaw.map((w) => w.id);
+  let wpPassRaw: OSWaypointPassengerRow[] = [];
+
+  if (wpIds.length > 0) {
+    const { data: passData, error: passError } = await getSupabase()
+      .from('os_waypoint_passengers')
+      .select('id, waypoint_id, passageiro_id, nome')
+      .in('waypoint_id', wpIds);
+
+    if (passError) throw passError;
+    wpPassRaw = (passData || []) as OSWaypointPassengerRow[];
+  }
+
+  return mapOSRecord(osRaw as OSRow, wpRaw, wpPassRaw);
 }
 
 export async function fetchOSPage({
@@ -739,7 +766,7 @@ export async function fetchOSPage({
 type OSInput = Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>;
 
 export async function insertOS(osData: OSInput): Promise<OrderService> {
-  const impostoPercentual = await getImpostoPercentual();
+  const impostoPercentual = await getImpostoPercentualForDate(osData.data);
   const imposto = osData.valorBruto * (impostoPercentual / 100);
   const lucro = osData.valorBruto - imposto - osData.custo;
   const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
@@ -865,7 +892,7 @@ export async function updateOSInDB(
   id: string,
   osData: OSInput
 ): Promise<void> {
-  const impostoPercentual = await getImpostoPercentual();
+  const impostoPercentual = await getImpostoPercentualForDate(osData.data);
   const imposto = osData.valorBruto * (impostoPercentual / 100);
   const lucro = osData.valorBruto - imposto - osData.custo;
   const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
@@ -1528,4 +1555,42 @@ export async function getImpostoPercentual(): Promise<number> {
   const raw = await getAppSetting('imposto_percentual');
   const parsed = parseFloat(raw || '');
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 12;
+}
+
+export async function getImpostoPercentualForDate(date: string): Promise<number> {
+  const { data, error } = await getSupabase()
+    .from('financial_config_history')
+    .select('value')
+    .eq('config_key', 'imposto_percentual')
+    .lte('effective_from', date)
+    .order('effective_from', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error || !data) {
+    // Fallback para app_settings se não houver histórico
+    return getImpostoPercentual();
+  }
+
+  const parsed = parseFloat(data.value || '');
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 12;
+}
+
+export async function setFinancialConfig(
+  key: string,
+  value: string,
+  effectiveFrom: string
+): Promise<void> {
+  // Insere no histórico
+  const { error: histError } = await getSupabase()
+    .from('financial_config_history')
+    .upsert(
+      { config_key: key, value, effective_from: effectiveFrom },
+      { onConflict: 'config_key,effective_from' }
+    );
+
+  if (histError) throw histError;
+
+  // Atualiza o valor atual em app_settings para compatibilidade
+  await setAppSetting(key, value);
 }

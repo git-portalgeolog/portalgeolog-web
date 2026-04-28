@@ -45,7 +45,7 @@ import {
   FilterX,
 } from 'lucide-react';
 import { useData, type OrderService, type ParceiroServico } from '@/context/DataContext';
-import { fetchOSPage } from '@/lib/supabase/queries';
+import { fetchOSById, fetchOSPage } from '@/lib/supabase/queries';
 import { useServerPaginatedTable } from '@/hooks/useServerPaginatedTable';
 import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
 import { DataTable } from '@/components/ui/DataTable';
@@ -191,11 +191,14 @@ export default function OSOperationalPage() {
   const [calendarMenuPosition, setCalendarMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [editingOSId, setEditingOSId] = useState<string | null>(null);
   const [viewingOSId, setViewingOSId] = useState<string | null>(null);
+  const [viewingOSLive, setViewingOSLive] = useState<OrderService | null>(null);
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table');
+  const [driverNotificationSentByOS, setDriverNotificationSentByOS] = useState<Record<string, boolean>>({});
   const actionMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const calendarMenuRef = useRef<HTMLDivElement | null>(null);
   const passengerDraftIdRef = useRef(0);
+  const viewingOSPollRef = useRef<NodeJS.Timeout | null>(null);
 
   type AdvancedFilters = {
     osNumber: string;
@@ -241,6 +244,83 @@ export default function OSOperationalPage() {
       void osTableRefreshRef.current();
     }
   }, [lastOSUpdate]);
+
+  useEffect(() => {
+    if (!viewingOSId) {
+      setViewingOSLive(null);
+      if (viewingOSPollRef.current) {
+        clearInterval(viewingOSPollRef.current);
+        viewingOSPollRef.current = null;
+      }
+      return;
+    }
+
+    let isActive = true;
+
+    const syncViewingOS = async () => {
+      try {
+        const latest = await fetchOSById(viewingOSId);
+        if (isActive) {
+          setViewingOSLive(latest);
+        }
+      } catch (error) {
+        console.error('Erro ao sincronizar OS aberta:', error);
+      }
+    };
+
+    void syncViewingOS();
+
+    if (viewingOSPollRef.current) {
+      clearInterval(viewingOSPollRef.current);
+    }
+
+    viewingOSPollRef.current = setInterval(() => {
+      void syncViewingOS();
+    }, 2000);
+
+    const channel = supabase
+      .channel(`os-live-${viewingOSId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'ordens_servico', filter: `id=eq.${viewingOSId}` },
+        () => {
+          void syncViewingOS();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'os_waypoints', filter: `ordem_servico_id=eq.${viewingOSId}` },
+        () => {
+          void syncViewingOS();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'os_waypoint_passengers' },
+        () => {
+          void syncViewingOS();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isActive = false;
+      if (viewingOSPollRef.current) {
+        clearInterval(viewingOSPollRef.current);
+        viewingOSPollRef.current = null;
+      }
+      void supabase.removeChannel(channel);
+    };
+  }, [supabase, viewingOSId]);
+
+  useEffect(() => {
+    if (!viewingOSId) return;
+
+    const latestFromList = osList.find((os) => os.id === viewingOSId);
+    if (latestFromList) {
+      setViewingOSLive(latestFromList);
+    }
+  }, [osList, viewingOSId]);
 
   // Resetar paginação cliente quando filtros ou busca mudam
   useEffect(() => {
@@ -798,26 +878,83 @@ export default function OSOperationalPage() {
     }
 
     const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
+    const driverObj = drivers.find(d =>
+      d.name.trim().toLowerCase() === osData.motorista.trim().toLowerCase()
+    );
+
+    // Veículo da OS ou vinculado ao motorista
+    let vehicleInfo = { modelo: '', marca: '', placa: '' };
+    if (osData.veiculoId) {
+      const v = vehicles.find(v => v.id === osData.veiculoId);
+      if (v) vehicleInfo = { modelo: v.modelo || '', marca: v.marca || '', placa: v.placa || '' };
+    } else if (driverObj?.id) {
+      const assoc = driverVehiclesAssoc.find(a => a.driver_id === driverObj.id);
+      if (assoc) {
+        const v = vehicles.find(v => v.id === assoc.vehicle_id);
+        if (v) vehicleInfo = { modelo: v.modelo || '', marca: v.marca || '', placa: v.placa || '' };
+      }
+    }
+
     // Link de aceitação
-    const acceptLink = `https://portalgeolog.com.br/aceitar/${osData.id}`; 
-    
-    // Formatação do itinerário
+    const acceptLink = `https://portalgeolog.com.br/aceitar/${osData.id}`;
+
+    // Passageiros do itinerário
+    const allPassengers: { nome: string; celular: string }[] = [];
     const waypoints = osData.rota?.waypoints || [];
-    let itineraryText = "";
-    if (waypoints.length >= 2) {
+    waypoints.forEach((wp) => {
+      (wp.passengers || []).forEach((p) => {
+        const passRecord = passageiros.find(x => x.id === p.solicitanteId);
+        const cel = passRecord?.celular || '';
+        if (!allPassengers.some(x => x.nome === (p.nome || passRecord?.nomeCompleto || ''))) {
+          allPassengers.push({
+            nome: p.nome || passRecord?.nomeCompleto || 'Não identificado',
+            celular: cel ? cel.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3') : 'Não informado',
+          });
+        }
+      });
+    });
+
+    // Itinerário com observações
+    let itineraryText = '';
+    if (waypoints.length >= 1) {
       itineraryText = waypoints.map((w, idx) => {
         const label = w.label.trim();
-        if (idx === 0) return `🟢 *Origem:* ${label}`;
-        if (idx === waypoints.length - 1) return `🔵 *Destino Final:* ${label}`;
-        return `🛑 *Parada:* ${label}`;
+        const comment = w.comment?.trim();
+        let line = '';
+        if (idx === 0) line = `🟢 *Origem:* ${label}`;
+        else if (idx === waypoints.length - 1) line = `🔵 *Destino Final:* ${label}`;
+        else line = `🛑 *Parada ${idx}:* ${label}`;
+        if (comment) line += `\n   _Obs: ${comment}_`;
+        return line;
       }).join('\n\n');
     }
 
-    const message = 
-      `🏢 *Empresa:* ${cliente}\n` +
-      `📍 *Itinerário:*\n\n${itineraryText}\n\n` +
+    // Transporte
+    const vehicleDisplay = vehicleInfo.modelo && vehicleInfo.marca
+      ? `${vehicleInfo.marca} ${vehicleInfo.modelo}`
+      : 'Não informado';
+    const placaDisplay = vehicleInfo.placa || 'Não informada';
+
+    // Passageiros
+    const paxText = allPassengers.length > 0
+      ? allPassengers.map(p => `• ${p.nome}${p.celular !== 'Não informado' ? ` – ${p.celular}` : ''}`).join('\n')
+      : 'Não informado';
+
+    const message =
+      `🆔 *OS ${osData.os || osData.protocolo}*\n` +
+      `📋 ${osData.trecho || 'Serviço'}\n\n` +
       `📅 *Data:* ${osData.data.split('-').reverse().join('/')}\n` +
-      `🛠️ *Serviço:* ${osData.os || osData.protocolo}\n\n` +
+      `⏰ *Horário:* ${osData.hora || 'Não informado'}\n\n` +
+      `🏢 *Empresa:* ${cliente}\n` +
+      `👤 *Solicitante:* ${osData.solicitante || 'Não informado'}\n\n` +
+      `🚗 *Transporte:* ${vehicleDisplay}\n\n` +
+      `👥 *Passageiro(s):*\n${paxText}\n\n` +
+      `📍 *Itinerário:*\n${itineraryText}\n\n` +
+      `────────────────────────\n` +
+      `👨‍✈️ *Motorista:* ${osData.motorista}\n` +
+      `📞 *Contato:* ${driverObj?.phone || 'Não informado'}\n` +
+      `🚘 *Veículo:* ${vehicleDisplay}\n` +
+      `📝 *Placa:* ${placaDisplay}\n\n` +
       `👇 *CLIQUE NO LINK ABAIXO PARA ACEITAR:*\n` +
       `${acceptLink}\n\n` +
       `_Ao clicar, o status será atualizado automaticamente no painel._`;
@@ -846,6 +983,11 @@ export default function OSOperationalPage() {
 
       if (response.ok && data.success) {
         toast.success("WhatsApp enviado para o motorista!");
+        setDriverNotificationSentByOS((prev) => ({
+          ...prev,
+          [osData.id]: true,
+        }));
+        void refreshData();
       } else {
         console.error('[WhatsApp] Erro na API:', data);
         toast.error(`Falha ao enviar: ${data.error || 'Erro na API WAHA'}`);
@@ -994,7 +1136,10 @@ export default function OSOperationalPage() {
     return validWaypoints.join(' x ');
   }, [formData.waypoints]);
 
-  const viewingOS = useMemo(() => osList.find(os => os.id === viewingOSId) || null, [osList, viewingOSId]);
+  const viewingOS = useMemo(() => {
+    if (!viewingOSId) return null;
+    return viewingOSLive || osList.find(os => os.id === viewingOSId) || null;
+  }, [osList, viewingOSId, viewingOSLive]);
   const cancelTargetOS = useMemo(() => osList.find(os => os.id === cancelTargetId) || null, [osList, cancelTargetId]);
 
   const operationalPassengerList = useMemo(() => {
@@ -1022,12 +1167,12 @@ export default function OSOperationalPage() {
   const driverFlow = useMemo(() => {
     const status = viewingOS?.status.operacional;
     return {
-      received: Boolean(viewingOS),
+      received: Boolean(viewingOS && (driverNotificationSentByOS[viewingOS.id] || status !== 'Pendente')),
       accepted: status === 'Aguardando' || status === 'Em Rota' || status === 'Finalizado',
       started: status === 'Em Rota' || status === 'Finalizado',
       finished: status === 'Finalizado'
     };
-  }, [viewingOS]);
+  }, [driverNotificationSentByOS, viewingOS]);
 
   const handleSwapRoute = () => {
     setOpenWaypointComments((prev) => {
