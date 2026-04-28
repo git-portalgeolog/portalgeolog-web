@@ -878,9 +878,6 @@ export default function OSOperationalPage() {
     }
 
     const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
-    const driverObj = drivers.find(d =>
-      d.name.trim().toLowerCase() === osData.motorista.trim().toLowerCase()
-    );
 
     // Veículo da OS ou vinculado ao motorista
     let vehicleInfo = { modelo: '', marca: '', placa: '' };
