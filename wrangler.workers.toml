@@ -3,7 +3,7 @@
 name = "portalgeolog-web"
 main = "worker/index.js"
 compatibility_date = "2025-03-31"
-compatibility_flags = ["nodejs_compat"]
+compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
 
 [assets]
 directory = "dist/client"

@@ -7,7 +7,7 @@ export type ServerPaginatedFetch<T> = (params: {
   searchTerm: string;
 }) => Promise<PaginatedResult<T>>;
 
-export function useServerPaginatedTable<T>(fetchPage: ServerPaginatedFetch<T>, pageSize = 10) {
+export function useServerPaginatedTable<T>(fetchPage: ServerPaginatedFetch<T>, pageSize = 10, enabled = true) {
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [items, setItems] = useState<T[]>([]);
@@ -20,6 +20,10 @@ export function useServerPaginatedTable<T>(fetchPage: ServerPaginatedFetch<T>, p
   }, [pageSize, totalCount]);
 
   const loadPage = useCallback(async () => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const result = await fetchPage({ page, pageSize, searchTerm });
@@ -34,7 +38,7 @@ export function useServerPaginatedTable<T>(fetchPage: ServerPaginatedFetch<T>, p
     } finally {
       setLoading(false);
     }
-  }, [fetchPage, page, pageSize, searchTerm]);
+  }, [fetchPage, page, pageSize, searchTerm, enabled]);
 
   useEffect(() => {
     void loadPage();

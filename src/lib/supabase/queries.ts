@@ -118,6 +118,13 @@ type OSRow = {
   status_financeiro: OrderService['status']['financeiro'];
   distancia: string | null;
   arquivado: boolean;
+  driver_message_sent_at: string | null;
+  driver_accepted_at: string | null;
+  driver_km_initial: number | null;
+  route_started_at: string | null;
+  route_started_km: number | null;
+  route_finished_at: string | null;
+  route_finished_km: number | null;
 };
 type OSWaypointRow = {
   id: string;
@@ -198,6 +205,13 @@ const mapOSRecord = (
     },
     distancia: o.distancia ? Number(o.distancia) : undefined,
     rota: waypoints.length > 0 ? { waypoints } : undefined,
+    driverMessageSentAt: o.driver_message_sent_at ?? undefined,
+    driverAcceptedAt: o.driver_accepted_at ?? undefined,
+    driverKmInitial: o.driver_km_initial ?? undefined,
+    routeStartedAt: o.route_started_at ?? undefined,
+    routeStartedKm: o.route_started_km ?? undefined,
+    routeFinishedAt: o.route_finished_at ?? undefined,
+    routeFinishedKm: o.route_finished_km ?? undefined,
   };
 };
 
@@ -757,6 +771,13 @@ export async function fetchOSPage({
         },
         distancia: o.distancia ? Number(o.distancia) : undefined,
         rota: waypoints.length > 0 ? { waypoints } : undefined,
+        driverMessageSentAt: o.driver_message_sent_at ?? undefined,
+        driverAcceptedAt: o.driver_accepted_at ?? undefined,
+        driverKmInitial: o.driver_km_initial ?? undefined,
+        routeStartedAt: o.route_started_at ?? undefined,
+        routeStartedKm: o.route_started_km ?? undefined,
+        routeFinishedAt: o.route_finished_at ?? undefined,
+        routeFinishedKm: o.route_finished_km ?? undefined,
       };
     }),
     totalCount: count ?? typedOrders.length,

@@ -240,6 +240,166 @@ export async function sendWhatsAppMessage(
   return data;
 }
 
+export async function sendWhatsAppList(
+  phone: string,
+  title: string,
+  description: string,
+  buttonText: string,
+  options: Array<{ id: string; title: string; description?: string | null }>,
+  footer?: string
+): Promise<{ id: string; [key: string]: unknown }> {
+  const { url: WAHA_API_URL, key: WAHA_API_KEY, session: WAHA_SESSION } = getWahaConfig();
+  if (!WAHA_API_URL || !WAHA_API_KEY) {
+    throw new Error('WAHA não configurada (faltam variáveis de ambiente)');
+  }
+
+  const cleanPhone = validatePhone(phone);
+
+  if (!title || title.trim().length === 0) {
+    throw new Error('Título da lista não pode estar vazio');
+  }
+  if (!description || description.trim().length === 0) {
+    throw new Error('Descrição da lista não pode estar vazia');
+  }
+  if (!buttonText || buttonText.trim().length === 0) {
+    throw new Error('Texto do botão não pode estar vazio');
+  }
+  if (!options || options.length === 0) {
+    throw new Error('Lista precisa de pelo menos uma opção');
+  }
+
+  const currentState = await fetchWahaSessionState();
+
+  if (currentState.state !== 'open') {
+    throw new Error(
+      `Sessão WAHA indisponível no momento (${currentState.state}). Refaça a conexão antes de enviar.`
+    );
+  }
+
+  const url = `${WAHA_API_URL}/api/sendList`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Api-Key': WAHA_API_KEY,
+    },
+    body: JSON.stringify({
+      session: WAHA_SESSION,
+      chatId: `${cleanPhone}@c.us`,
+      message: {
+        title,
+        description,
+        footer: footer || undefined,
+        button: buttonText,
+        sections: [
+          {
+            title: 'Opções',
+            rows: options.map((option) => ({
+              title: option.title,
+              rowId: option.id,
+              description: option.description || undefined,
+            })),
+          },
+        ],
+      },
+    }),
+    signal: AbortSignal.timeout(WAHA_SEND_TIMEOUT_MS),
+  });
+
+  const responseText = await response.text().catch(() => '');
+  let data: Record<string, unknown> = {};
+
+  if (responseText) {
+    try {
+      data = JSON.parse(responseText) as Record<string, unknown>;
+    } catch {
+      data = { raw: responseText };
+    }
+  }
+
+  if (!response.ok) {
+    const payload = typeof data === 'string' ? data : JSON.stringify(data);
+    throw new Error(
+      response.status === 524
+        ? 'WAHA demorou demais para responder (524). Verifique se a sessão está conectada.'
+        : `WAHA error ${response.status}: ${payload}`
+    );
+  }
+
+  return data as { id: string; [key: string]: unknown };
+}
+
+export async function sendWhatsAppPoll(
+  phone: string,
+  question: string,
+  options: string[]
+): Promise<{ id: string; [key: string]: unknown }> {
+  const { url: WAHA_API_URL, key: WAHA_API_KEY, session: WAHA_SESSION } = getWahaConfig();
+  if (!WAHA_API_URL || !WAHA_API_KEY) {
+    throw new Error('WAHA não configurada (faltam variáveis de ambiente)');
+  }
+
+  const cleanPhone = validatePhone(phone);
+
+  if (!question || question.trim().length === 0) {
+    throw new Error('Pergunta da enquete não pode estar vazia');
+  }
+  if (!options || options.length < 2) {
+    throw new Error('Enquete precisa de pelo menos 2 opções');
+  }
+
+  const currentState = await fetchWahaSessionState();
+
+  if (currentState.state !== 'open') {
+    throw new Error(
+      `Sessão WAHA indisponível no momento (${currentState.state}). Refaça a conexão antes de enviar.`
+    );
+  }
+
+  const url = `${WAHA_API_URL}/api/sendPoll`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Api-Key': WAHA_API_KEY,
+    },
+    body: JSON.stringify({
+      session: WAHA_SESSION,
+      chatId: `${cleanPhone}@c.us`,
+      poll: {
+        name: question,
+        options,
+        multipleAnswers: false,
+      },
+    }),
+    signal: AbortSignal.timeout(WAHA_SEND_TIMEOUT_MS),
+  });
+
+  const responseText = await response.text().catch(() => '');
+  let data: Record<string, unknown> = {};
+
+  if (responseText) {
+    try {
+      data = JSON.parse(responseText) as Record<string, unknown>;
+    } catch {
+      data = { raw: responseText };
+    }
+  }
+
+  if (!response.ok) {
+    const payload = typeof data === 'string' ? data : JSON.stringify(data);
+    throw new Error(
+      response.status === 524
+        ? 'WAHA demorou demais para responder (524). Verifique se a sessão está conectada.'
+        : `WAHA error ${response.status}: ${payload}`
+    );
+  }
+
+  return data as { id: string; [key: string]: unknown };
+}
+
 export async function startWahaSession(sessionName?: string): Promise<WahaSessionSnapshot> {
   const { url: WAHA_API_URL, key: WAHA_API_KEY, session: WAHA_SESSION } = getWahaConfig();
   const resolvedSession = sessionName ?? WAHA_SESSION;

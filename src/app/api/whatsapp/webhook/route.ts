@@ -120,6 +120,77 @@ export async function POST(request: Request) {
 
     const event = body.event ?? body.payload?.event;
 
+    // Processa respostas da lista de opções via eventos de mensagem
+    if (event === 'message' || event === 'message.any') {
+      const messagePayload = body.payload as {
+        id?: string;
+        from?: string;
+        body?: string;
+        replyTo?: { id?: string | null } | null;
+      } | null;
+
+      const selectedText = messagePayload?.body?.trim() || '';
+      const replyToId = messagePayload?.replyTo?.id || null;
+
+      const normalizedChoice = selectedText.toLowerCase();
+      const isKnownChoice = normalizedChoice === 'aceitar' || normalizedChoice === 'recusar';
+
+      if (!isKnownChoice || !replyToId) {
+        return NextResponse.json({ ignored: true, reason: 'not a list reply' });
+      }
+
+      const supabase = createAdminClient();
+
+      const { data: listRecord, error: listError } = await supabase
+        .from('os_driver_polls')
+        .select('os_id, id')
+        .eq('poll_id', replyToId)
+        .single();
+
+      if (listError || !listRecord) {
+        console.error('[whatsapp/webhook] List message not found:', replyToId, listError);
+        return NextResponse.json({ ignored: true, reason: 'list message not found' });
+      }
+
+      const now = new Date().toISOString();
+
+      const { error: updateError } = await supabase
+        .from('os_driver_polls')
+        .update({
+          status: 'voted',
+          voted_option: selectedText,
+          voted_at: now,
+          updated_at: now,
+        })
+        .eq('id', listRecord.id);
+
+      if (updateError) {
+        console.error('[whatsapp/webhook] Error updating list record:', updateError);
+        return NextResponse.json({ error: 'DB error' }, { status: 500 });
+      }
+
+      const operationalStatus = normalizedChoice === 'aceitar' ? 'Aguardando' : 'Cancelado';
+
+      const { error: osError } = await supabase
+        .from('ordens_servico')
+        .update({
+          status_operacional: operationalStatus,
+          updated_at: now,
+        })
+        .eq('id', listRecord.os_id);
+
+      if (osError) {
+        console.error('[whatsapp/webhook] Error updating OS:', osError);
+      }
+
+      return NextResponse.json({
+        success: true,
+        choice: selectedText,
+        osId: listRecord.os_id,
+        operationalStatus,
+      });
+    }
+
     // Só processa eventos de status da sessão
     if (event !== 'session.status' && event !== 'connection.update') {
       return NextResponse.json({ ignored: true, event });

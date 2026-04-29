@@ -96,6 +96,13 @@ export interface OrderService {
   rota?: {
     waypoints: Waypoint[];
   };
+  driverMessageSentAt?: string;
+  driverAcceptedAt?: string;
+  driverKmInitial?: number;
+  routeStartedAt?: string;
+  routeStartedKm?: number;
+  routeFinishedAt?: string;
+  routeFinishedKm?: number;
 }
 
 export interface OSStatus {

@@ -87,6 +87,7 @@ type VehicleOption = {
   placa: string;
   modelo: string;
   marca: string;
+  tipo?: 'carro' | 'van' | 'onibus' | 'moto' | 'caminhao' | 'outro';
 };
 
 const initialQuickAddDriverForm: QuickAddDriverForm = {
@@ -181,7 +182,7 @@ const validarPlacaOS = (placa: string): boolean => {
 };
 
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, addParceiro, refreshData, lastOSUpdate, impostoPercentual } = useData();
+  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, addParceiro, refreshData, impostoPercentual, loading: dataLoading } = useData();
   const supabase = createClient();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -231,19 +232,7 @@ export default function OSOperationalPage() {
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>(defaultAdvancedFilters);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [clientPage, setClientPage] = useState(1);
-  const osTable = useServerPaginatedTable(fetchOSPage, 10);
-  const osTableRefreshRef = useRef(osTable.refresh);
-  
-  useEffect(() => {
-    osTableRefreshRef.current = osTable.refresh;
-  }, [osTable.refresh]);
-
-  // Sincronizar tabela com atualizações globais de OS
-  useEffect(() => {
-    if (lastOSUpdate > 0) {
-      void osTableRefreshRef.current();
-    }
-  }, [lastOSUpdate]);
+  const osTable = useServerPaginatedTable(fetchOSPage, 10, false);
 
   useEffect(() => {
     if (!viewingOSId) {
@@ -616,7 +605,7 @@ export default function OSOperationalPage() {
     const fetchVehicles = async () => {
       const { data, error } = await supabase
         .from('veiculos')
-        .select('id, placa, modelo, marca')
+        .select('id, placa, modelo, marca, tipo')
         .eq('status', 'ativo')
         .order('marca', { ascending: true })
         .order('modelo', { ascending: true });
@@ -695,6 +684,7 @@ export default function OSOperationalPage() {
     setEditingOSId(null);
     setFormData(initialForm);
     setOpenWaypointComments({});
+    void refreshData();
   };
 
   const handleOpenCreateOSModal = () => {
@@ -759,7 +749,6 @@ export default function OSOperationalPage() {
 
   const handleReopenOS = (osId: string) => {
     updateOSStatus(osId, { operacional: 'Pendente' });
-    void osTable.refresh();
     setOpenActionMenuId(null);
   };
 
@@ -784,7 +773,6 @@ export default function OSOperationalPage() {
 
     try {
       await deleteOS(osId);
-      void osTable.refresh();
       setOpenActionMenuId(null);
       toast.success('OS arquivada com sucesso!');
     } catch (error) {
@@ -796,7 +784,6 @@ export default function OSOperationalPage() {
   const confirmCancelOS = () => {
     if (!cancelTargetId) return;
     updateOSStatus(cancelTargetId, { operacional: 'Cancelado' });
-    void osTable.refresh();
     setCancelTargetId(null);
   };
 
@@ -808,7 +795,7 @@ export default function OSOperationalPage() {
     if (!viewingOS) return;
     setNotifyLoadingKey(passengerKey);
     try {
-      const acceptUrl = `${window.location.origin}/aceitar`;
+      const acceptUrl = `${window.location.origin}/a`;
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
         toast.error('Sessão expirada. Por favor, faça login novamente.');
@@ -880,20 +867,17 @@ export default function OSOperationalPage() {
     const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
 
     // Veículo da OS ou vinculado ao motorista
-    let vehicleInfo = { modelo: '', marca: '', placa: '' };
+    let vehicleInfo = { tipo: '', placa: '' };
     if (osData.veiculoId) {
       const v = vehicles.find(v => v.id === osData.veiculoId);
-      if (v) vehicleInfo = { modelo: v.modelo || '', marca: v.marca || '', placa: v.placa || '' };
+      if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
     } else if (driverObj?.id) {
       const assoc = driverVehiclesAssoc.find(a => a.driver_id === driverObj.id);
       if (assoc) {
         const v = vehicles.find(v => v.id === assoc.vehicle_id);
-        if (v) vehicleInfo = { modelo: v.modelo || '', marca: v.marca || '', placa: v.placa || '' };
+        if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
       }
     }
-
-    // Link de aceitação
-    const acceptLink = `https://portalgeolog.com.br/aceitar/${osData.id}`;
 
     // Passageiros do itinerário
     const allPassengers: { nome: string; celular: string }[] = [];
@@ -926,9 +910,9 @@ export default function OSOperationalPage() {
       }).join('\n\n');
     }
 
-    // Transporte
-    const vehicleDisplay = vehicleInfo.modelo && vehicleInfo.marca
-      ? `${vehicleInfo.marca} ${vehicleInfo.modelo}`
+    // Transporte: usar tipo do veículo
+    const tipoCapitalizado = vehicleInfo.tipo
+      ? vehicleInfo.tipo.charAt(0).toUpperCase() + vehicleInfo.tipo.slice(1)
       : 'Não informado';
     const placaDisplay = vehicleInfo.placa || 'Não informada';
 
@@ -937,24 +921,53 @@ export default function OSOperationalPage() {
       ? allPassengers.map(p => `• ${p.nome}${p.celular !== 'Não informado' ? ` – ${p.celular}` : ''}`).join('\n')
       : 'Não informado';
 
+    // Buscar ou criar slug curto para a OS
+    let shortSlug = osData.id;
+    try {
+      const { data: existing } = await supabase
+        .from('os_link_shortcuts')
+        .select('slug')
+        .eq('os_id', osData.id)
+        .single();
+      if (existing?.slug) {
+        shortSlug = existing.slug;
+      } else {
+        const newSlug = Math.random().toString(36).slice(2, 17);
+        const { data: inserted } = await supabase
+          .from('os_link_shortcuts')
+          .insert({ os_id: osData.id, slug: newSlug })
+          .select('slug')
+          .single();
+        if (inserted?.slug) shortSlug = inserted.slug;
+      }
+    } catch {
+      /* fallback: usa o UUID */
+    }
+
+    const acceptLink = `${window.location.origin}/a/${shortSlug}`;
+
+    const osLine = osData.os ? `🆔 *OS:* ${osData.os}\n` : '';
+
     const message =
-      `🆔 *OS ${osData.os || osData.protocolo}*\n` +
-      `📋 ${osData.trecho || 'Serviço'}\n\n` +
+      `📋 *Protocolo:* ${osData.protocolo}\n` +
+      `${osLine}` +
+      `📦 *Fornecedor:* Geolog Transporte Executivo\n` +
       `📅 *Data:* ${osData.data.split('-').reverse().join('/')}\n` +
-      `⏰ *Horário:* ${osData.hora || 'Não informado'}\n\n` +
+      `⏰ *Horário:* ${osData.hora || 'Não informado'}\n` +
       `🏢 *Empresa:* ${cliente}\n` +
-      `👤 *Solicitante:* ${osData.solicitante || 'Não informado'}\n\n` +
-      `🚗 *Transporte:* ${vehicleDisplay}\n\n` +
+      `👤 *Solicitante:* ${osData.solicitante || 'Não informado'}\n` +
+      `🚗 *Transporte:* ${tipoCapitalizado}\n\n` +
+      `────────────────\n` +
       `👥 *Passageiro(s):*\n${paxText}\n\n` +
+      `────────────────\n` +
       `📍 *Itinerário:*\n${itineraryText}\n\n` +
-      `────────────────────────\n` +
+      `────────────────\n` +
       `👨‍✈️ *Motorista:* ${osData.motorista}\n` +
       `📞 *Contato:* ${driverObj?.phone || 'Não informado'}\n` +
-      `🚘 *Veículo:* ${vehicleDisplay}\n` +
+      `🚘 *Veículo:* ${tipoCapitalizado}\n` +
       `📝 *Placa:* ${placaDisplay}\n\n` +
-      `👇 *CLIQUE NO LINK ABAIXO PARA ACEITAR:*\n` +
-      `${acceptLink}\n\n` +
-      `_Ao clicar, o status será atualizado automaticamente no painel._`;
+      `👇 *Aceitar o serviço:*\n` +
+      `${acceptLink}\n`;
 
     setNotifyLoadingKey('driver-whatsapp');
     try {
@@ -967,7 +980,8 @@ export default function OSOperationalPage() {
 
       console.log(`[WhatsApp] Enviando notificação para ${osData.motorista} (${phone})`);
 
-      const response = await fetch('/api/whatsapp', {
+      // 1. Enviar mensagem informativa com link curto
+      const msgResponse = await fetch('/api/whatsapp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -976,19 +990,29 @@ export default function OSOperationalPage() {
         body: JSON.stringify({ phone, message })
       });
 
-      const data = await response.json();
+      const msgData = await msgResponse.json();
 
-      if (response.ok && data.success) {
-        toast.success("WhatsApp enviado para o motorista!");
-        setDriverNotificationSentByOS((prev) => ({
-          ...prev,
-          [osData.id]: true,
-        }));
-        void refreshData();
-      } else {
-        console.error('[WhatsApp] Erro na API:', data);
-        toast.error(`Falha ao enviar: ${data.error || 'Erro na API WAHA'}`);
+      if (!msgResponse.ok || !msgData.success) {
+        console.error('[WhatsApp] Erro na API de mensagem:', msgData);
+        toast.error(`Falha ao enviar mensagem: ${msgData.error || 'Erro na API WAHA'}`);
+        setNotifyLoadingKey(null);
+        return;
       }
+
+      toast.success("WhatsApp enviado para o motorista!");
+      setDriverNotificationSentByOS((prev) => ({
+        ...prev,
+        [osData.id]: true,
+      }));
+      try {
+        await supabase
+          .from('ordens_servico')
+          .update({ driver_message_sent_at: new Date().toISOString() })
+          .eq('id', osData.id);
+      } catch (dbErr) {
+        console.error('[WhatsApp] Erro ao registrar timestamp de envio:', dbErr);
+      }
+      void refreshData();
     } catch (err) {
       console.error("[WhatsApp] Erro crítico:", err);
       toast.error("Erro ao conectar com a API de WhatsApp.");
@@ -1164,10 +1188,27 @@ export default function OSOperationalPage() {
   const driverFlow = useMemo(() => {
     const status = viewingOS?.status.operacional;
     return {
-      received: Boolean(viewingOS && (driverNotificationSentByOS[viewingOS.id] || status !== 'Pendente')),
-      accepted: status === 'Aguardando' || status === 'Em Rota' || status === 'Finalizado',
-      started: status === 'Em Rota' || status === 'Finalizado',
-      finished: status === 'Finalizado'
+      received: Boolean(
+        viewingOS &&
+        (driverNotificationSentByOS[viewingOS.id] ||
+          viewingOS.driverMessageSentAt ||
+          status !== 'Pendente')
+      ),
+      accepted: Boolean(
+        viewingOS?.driverAcceptedAt ||
+        status === 'Aguardando' ||
+        status === 'Em Rota' ||
+        status === 'Finalizado'
+      ),
+      started: Boolean(
+        viewingOS?.routeStartedAt ||
+        status === 'Em Rota' ||
+        status === 'Finalizado'
+      ),
+      finished: Boolean(
+        viewingOS?.routeFinishedAt ||
+        status === 'Finalizado'
+      ),
     };
   }, [driverNotificationSentByOS, viewingOS]);
 
@@ -1715,14 +1756,12 @@ export default function OSOperationalPage() {
 
     if (editingOSId) {
       updateOS(editingOSId, finalData);
-      void osTable.refresh();
       resetMainModalState();
       return;
     }
 
     try {
       await addOS(finalData);
-      await osTable.refresh();
       resetMainModalState();
     } catch (error) {
       console.error('Error in handleAddOS:', error);
@@ -1833,6 +1872,14 @@ export default function OSOperationalPage() {
     const start = (clientPage - 1) * clientPageSize;
     return filteredData.slice(start, start + clientPageSize);
   }, [filteredData, clientPage]);
+
+  const tableItems = useMemo(() => {
+    if (hasActiveAdvancedFilters) return clientPaginatedItems;
+    const start = (osTable.page - 1) * osTable.pageSize;
+    return filteredData.slice(start, start + osTable.pageSize);
+  }, [hasActiveAdvancedFilters, clientPaginatedItems, filteredData, osTable.page, osTable.pageSize]);
+
+  const tableTotalCount = useMemo(() => filteredData.length, [filteredData]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -2225,8 +2272,8 @@ export default function OSOperationalPage() {
       {/* Conteúdo: Tabela ou Calendário */}
       {viewMode === 'table' ? (
         <DataTable
-          data={hasActiveAdvancedFilters ? clientPaginatedItems : osTable.items}
-          loading={osTable.loading && !hasActiveAdvancedFilters}
+          data={tableItems}
+          loading={dataLoading && !hasActiveAdvancedFilters}
           disableClientSearch
           pagination={hasActiveAdvancedFilters ? {
             page: clientPage,
@@ -2236,7 +2283,7 @@ export default function OSOperationalPage() {
           } : {
             page: osTable.page,
             pageSize: osTable.pageSize,
-            totalItems: osTable.totalCount,
+            totalItems: tableTotalCount,
             onPageChange: osTable.setPage,
           }}
           columns={[
@@ -3086,7 +3133,10 @@ export default function OSOperationalPage() {
 
       {viewingOS && (
         <StandardModal
-          onClose={() => setViewingOSId(null)}
+          onClose={() => {
+            setViewingOSId(null);
+            void refreshData();
+          }}
           title={`Visão Operacional ${viewingOS.os || 'Sem OS'}`}
           subtitle={`Protocolo ${viewingOS.protocolo}`}
           icon={<Eye size={24} />}
@@ -3218,38 +3268,46 @@ export default function OSOperationalPage() {
 
                   {/* Steps */}
                   {[
-                    { 
-                      id: 'received', 
-                      icon: <MessageCircle size={20} />, 
-                      label: 'Mensagem', 
-                      sublabel: 'Enviada', 
+                    {
+                      id: 'received',
+                      icon: <MessageCircle size={20} />,
+                      label: 'Mensagem',
+                      sublabel: 'Enviada',
                       active: driverFlow.received,
-                      color: 'blue-light'
+                      color: 'blue-light',
+                      timestamp: viewingOS?.driverMessageSentAt,
+                      km: undefined as number | undefined,
                     },
-                    { 
-                      id: 'accepted', 
-                      icon: <CheckCircle2 size={20} />, 
-                      label: 'Aceite', 
-                      sublabel: driverFlow.accepted ? 'Confirmado' : 'Aguardando', 
+                    {
+                      id: 'accepted',
+                      icon: <CheckCircle2 size={20} />,
+                      label: 'Aceite',
+                      sublabel: driverFlow.accepted ? 'Confirmado' : 'Aguardando',
                       active: driverFlow.accepted,
-                      color: 'emerald-light'
+                      color: 'emerald-light',
+                      timestamp: viewingOS?.driverAcceptedAt,
+                      km: viewingOS?.driverKmInitial,
                     },
-                    { 
-                      id: 'started', 
-                      icon: <Navigation size={20} />, 
-                      label: 'Em Rota', 
-                      sublabel: driverFlow.started ? 'Iniciado' : 'Pendente', 
+                    {
+                      id: 'started',
+                      icon: <Navigation size={20} />,
+                      label: 'Em Rota',
+                      sublabel: driverFlow.started ? 'Iniciado' : 'Pendente',
                       active: driverFlow.started,
-                      color: 'blue'
+                      color: 'blue',
+                      timestamp: viewingOS?.routeStartedAt,
+                      km: viewingOS?.routeStartedKm ?? viewingOS?.driverKmInitial,
                     },
-                    { 
-                      id: 'finished', 
-                      icon: <FileText size={20} />, 
-                      label: 'Concluído', 
-                      sublabel: driverFlow.finished ? 'Finalizado' : 'Em aberto', 
+                    {
+                      id: 'finished',
+                      icon: <FileText size={20} />,
+                      label: 'Concluído',
+                      sublabel: driverFlow.finished ? 'Finalizado' : 'Em aberto',
                       active: driverFlow.finished,
-                      color: 'emerald'
-                    }
+                      color: 'emerald',
+                      timestamp: viewingOS?.routeFinishedAt,
+                      km: viewingOS?.routeFinishedKm,
+                    },
                   ].map((step) => (
                     <button
                       key={step.id}
@@ -3300,6 +3358,16 @@ export default function OSOperationalPage() {
                         <p className={`text-[10px] font-bold transition-colors ${step.active ? 'text-slate-500' : 'text-slate-300'}`}>
                           {step.sublabel}
                         </p>
+                        {step.timestamp && (
+                          <p className="text-[9px] font-medium text-slate-400">
+                            {new Date(step.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        )}
+                        {typeof step.km === 'number' && (
+                          <p className="text-[9px] font-black text-slate-600">
+                            KM: {step.km.toLocaleString('pt-BR')}
+                          </p>
+                        )}
                       </div>
 
                       {step.active && (

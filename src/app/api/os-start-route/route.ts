@@ -25,7 +25,46 @@ export async function GET(request: Request) {
 
     const { data: os, error: findError } = await getAdmin()
       .from('ordens_servico')
-      .select('id, status_operacional')
+      .select('id, status_operacional, motorista, protocolo, os_number, trecho')
+      .eq('id', osId)
+      .single();
+
+    if (findError || !os) {
+      return NextResponse.json(
+        { success: false, error: 'Ordem de serviço não encontrada.' },
+        { status: 404 }
+      );
+    }
+
+    const alreadyStarted = os.status_operacional === 'Em Rota' || os.status_operacional === 'Finalizado';
+
+    return NextResponse.json({
+      success: true,
+      os,
+      alreadyStarted,
+      message: alreadyStarted ? 'Rota já iniciada anteriormente.' : undefined,
+    });
+  } catch (error: unknown) {
+    console.error('🔥 Erro os-start-route preview:', error);
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = (await request.json()) as { os_id?: string };
+    const osId = body.os_id;
+
+    if (!osId) {
+      return NextResponse.json({ success: false, error: 'ID da OS não informado.' }, { status: 400 });
+    }
+
+    const { data: os, error: findError } = await getAdmin()
+      .from('ordens_servico')
+      .select('id, status_operacional, motorista')
       .eq('id', osId)
       .single();
 
@@ -42,7 +81,10 @@ export async function GET(request: Request) {
 
     const { error: updateError } = await getAdmin()
       .from('ordens_servico')
-      .update({ status_operacional: 'Em Rota' })
+      .update({
+        status_operacional: 'Em Rota',
+        route_started_at: new Date().toISOString(),
+      })
       .eq('id', osId);
 
     if (updateError) {
@@ -53,29 +95,21 @@ export async function GET(request: Request) {
     }
 
     try {
-      if (osId) {
-        const { data: driver } = await getAdmin()
-          .from('ordens_servico')
-          .select('motorista')
-          .eq('id', osId)
+      if (os.motorista) {
+        const { data: driverPhone } = await getAdmin()
+          .from('drivers')
+          .select('phone')
+          .eq('name', os.motorista)
           .single();
 
-        if (driver?.motorista) {
-          const { data: driverPhone } = await getAdmin()
-            .from('drivers')
-            .select('phone')
-            .eq('name', driver.motorista)
-            .single();
-
-          if (driverPhone?.phone) {
-            const finishLink = `https://portalgeolog.com.br/finalizar-rota/${osId}`;
-            const message =
-              `🚗 *Rota iniciada!*\n\nBoa viagem.\n\n` +
-              `Quando chegar ao destino, clique no link abaixo para finalizar a rota:\n` +
-              `${finishLink}\n\n` +
-              `_Após clicar, o status será atualizado automaticamente no painel._`;
-            await sendWhatsAppMessage(driverPhone.phone, message);
-          }
+        if (driverPhone?.phone) {
+          const finishLink = `https://portalgeolog.com.br/finalizar-rota/${osId}`;
+          const message =
+            `🚗 *Rota iniciada!*\n\nBoa viagem.\n\n` +
+            `Quando chegar ao destino, clique no link abaixo para finalizar a rota:\n` +
+            `${finishLink}\n\n` +
+            `_Após clicar, o status será atualizado automaticamente no painel._`;
+          await sendWhatsAppMessage(driverPhone.phone, message);
         }
       }
     } catch (notifyErr) {
@@ -87,7 +121,7 @@ export async function GET(request: Request) {
       message: 'Rota iniciada. Boa viagem!',
     });
   } catch (error: unknown) {
-    console.error('🔥 Erro os-start-route:', error);
+    console.error('🔥 Erro os-start-route POST:', error);
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : String(error) },
       { status: 500 }
