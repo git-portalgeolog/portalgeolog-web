@@ -16,6 +16,22 @@ function getWahaConfig() {
   };
 }
 
+function getWebhookConfig() {
+  const webhookUrl = 'https://portalgeolog.com.br/api/whatsapp/webhook';
+  const hookHmacKey = process.env.WHATSAPP_HOOK_HMAC_KEY || process.env.WAHA_WEBHOOK_HMAC_KEY || '';
+
+  return {
+    url: webhookUrl,
+    events: ['session.status', 'message', 'message.any'],
+    ...(hookHmacKey ? { hmac: { key: hookHmacKey } } : {}),
+    retries: {
+      policy: 'constant',
+      delaySeconds: 2,
+      attempts: 15,
+    },
+  };
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ name: string }> }
@@ -55,12 +71,20 @@ export async function POST(
 
     let response = await startSession(
       `${WAHA_API_URL}/api/sessions/${encodeURIComponent(name)}/start`,
-      {}
+      {
+        name,
+        config: {
+          webhooks: [getWebhookConfig()],
+        },
+      }
     );
 
     if (response.status === 404) {
       response = await startSession(`${WAHA_API_URL}/api/sessions/start`, {
         name,
+        config: {
+          webhooks: [getWebhookConfig()],
+        },
       });
     }
 

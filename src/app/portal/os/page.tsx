@@ -43,6 +43,8 @@ import {
   Send,
   Filter,
   FilterX,
+  Link,
+  Keyboard,
 } from 'lucide-react';
 import { useData, type OrderService, type ParceiroServico } from '@/context/DataContext';
 import { fetchOSById, fetchOSPage } from '@/lib/supabase/queries';
@@ -1008,7 +1010,10 @@ export default function OSOperationalPage() {
       try {
         await supabase
           .from('ordens_servico')
-          .update({ driver_message_sent_at: new Date().toISOString() })
+          .update({
+            driver_message_sent_at: new Date().toISOString(),
+            driver_whatsapp_state: 'awaiting_accept',
+          })
           .eq('id', osData.id);
       } catch (dbErr) {
         console.error('[WhatsApp] Erro ao registrar timestamp de envio:', dbErr);
@@ -1016,6 +1021,121 @@ export default function OSOperationalPage() {
       void refreshData();
     } catch (err) {
       console.error("[WhatsApp] Erro crítico:", err);
+      toast.error("Erro ao conectar com a API de WhatsApp.");
+    } finally {
+      setNotifyLoadingKey(null);
+    }
+  };
+
+  const sendWhatsAppTextNotification = async (osData: OrderService) => {
+    if (!osData.motorista) {
+      toast.error("Motorista não atribuído a esta OS.");
+      return;
+    }
+
+    const driverObj = drivers.find(d =>
+      d.name.trim().toLowerCase() === osData.motorista.trim().toLowerCase()
+    );
+
+    let phone = driverObj?.phone || "5522997259180";
+
+    if (!driverObj?.phone) {
+      console.warn(`[WhatsApp Text] Motorista "${osData.motorista}" não encontrado ou sem telefone. Usando fallback.`);
+    }
+
+    phone = phone.replace(/\D/g, '');
+    if (phone.length > 0 && phone.length <= 11 && !phone.startsWith('55')) {
+      phone = `55${phone}`;
+    }
+
+    if (phone.length < 10) {
+      toast.error("Telefone do motorista é inválido ou não cadastrado.");
+      return;
+    }
+
+    const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
+
+    let vehicleInfo = { tipo: '', placa: '' };
+    if (osData.veiculoId) {
+      const v = vehicles.find(v => v.id === osData.veiculoId);
+      if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
+    } else if (driverObj?.id) {
+      const assoc = driverVehiclesAssoc.find(a => a.driver_id === driverObj.id);
+      if (assoc) {
+        const v = vehicles.find(v => v.id === assoc.vehicle_id);
+        if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
+      }
+    }
+
+    const tipoCapitalizado = vehicleInfo.tipo
+      ? vehicleInfo.tipo.charAt(0).toUpperCase() + vehicleInfo.tipo.slice(1)
+      : 'Não informado';
+    const placaDisplay = vehicleInfo.placa || 'Não informada';
+
+    const osLine = osData.os ? `🆔 *OS:* ${osData.os}\n` : '';
+
+    const message =
+      `📋 *Protocolo:* ${osData.protocolo}\n` +
+      `${osLine}` +
+      `📦 *Fornecedor:* Geolog Transporte Executivo\n` +
+      `📅 *Data:* ${osData.data.split('-').reverse().join('/')}\n` +
+      `⏰ *Horário:* ${osData.hora || 'Não informado'}\n` +
+      `🏢 *Empresa:* ${cliente}\n` +
+      `👤 *Solicitante:* ${osData.solicitante || 'Não informado'}\n` +
+      `🚗 *Transporte:* ${tipoCapitalizado}\n` +
+      `📝 *Placa:* ${placaDisplay}\n\n` +
+      `────────────────\n` +
+      `Para *aceitar* o serviço, digite: *1*\n` +
+      `Para *recusar*, digite: *0*\n`;
+
+    setNotifyLoadingKey('driver-whatsapp-text');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        toast.error("Sessão expirada. Por favor, faça login novamente.");
+        return;
+      }
+
+      console.log(`[WhatsApp Text] Enviando notificação para ${osData.motorista} (${phone})`);
+
+      const msgResponse = await fetch('/api/whatsapp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ phone, message })
+      });
+
+      const msgData = await msgResponse.json();
+
+      if (!msgResponse.ok || !msgData.success) {
+        console.error('[WhatsApp Text] Erro na API de mensagem:', msgData);
+        toast.error(`Falha ao enviar mensagem: ${msgData.error || 'Erro na API WAHA'}`);
+        setNotifyLoadingKey(null);
+        return;
+      }
+
+      toast.success("WhatsApp enviado para o motorista (modo texto)!");
+      setDriverNotificationSentByOS((prev) => ({
+        ...prev,
+        [osData.id]: true,
+      }));
+      try {
+        await supabase
+          .from('ordens_servico')
+          .update({
+            driver_message_sent_at: new Date().toISOString(),
+            driver_whatsapp_state: 'awaiting_accept',
+          })
+          .eq('id', osData.id);
+      } catch (dbErr) {
+        console.error('[WhatsApp Text] Erro ao registrar timestamp e estado:', dbErr);
+      }
+      void refreshData();
+    } catch (err) {
+      console.error("[WhatsApp Text] Erro crítico:", err);
       toast.error("Erro ao conectar com a API de WhatsApp.");
     } finally {
       setNotifyLoadingKey(null);
@@ -1050,6 +1170,8 @@ export default function OSOperationalPage() {
   const [notifyLoadingKey, setNotifyLoadingKey] = useState<string | null>(null);
   const [notifyMenuPosition, setNotifyMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [passengerConfirmations, setPassengerConfirmations] = useState<Record<string, boolean>>({});
+  const [openDriverNotifyMenu, setOpenDriverNotifyMenu] = useState(false);
+  const [driverNotifyMenuPos, setDriverNotifyMenuPos] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!openNotifyMenuKey) return;
@@ -1062,6 +1184,18 @@ export default function OSOperationalPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [openNotifyMenuKey]);
+
+  useEffect(() => {
+    if (!openDriverNotifyMenu) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('[data-driver-notify-menu]') || target.closest('[data-driver-notify-button]')) return;
+      setOpenDriverNotifyMenu(false);
+      setDriverNotifyMenuPos(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openDriverNotifyMenu]);
 
   useEffect(() => {
     if (!viewingOSId) {
@@ -3310,81 +3444,173 @@ export default function OSOperationalPage() {
                       km: viewingOS?.routeFinishedKm,
                     },
                   ].map((step) => (
-                    <button
-                      key={step.id}
-                      type="button"
-                      className="relative z-10 flex flex-col items-center group cursor-pointer"
-                      onClick={() => {
-                        if (step.id === 'received' && viewingOS) {
-                          if (wppStatus !== 'open') {
-                            toast.error("O WhatsApp da Geolog está offline. Verifique a conexão.");
-                            return;
-                          }
-                          sendWhatsAppNotification(viewingOS);
-                        } else {
-                          toast.info(`Etapa: ${step.label} - ${step.sublabel}`);
-                        }
-                      }}
-                      disabled={notifyLoadingKey === 'driver-whatsapp'}
-                    >
-                      <div 
-                        className={`
-                          w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-lg
-                          ${!step.active ? 'bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300' : 'text-white'}
-                          group-hover:scale-110 group-active:scale-95
-                          ${notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? 'animate-pulse' : ''}
-                        `}
-                        style={step.active ? {
-                          backgroundColor: step.color === 'blue-light' ? 'rgb(81, 222, 255)' 
-                            : step.color === 'emerald-light' ? 'rgb(26, 238, 172)'
-                            : step.color === 'blue' ? '#2563eb'
-                            : '#10b981',
-                          boxShadow: `0 10px 15px -3px ${
-                            step.color === 'blue-light' ? 'rgba(81, 222, 255, 0.4)' 
-                            : step.color === 'emerald-light' ? 'rgba(26, 238, 172, 0.4)'
-                            : step.color === 'blue' ? 'rgba(37, 99, 235, 0.4)'
-                            : 'rgba(16, 185, 129, 0.4)'
-                          }`
-                        } : {}}
-                      >
-                        {notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? (
-                          <Loader2 size={24} className="animate-spin" />
-                        ) : step.icon}
-                      </div>
-                      
-                      <div className="mt-4 text-center space-y-1">
-                        <p className={`text-[11px] font-black uppercase tracking-[0.15em] transition-colors ${step.active ? 'text-slate-900' : 'text-slate-400'}`}>
-                          {step.label}
-                        </p>
-                        <p className={`text-[10px] font-bold transition-colors ${step.active ? 'text-slate-500' : 'text-slate-300'}`}>
-                          {step.sublabel}
-                        </p>
-                        {step.timestamp && (
-                          <p className="text-[9px] font-medium text-slate-400">
-                            {new Date(step.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        )}
-                        {typeof step.km === 'number' && (
-                          <p className="text-[9px] font-black text-slate-600">
-                            KM: {step.km.toLocaleString('pt-BR')}
-                          </p>
-                        )}
-                      </div>
-
-                      {step.active && (
-                        <div 
-                          className="absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center"
-                          style={{
-                            backgroundColor: step.color === 'blue-light' ? 'rgb(81, 222, 255)' 
-                              : step.color === 'emerald-light' ? 'rgb(26, 238, 172)'
-                              : step.color === 'blue' ? '#2563eb'
-                              : '#10b981'
+                    <div key={step.id} className="relative z-10 flex flex-col items-center">
+                      {step.id === 'received' && viewingOS ? (
+                        <div className="relative">
+                          <button
+                            type="button"
+                            data-driver-notify-button
+                            className="flex flex-col items-center group cursor-pointer"
+                            onClick={(e) => {
+                              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                              setDriverNotifyMenuPos({ x: rect.left + rect.width / 2, y: rect.bottom });
+                              setOpenDriverNotifyMenu(!openDriverNotifyMenu);
+                            }}
+                            disabled={notifyLoadingKey === 'driver-whatsapp' || notifyLoadingKey === 'driver-whatsapp-text'}
+                          >
+                            <div
+                              className={`
+                                w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-lg
+                                ${!step.active ? 'bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300' : 'text-white'}
+                                group-hover:scale-110 group-active:scale-95
+                                ${(notifyLoadingKey === 'driver-whatsapp' || notifyLoadingKey === 'driver-whatsapp-text') && step.id === 'received' ? 'animate-pulse' : ''}
+                              `}
+                              style={step.active ? {
+                                backgroundColor: 'rgb(81, 222, 255)',
+                                boxShadow: '0 10px 15px -3px rgba(81, 222, 255, 0.4)'
+                              } : {}}
+                            >
+                              {(notifyLoadingKey === 'driver-whatsapp' || notifyLoadingKey === 'driver-whatsapp-text') && step.id === 'received' ? (
+                                <Loader2 size={24} className="animate-spin" />
+                              ) : step.icon}
+                            </div>
+                            <div className="mt-4 text-center space-y-1">
+                              <p className={`text-[11px] font-black uppercase tracking-[0.15em] transition-colors ${step.active ? 'text-slate-900' : 'text-slate-400'}`}>
+                                {step.label}
+                              </p>
+                              <p className={`text-[10px] font-bold transition-colors ${step.active ? 'text-slate-500' : 'text-slate-300'}`}>
+                                {step.sublabel}
+                              </p>
+                              {step.timestamp && (
+                                <p className="text-[9px] font-medium text-slate-400">
+                                  {new Date(step.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              )}
+                            </div>
+                            {step.active && (
+                              <div
+                                className="absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center"
+                                style={{ backgroundColor: 'rgb(81, 222, 255)' }}
+                              >
+                                <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></div>
+                              </div>
+                            )}
+                          </button>
+                          {openDriverNotifyMenu && driverNotifyMenuPos && (
+                            <div
+                              data-driver-notify-menu
+                              style={{
+                                position: 'fixed',
+                                left: driverNotifyMenuPos.x,
+                                top: driverNotifyMenuPos.y + 8,
+                                transform: 'translateX(-50%)',
+                              }}
+                              className="z-[9999] min-w-[240px] bg-white rounded-2xl border border-slate-200 shadow-xl p-2 space-y-1"
+                            >
+                              <p className="px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                                <MessageCircle size={12} />
+                                Enviar WhatsApp
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (wppStatus !== 'open') {
+                                    toast.error("O WhatsApp da Geolog está offline. Verifique a conexão.");
+                                    setOpenDriverNotifyMenu(false);
+                                    return;
+                                  }
+                                  sendWhatsAppNotification(viewingOS);
+                                  setOpenDriverNotifyMenu(false);
+                                }}
+                                disabled={!!notifyLoadingKey}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                              >
+                                <Link size={14} />
+                                {notifyLoadingKey === 'driver-whatsapp' ? 'Enviando...' : 'Com link (aceitar)'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (wppStatus !== 'open') {
+                                    toast.error("O WhatsApp da Geolog está offline. Verifique a conexão.");
+                                    setOpenDriverNotifyMenu(false);
+                                    return;
+                                  }
+                                  sendWhatsAppTextNotification(viewingOS);
+                                  setOpenDriverNotifyMenu(false);
+                                }}
+                                disabled={!!notifyLoadingKey}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-green-50 hover:text-green-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                              >
+                                <Keyboard size={14} />
+                                {notifyLoadingKey === 'driver-whatsapp-text' ? 'Enviando...' : 'Por texto (digite 1/0)'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="flex flex-col items-center group cursor-pointer"
+                          onClick={() => {
+                            toast.info(`Etapa: ${step.label} - ${step.sublabel}`);
                           }}
                         >
-                          <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></div>
-                        </div>
+                          <div
+                            className={`
+                              w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-lg
+                              ${!step.active ? 'bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300' : 'text-white'}
+                              group-hover:scale-110 group-active:scale-95
+                            `}
+                            style={step.active ? {
+                              backgroundColor: step.color === 'blue-light' ? 'rgb(81, 222, 255)'
+                                : step.color === 'emerald-light' ? 'rgb(26, 238, 172)'
+                                : step.color === 'blue' ? '#2563eb'
+                                : '#10b981',
+                              boxShadow: `0 10px 15px -3px ${
+                                step.color === 'blue-light' ? 'rgba(81, 222, 255, 0.4)'
+                                : step.color === 'emerald-light' ? 'rgba(26, 238, 172, 0.4)'
+                                : step.color === 'blue' ? 'rgba(37, 99, 235, 0.4)'
+                                : 'rgba(16, 185, 129, 0.4)'
+                              }`
+                            } : {}}
+                          >
+                            {step.icon}
+                          </div>
+                          <div className="mt-4 text-center space-y-1">
+                            <p className={`text-[11px] font-black uppercase tracking-[0.15em] transition-colors ${step.active ? 'text-slate-900' : 'text-slate-400'}`}>
+                              {step.label}
+                            </p>
+                            <p className={`text-[10px] font-bold transition-colors ${step.active ? 'text-slate-500' : 'text-slate-300'}`}>
+                              {step.sublabel}
+                            </p>
+                            {step.timestamp && (
+                              <p className="text-[9px] font-medium text-slate-400">
+                                {new Date(step.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            )}
+                            {typeof step.km === 'number' && (
+                              <p className="text-[9px] font-black text-slate-600">
+                                KM: {step.km.toLocaleString('pt-BR')}
+                              </p>
+                            )}
+                          </div>
+                          {step.active && (
+                            <div
+                              className="absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center"
+                              style={{
+                                backgroundColor: step.color === 'blue-light' ? 'rgb(81, 222, 255)'
+                                  : step.color === 'emerald-light' ? 'rgb(26, 238, 172)'
+                                  : step.color === 'blue' ? '#2563eb'
+                                  : '#10b981'
+                              }}
+                            >
+                              <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></div>
+                            </div>
+                          )}
+                        </button>
                       )}
-                    </button>
+                    </div>
                   ))}
                 </div>
               </div>
