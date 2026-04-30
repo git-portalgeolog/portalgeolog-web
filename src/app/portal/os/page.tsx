@@ -54,6 +54,7 @@ import { toast } from 'sonner';
 import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
 import OSCalendar from '@/components/OS/OSCalendar';
 import { useConfirm } from '@/hooks/useConfirm';
+import { BASE_URL } from '@/lib/constants';
 
 type FormPassenger = { id: string; solicitanteId: string; nome: string; };
 type FormWaypoint = { label: string; lat: number | null; lng: number | null; comment: string; passengers: FormPassenger[]; };
@@ -795,7 +796,7 @@ export default function OSOperationalPage() {
     if (!viewingOS) return;
     setNotifyLoadingKey(passengerKey);
     try {
-      const acceptUrl = `${window.location.origin}/a`;
+      const acceptUrl = `${BASE_URL}/a`;
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
         toast.error('Sessão expirada. Por favor, faça login novamente.');
@@ -944,7 +945,7 @@ export default function OSOperationalPage() {
       /* fallback: usa o UUID */
     }
 
-    const acceptLink = `${window.location.origin}/a/${shortSlug}`;
+    const acceptLink = `${BASE_URL}/a/${shortSlug}`;
 
     const osLine = osData.os ? `🆔 *OS:* ${osData.os}\n` : '';
 
