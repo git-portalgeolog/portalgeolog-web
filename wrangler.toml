@@ -1,9 +1,9 @@
-# Cloudflare — config de BUILD (lido pelo @cloudflare/vite-plugin durante vinext build)
-# Para deploy, use: npx wrangler deploy --config wrangler.workers.toml
+# Cloudflare Workers — config de BUILD (lido pelo @cloudflare/vite-plugin durante vinext build)
+# NUNCA use pages_build_output_dir aqui — isso ativa Cloudflare Pages e quebra as rotas
+# Para deploy manual: npx wrangler deploy --config wrangler.workers.toml
 name = "portalgeolog-web"
 compatibility_date = "2025-03-31"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = "dist/client"
 
 [vars]
 NEXT_PUBLIC_SUPABASE_URL = "https://hzpgfapvjwqtjclriisz.supabase.co"
