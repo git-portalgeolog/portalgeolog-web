@@ -9,11 +9,18 @@ export default {
       globalThis.process = { env: {} };
     }
 
-    // Mapeia todas as variáveis do env para process.env
-    Object.assign(globalThis.process.env, env);
+    // Cria um Proxy para process.env que consulta o env do Cloudflare como fallback.
+    // Isso resolve capturas top-level no bundle server que ocorrem quando o módulo
+    // é avaliado antes do Object.assign ter efeito completo.
+    const originalEnv = globalThis.process.env || {};
+    globalThis.process.env = new Proxy(originalEnv, {
+      get(target, prop) {
+        if (prop in target) return target[prop];
+        if (prop in env) return env[prop];
+        return undefined;
+      }
+    });
 
-    // Import dinâmico garante que o bundle server só seja avaliado
-    // depois que process.env já contém as variáveis do Cloudflare
     const { default: handler } = await import("../dist/server/index.js");
 
     return handler(request, ctx);
