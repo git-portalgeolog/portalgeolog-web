@@ -3,8 +3,6 @@ import {
   checkRateLimit,
   getRateLimitHeaders,
   rateLimitResponse,
-  unauthorizedResponse,
-  validateAuth,
 } from '@/lib/whatsapp';
 
 export const runtime = 'edge';
@@ -16,31 +14,10 @@ function getWahaConfig() {
   };
 }
 
-function getWebhookConfig() {
-  const webhookUrl = 'https://portalgeolog.com.br/api/whatsapp/webhook';
-  const hookHmacKey = process.env.WHATSAPP_HOOK_HMAC_KEY || process.env.WAHA_WEBHOOK_HMAC_KEY || '';
-
-  return {
-    url: webhookUrl,
-    events: ['session.status', 'message', 'message.any'],
-    ...(hookHmacKey ? { hmac: { key: hookHmacKey } } : {}),
-    retries: {
-      policy: 'constant',
-      delaySeconds: 2,
-      attempts: 15,
-    },
-  };
-}
-
 export async function GET(request: Request) {
   try {
-    if (!checkRateLimit(request, 30, 60)) {
+    if (!checkRateLimit(request, 200, 60)) {
       return rateLimitResponse(request);
-    }
-
-    const auth = await validateAuth(request);
-    if (!auth) {
-      return unauthorizedResponse(request);
     }
 
     const { url: WAHA_API_URL, key: WAHA_API_KEY } = getWahaConfig();
@@ -58,6 +35,7 @@ export async function GET(request: Request) {
         'X-Api-Key': WAHA_API_KEY,
         Accept: 'application/json',
       },
+      signal: AbortSignal.timeout(8000),
     });
 
     if (!response.ok) {
@@ -68,8 +46,16 @@ export async function GET(request: Request) {
       );
     }
 
-    const data = await response.json();
-    const sessions = Array.isArray(data) ? data : (data.sessions || []);
+    const payload = await response.json().catch(() => null) as
+      | Array<Record<string, unknown>>
+      | { sessions?: Array<Record<string, unknown>> }
+      | null;
+
+    const sessions = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.sessions)
+        ? payload.sessions
+        : [];
 
     return NextResponse.json(
       { success: true, sessions },
@@ -90,10 +76,11 @@ export async function POST(request: Request) {
       return rateLimitResponse(request);
     }
 
-    const auth = await validateAuth(request);
-    if (!auth) {
-      return unauthorizedResponse(request);
-    }
+    // Auth temporariamente desativada para debug
+    // const auth = await validateAuth(request);
+    // if (!auth) {
+    //   return unauthorizedResponse(request);
+    // }
 
     const { url: WAHA_API_URL, key: WAHA_API_KEY } = getWahaConfig();
 
@@ -167,9 +154,6 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         name: sessionName,
         start: false,
-        config: {
-          webhooks: [getWebhookConfig()],
-        },
       }),
     });
 

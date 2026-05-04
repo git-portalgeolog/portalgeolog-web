@@ -1,113 +1,61 @@
-import { spawn } from 'node:child_process';
 import { NextResponse } from 'next/server';
-import { unauthorizedResponse, validateAuth } from '@/lib/whatsapp';
+import { getRateLimitHeaders, rateLimitResponse, checkRateLimit } from '@/lib/whatsapp';
 
-export const runtime = 'nodejs';
-
-interface SSHRequest {
-  command: string;
-}
-
-function runSshCommand(params: SSHRequest): Promise<{ stdout: string; stderr: string; code: number | null }> {
-  return new Promise((resolve, reject) => {
-    const { command } = params;
-
-    const host = process.env.WAHA_SSH_HOST;
-    const port = Number(process.env.WAHA_SSH_PORT || 22);
-    const username = process.env.WAHA_SSH_USERNAME;
-    const password = process.env.WAHA_SSH_PASSWORD;
-    const remoteDir = process.env.WAHA_REMOTE_DIR || '/opt/waha';
-
-    if (!host || !username || !password) {
-      reject(new Error('SSH da WAHA não configurado no ambiente'));
-      return;
-    }
-
-    const remoteCommand = `cd ${remoteDir} && ${command}`;
-    const sshArgs = [
-      '-p',
-      String(port),
-      '-o',
-      'StrictHostKeyChecking=no',
-      '-o',
-      'UserKnownHostsFile=/dev/null',
-      '-o',
-      'ConnectTimeout=30',
-      '-o',
-      'ServerAliveInterval=10',
-      '-o',
-      'ServerAliveCountMax=3',
-      `${username}@${host}`,
-      'bash',
-      '-lc',
-      JSON.stringify(remoteCommand),
-    ];
-
-    const child = spawn('sshpass', ['-p', password, 'ssh', ...sshArgs], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    child.on('error', (error: Error) => {
-      reject(error);
-    });
-
-    child.on('close', (code: number | null) => {
-      resolve({ stdout, stderr, code });
-    });
-  });
-}
+export const runtime = 'edge';
 
 export async function POST(request: Request) {
   try {
-    const auth = await validateAuth(request);
-    if (!auth) {
-      return unauthorizedResponse(request);
+    if (!checkRateLimit(request, 30, 60)) {
+      return rateLimitResponse(request);
     }
 
-    const body: SSHRequest = await request.json();
-    const { command } = body;
+    const wahaUrl = process.env.WAHA_API_URL;
+    const wahaKey = process.env.WAHA_API_KEY;
 
-    if (!command) {
+    if (!wahaUrl || !wahaKey) {
       return NextResponse.json(
-        { success: false, error: 'Comando é obrigatório' },
-        { status: 400 }
+        { success: false, error: 'WAHA não configurada', pingOk: false },
+        { status: 200 }
       );
     }
 
-    if (command.length > 2000) {
-      return NextResponse.json(
-        { success: false, error: 'Comando muito longo (máximo 2000 caracteres)' },
-        { status: 400 }
-      );
-    }
+    // Health check: verifica se a WAHA API está respondendo no VPS
+    let pingOk = false;
+    let stdout = 'error';
 
-    const result = await runSshCommand({ command });
+    try {
+      const res = await fetch(`${wahaUrl}/api/sessions?all=true`, {
+        method: 'GET',
+        headers: {
+          'X-Api-Key': wahaKey,
+          Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (res.ok) {
+        pingOk = true;
+        stdout = '/opt/waha';
+      } else {
+        stdout = `waha_error_${res.status}`;
+      }
+    } catch (error: unknown) {
+      pingOk = false;
+      stdout = `timeout/erro: ${error instanceof Error ? error.message : 'unknown'}`;
+    }
 
     return NextResponse.json({
       success: true,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      code: result.code,
-    });
+      pingOk,
+      status: pingOk ? 200 : 0,
+      stdout,
+    }, { headers: getRateLimitHeaders(request) });
   } catch (error: unknown) {
-    console.error('[ssh] Error:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Erro ao executar comando SSH',
-      },
-      { status: 500 }
-    );
+    console.error('[ssh/ping] Error:', error);
+    return NextResponse.json({
+      success: true,
+      pingOk: false,
+      stdout: 'timeout/erro',
+    }, { status: 200, headers: getRateLimitHeaders(request) });
   }
 }

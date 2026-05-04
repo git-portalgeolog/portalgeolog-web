@@ -1,8 +1,17 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { sendWhatsAppMessage } from '@/lib/whatsapp';
 
 export const runtime = 'edge';
+
+type OSFinishRow = {
+  id: string;
+  status_operacional: string;
+  motorista: string | null;
+  protocolo: string | null;
+  os_number: string | null;
+  driver_km_initial: number | null;
+  route_started_km: number | null;
+};
 
 let _supabaseAdmin: ReturnType<typeof createClient> | null = null;
 const getAdmin = () => {
@@ -23,11 +32,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: 'ID da OS não informado.' }, { status: 400 });
     }
 
-    const { data: os, error: findError } = await getAdmin()
+    const { data: osRaw, error: findError } = await getAdmin()
       .from('ordens_servico')
-      .select('id, status_operacional, motorista, protocolo, os_number, trecho')
+      .select('id, status_operacional, motorista, protocolo, os_number')
       .eq('id', osId)
       .single();
+    const os = osRaw as OSFinishRow | null;
 
     if (findError || !os) {
       return NextResponse.json(
@@ -67,11 +77,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Quilometragem final inválida.' }, { status: 400 });
     }
 
-    const { data: os, error: findError } = await getAdmin()
+    const { data: osRaw, error: findError } = await getAdmin()
       .from('ordens_servico')
       .select('id, status_operacional, driver_km_initial, route_started_km')
       .eq('id', osId)
       .single();
+    const os = osRaw as OSFinishRow | null;
 
     if (findError || !os) {
       return NextResponse.json(
@@ -99,7 +110,7 @@ export async function POST(request: Request) {
         status_operacional: 'Finalizado',
         route_finished_at: new Date().toISOString(),
         route_finished_km: kmFinal,
-      })
+      } as never)
       .eq('id', osId);
 
     if (updateError) {

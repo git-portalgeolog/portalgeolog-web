@@ -1,0 +1,12 @@
+{
+  "rules": [
+    {
+      "name": "fastmode",
+      "model": "stepfun-ai/step-3.5-flash"
+    },
+    {
+      "name": "smartmode",
+      "model": "qwen/qwen3-coder-480b-a35b-instruct"
+    }
+  ]
+}

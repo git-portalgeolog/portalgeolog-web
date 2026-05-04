@@ -10,9 +10,6 @@ import ptBrLocale from '@fullcalendar/core/locales/pt-br';
 import type { OrderService } from '@/context/DataContext';
 import { 
   Clock, 
-  Navigation, 
-  CheckCircle2, 
-  X, 
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -28,6 +25,8 @@ interface Cliente {
 interface EventContentProps {
   os: OrderService;
   clientes: Cliente[];
+  itineraryLabel?: string;
+  displayDateTime?: string;
 }
 
 interface OSCalendarProps {
@@ -71,20 +70,61 @@ const statusColors: Record<string, { bg: string; border: string; text: string; d
   }
 };
 
+type CalendarEvent = {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+  backgroundColor: string;
+  borderColor: string;
+  textColor: string;
+  extendedProps: {
+    os: OrderService;
+    clienteNome: string;
+    itineraryLabel?: string;
+    itineraryIndex?: number;
+    displayDateTime?: string;
+  };
+};
+
+const parseBrDateToIso = (dateStr?: string): string | undefined => {
+  if (!dateStr) return undefined;
+  if (dateStr.includes('-')) return dateStr; // já está em ISO
+  const parts = dateStr.split('/');
+  if (parts.length === 3) {
+    const [day, month, year] = parts;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+  return dateStr;
+};
+
+const formatCalendarDateTime = (date?: string, time?: string | null): string | null => {
+  if (!date) return null;
+
+  const normalizedTime = time || '00:00';
+  const [hours, minutes] = normalizedTime.split(':');
+  return `${date}T${hours || '00'}:${minutes || '00'}:00`;
+};
+
+const getItineraryLabel = (itineraryIndex: number): string => {
+  if (itineraryIndex < 0) {
+    return 'Retorno';
+  }
+
+  return `Itinerário ${itineraryIndex + 1}`;
+};
+
 // Componente de Evento Customizado
-const EventContent = ({ os, clientes }: EventContentProps) => {
+const EventContent = ({ os, clientes, itineraryLabel, displayDateTime }: EventContentProps) => {
   const status = os.status.operacional;
   const colors = statusColors[status] || statusColors['Pendente'];
   const clienteNome = clientes.find(c => c.id === os.clienteId)?.nome || 'N/A';
-  const startTime = os.hora ? os.hora.slice(0, 5) : '';
+  const startTime = displayDateTime ? new Date(displayDateTime).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }) : (os.hora ? os.hora.slice(0, 5) : '');
   
-  // Extrair passageiros
-  const allPassengers = os.rota?.waypoints?.flatMap(w => w.passengers.map(p => p.nome)).filter(Boolean) || [];
-  const passengerDisplay = allPassengers.length > 0 ? allPassengers[0].toUpperCase() : '';
-  
-  // Trajeto
-  const trajeto = os.trecho || '';
-
   return (
     <div
       className="fc-event-custom group transition-all duration-200 hover:shadow-md"
@@ -136,23 +176,22 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
         {os.solicitante.toUpperCase()}
       </div>
 
-      {/* Linha 3: Trajeto */}
-      {trajeto && (
-        <div style={{
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          color: '#64748b',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          fontSize: '8.5px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '4px'
-        }}>
-          <Navigation size={10} strokeWidth={2.5} style={{ color: colors.dot, flexShrink: 0 }} />
-          {trajeto}
-        </div>
+      {/* Ícone de status */}
+      {statusColors[os.status.operacional] && (
+      <div style={{
+        color: '#475569',
+        fontWeight: 600,
+        fontSize: '8.5px',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px'
+      }}>
+        <div style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: colors.dot }} />
+        {status}
+      </div>
       )}
 
       {/* Linha 4: Horário e Motorista */}
@@ -180,6 +219,20 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
           {startTime || '--:--'}
         </div>
 
+        {itineraryLabel && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '2px',
+            color: '#334155',
+            fontWeight: 800,
+            fontSize: '9px'
+          }}>
+            <CalendarDays size={10} strokeWidth={3} />
+            {itineraryLabel.toUpperCase()}
+          </div>
+        )}
+
         {os.motorista && (
           <div style={{
             display: 'flex',
@@ -199,44 +252,96 @@ const EventContent = ({ os, clientes }: EventContentProps) => {
 };
 
 export default function OSCalendar({ osList, clientes, onEventClick }: OSCalendarProps) {
-  const [currentView, setCurrentView] = useState<'dayGridMonth' | 'dayGridWeek' | 'dayGridDay' | 'listWeek'>('dayGridMonth');
+  const [currentView, setCurrentView] = useState<'dayGridMonth' | 'dayGridWeek' | 'dayGridDay' | 'listWeek'>('dayGridWeek');
   const calendarRef = React.useRef<FullCalendar>(null);
 
   // Converter OS para eventos do FullCalendar
   const events = useMemo(() => {
-    return osList.map(os => {
-      const dateStr = os.data; // YYYY-MM-DD
-      const timeStr = os.hora || '00:00';
-      const [hours, minutes] = timeStr.split(':');
-      const startDateTime = `${dateStr}T${hours || '00'}:${minutes || '00'}:00`;
-      
-      // Duração estimada de 1 hora se não tiver hora extra
-      const endHour = parseInt(hours || '0') + 1;
-      const endDateTime = `${dateStr}T${endHour.toString().padStart(2, '0')}:${minutes || '00'}:00`;
-      
+    const derivedEvents: CalendarEvent[] = [];
+
+    osList.forEach((os) => {
       const clienteNome = clientes.find(c => c.id === os.clienteId)?.nome || 'N/A';
       const colors = statusColors[os.status.operacional] || statusColors['Pendente'];
-      
-      return {
-        id: os.id,
-        title: `${os.protocolo} - ${clienteNome}`,
-        start: startDateTime,
-        end: endDateTime,
-        allDay: !os.hora,
-        backgroundColor: 'transparent',
-        borderColor: 'transparent',
-        textColor: colors.text,
-        extendedProps: {
-          os,
-          clienteNome
-        }
-      };
+      const waypoints = os.rota?.waypoints || [];
+      const itineraries = waypoints.length > 0
+        ? waypoints.reduce<Record<number, { waypoints: typeof waypoints; firstIndex: number }>>((acc, waypoint, index) => {
+            const itineraryIndex = waypoint.itineraryIndex ?? 0;
+            if (!acc[itineraryIndex]) {
+              acc[itineraryIndex] = { waypoints: [], firstIndex: index };
+            }
+            acc[itineraryIndex].waypoints.push(waypoint);
+            return acc;
+          }, {})
+        : {};
+
+      const itineraryEntries = Object.entries(itineraries);
+
+      if (itineraryEntries.length === 0) {
+        const startDateTime = formatCalendarDateTime(os.data, os.hora);
+        if (!startDateTime) return;
+
+        const endHour = ((os.hora || '00:00').split(':')[0] || '0');
+        const endDateTime = `${os.data}T${String(Number(endHour) + 1).padStart(2, '0')}:${(os.hora || '00:00').split(':')[1] || '00'}:00`;
+
+        derivedEvents.push({
+          id: `${os.id}-${os.status.operacional}`,
+          title: `${os.protocolo} - ${clienteNome}`,
+          start: startDateTime,
+          end: endDateTime,
+          allDay: !os.hora,
+          backgroundColor: 'transparent',
+          borderColor: 'transparent',
+          textColor: colors.text,
+          extendedProps: {
+            os,
+            clienteNome,
+            displayDateTime: startDateTime,
+          },
+        });
+        return;
+      }
+
+      itineraryEntries
+        .sort(([, a], [, b]) => a.firstIndex - b.firstIndex)
+        .forEach(([itineraryIndexRaw, itinerary]) => {
+          const itineraryIndex = Number(itineraryIndexRaw);
+          const firstWaypoint = itinerary.waypoints[0];
+          const dateStr = parseBrDateToIso(firstWaypoint?.data) || os.data;
+          const timeStr = firstWaypoint?.hora || os.hora || '00:00';
+          const startDateTime = formatCalendarDateTime(dateStr, timeStr);
+          if (!startDateTime) return;
+
+          const [hours = '00', minutes = '00'] = timeStr.split(':');
+          const endHour = Number(hours) + 1;
+          const endDateTime = `${dateStr}T${String(endHour).padStart(2, '0')}:${minutes}:00`;
+
+          derivedEvents.push({
+            id: `${os.id}-${itineraryIndex}-${os.status.operacional}`,
+            title: `${os.protocolo} - ${clienteNome}`,
+            start: startDateTime,
+            end: endDateTime,
+            allDay: !firstWaypoint?.hora && !os.hora,
+            backgroundColor: 'transparent',
+            borderColor: 'transparent',
+            textColor: colors.text,
+            extendedProps: {
+              os,
+              clienteNome,
+              itineraryIndex,
+              itineraryLabel: getItineraryLabel(itineraryIndex),
+              displayDateTime: startDateTime,
+            },
+          });
+        });
     });
+
+    return derivedEvents;
   }, [osList, clientes]);
 
-  const handleEventClick = useCallback((info: { jsEvent: MouseEvent; event: { id: string } }) => {
+  const handleEventClick = useCallback((info: { jsEvent: MouseEvent; event: { id: string; extendedProps?: { os?: OrderService } } }) => {
     info.jsEvent.preventDefault();
-    onEventClick(info.event.id, { x: info.jsEvent.clientX, y: info.jsEvent.clientY });
+    const osId = info.event.extendedProps?.os?.id || info.event.id;
+    onEventClick(osId, { x: info.jsEvent.clientX, y: info.jsEvent.clientY });
   }, [onEventClick]);
 
   const handleDateSelect = useCallback((selectInfo: { startStr: string }) => {
@@ -269,9 +374,16 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
   };
 
   // Renderizador customizado de eventos
-  const renderEventContent = (eventInfo: { event: { extendedProps: { os: OrderService } } }) => {
+  const renderEventContent = (eventInfo: { event: { extendedProps: { os: OrderService; itineraryLabel?: string; displayDateTime?: string } } }) => {
     const os = eventInfo.event.extendedProps.os;
-    return <EventContent os={os} clientes={clientes} />;
+    return (
+      <EventContent
+        os={os}
+        clientes={clientes}
+        itineraryLabel={eventInfo.event.extendedProps.itineraryLabel}
+        displayDateTime={eventInfo.event.extendedProps.displayDateTime}
+      />
+    );
   };
 
   if (osList.length === 0) {

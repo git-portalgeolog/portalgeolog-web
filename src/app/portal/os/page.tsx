@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import StandardModal from '@/components/StandardModal';
 import { 
   Plus, 
+  Minus,
   Truck, 
   User,
   UserPlus,
@@ -13,10 +14,13 @@ import {
   PlusCircle,
   FileText,
   MapPin,
+  Circle,
+  Flag,
   Clock,
   CheckCircle2,
   Navigation,
-  ArrowRightLeft,
+  ArrowRight,
+  ArrowLeft,
   Building,
   MoreVertical,
   Eye,
@@ -44,7 +48,6 @@ import {
   Filter,
   FilterX,
   Link,
-  Keyboard,
 } from 'lucide-react';
 import { useData, type OrderService, type ParceiroServico } from '@/context/DataContext';
 import { fetchOSById, fetchOSPage } from '@/lib/supabase/queries';
@@ -59,7 +62,7 @@ import { useConfirm } from '@/hooks/useConfirm';
 import { BASE_URL } from '@/lib/constants';
 
 type FormPassenger = { id: string; solicitanteId: string; nome: string; };
-type FormWaypoint = { label: string; lat: number | null; lng: number | null; comment: string; passengers: FormPassenger[]; };
+type FormWaypoint = { label: string; lat: number | null; lng: number | null; comment: string; passengers: FormPassenger[]; itineraryIndex?: number; hora?: string; data?: string; };
 type OSFormData = {
   data: string;
   hora: string;
@@ -70,9 +73,36 @@ type OSFormData = {
   motorista: string;
   veiculoId: string;
   centroCusto: string;
-  valorBruto: number;
-  custo: number;
+  valorBruto: number | null;
+  custo: number | null;
   waypoints: FormWaypoint[];
+};
+
+type PendingOSData = Omit<OSFormData, 'hora'> & {
+  hora: string | null;
+  rota: { waypoints: FormWaypoint[] };
+};
+
+// Helper: group waypoints into itineraries
+type ItineraryGroup = { index: number; waypoints: FormWaypoint[]; waypointIndices: number[] };
+const getItineraries = (waypoints: FormWaypoint[]): ItineraryGroup[] => {
+  const groups: Record<number, ItineraryGroup> = {};
+  waypoints.forEach((wp, idx) => {
+    const it = wp.itineraryIndex ?? 0;
+    if (!groups[it]) groups[it] = { index: it, waypoints: [], waypointIndices: [] };
+    groups[it].waypoints.push(wp);
+    groups[it].waypointIndices.push(idx);
+  });
+  return Object.values(groups).sort((a, b) => a.waypointIndices[0] - b.waypointIndices[0]);
+};
+
+const getItinerarySectionTitle = (): string => 'Rotas e Destinos';
+
+const getItineraryTitle = (itineraryIndex: number): string => {
+  if (itineraryIndex < 0) {
+    return 'Retorno';
+  }
+  return 'Itinerário';
 };
 
 type QuickAddDriverForm = {
@@ -185,7 +215,7 @@ const validarPlacaOS = (placa: string): boolean => {
 };
 
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, addParceiro, refreshData, impostoPercentual, loading: dataLoading } = useData();
+  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, addParceiro, refreshData, impostoPercentual, loading: dataLoading, heavyLoading } = useData();
   const supabase = createClient();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -197,7 +227,7 @@ export default function OSOperationalPage() {
   const [viewingOSId, setViewingOSId] = useState<string | null>(null);
   const [viewingOSLive, setViewingOSLive] = useState<OrderService | null>(null);
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table');
+  const [viewMode, setViewMode] = useState<'table' | 'calendar'>('calendar');
   const [driverNotificationSentByOS, setDriverNotificationSentByOS] = useState<Record<string, boolean>>({});
   const actionMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const calendarMenuRef = useRef<HTMLDivElement | null>(null);
@@ -235,7 +265,7 @@ export default function OSOperationalPage() {
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>(defaultAdvancedFilters);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [clientPage, setClientPage] = useState(1);
-  const osTable = useServerPaginatedTable(fetchOSPage, 10, false);
+  const osTable = useServerPaginatedTable(fetchOSPage, 10, true);
 
   useEffect(() => {
     if (!viewingOSId) {
@@ -341,7 +371,7 @@ export default function OSOperationalPage() {
   });
 
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
-  const [vehiclesUnavailable, setVehiclesUnavailable] = useState(false);
+  const [, setVehiclesUnavailable] = useState(false);
   const [quickAddedDriverOptions, setQuickAddedDriverOptions] = useState<{ id: string; nome: string }[]>([]);
   const [driverVehiclesAssoc, setDriverVehiclesAssoc] = useState<{ driver_id: string; vehicle_id: string }[]>([]);
   const [isOsVehicleQuickModalOpen, setIsOsVehicleQuickModalOpen] = useState(false);
@@ -350,6 +380,17 @@ export default function OSOperationalPage() {
     placa: '', modelo: '', marca: '',
     tipo: 'carro' as 'carro' | 'van' | 'onibus' | 'moto' | 'caminhao' | 'outro',
   });
+
+  // Novos estados para o modal de confirmação de notificações
+  const [showNotificationConfirm, setShowNotificationConfirm] = useState(false);
+  const [pendingOSData, setPendingOSData] = useState<PendingOSData | null>(null);
+  const [notificationConfig, setNotificationConfig] = useState({
+    auto: true,
+    motorista: true,
+    passageiros: true,
+    solicitante: true
+  });
+  const [isSubmittingOS, setIsSubmittingOS] = useState(false);
 
   // Estados para modal de veículo dentro do cadastro rápido de motorista
   type QuickVehicleMode = { mode: 'create'; rowIndex: number } | { mode: 'edit'; rowIndex: number; vehicleId: string };
@@ -674,11 +715,11 @@ export default function OSOperationalPage() {
     motorista: '',
     veiculoId: '',
     centroCusto: '',
-    valorBruto: 0,
-    custo: 0,
+    valorBruto: null,
+    custo: null,
     waypoints: [
-      { label: '', lat: null, lng: null, comment: '', passengers: [] },
-      { label: '', lat: null, lng: null, comment: '', passengers: [] }
+      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: 0 },
+      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: 0 }
     ]
   };
 
@@ -704,11 +745,17 @@ export default function OSOperationalPage() {
           lat: waypoint.lat ?? null,
           lng: waypoint.lng ?? null,
           comment: waypoint.comment || '',
-          passengers: (waypoint.passengers || []).map((passenger, passengerIndex) => ({
-            id: passenger.id || `${osItem.id}-${index}-${passengerIndex}`,
-            solicitanteId: passenger.solicitanteId || '',
-            nome: passenger.nome || ''
-          }))
+          itineraryIndex: waypoint.itineraryIndex ?? 0,
+          hora: waypoint.hora || '',
+          data: waypoint.data || '',
+          passengers: (waypoint.passengers || []).map((passenger, passengerIndex) => {
+            const rec = passageiros.find(x => x.id === passenger.solicitanteId);
+            return {
+              id: passenger.id || `${osItem.id}-${index}-${passengerIndex}`,
+              solicitanteId: passenger.solicitanteId || '',
+              nome: rec?.nomeCompleto || ''
+            };
+          })
         }))
       : initialForm.waypoints;
 
@@ -745,13 +792,20 @@ export default function OSOperationalPage() {
     if (!targetOS) return;
 
     hydrateFormFromOS(targetOS);
+    setOpenWaypointComments({});
     setEditingOSId(osId);
     setIsModalOpen(true);
     setOpenActionMenuId(null);
   };
 
-  const handleReopenOS = (osId: string) => {
-    updateOSStatus(osId, { operacional: 'Pendente' });
+  const handleReopenOS = async (osId: string) => {
+    try {
+      await updateOSStatus(osId, { operacional: 'Pendente' });
+      await osTable.refresh();
+    } catch (error) {
+      console.error('Error reopening OS:', error);
+      toast.error('Não foi possível reabrir a OS.');
+    }
     setOpenActionMenuId(null);
   };
 
@@ -776,6 +830,7 @@ export default function OSOperationalPage() {
 
     try {
       await deleteOS(osId);
+      await osTable.refresh();
       setOpenActionMenuId(null);
       toast.success('OS arquivada com sucesso!');
     } catch (error) {
@@ -784,10 +839,60 @@ export default function OSOperationalPage() {
     }
   };
 
-  const confirmCancelOS = () => {
+  const confirmCancelOS = async () => {
     if (!cancelTargetId) return;
-    updateOSStatus(cancelTargetId, { operacional: 'Cancelado' });
+    try {
+      await updateOSStatus(cancelTargetId, { operacional: 'Cancelado' });
+      await osTable.refresh();
+    } catch (error) {
+      console.error('Error canceling OS:', error);
+      toast.error('Não foi possível cancelar a OS.');
+    }
     setCancelTargetId(null);
+  };
+
+  // Função auxiliar para notificar passageiro sem depender de viewingOS (usada em notificações automáticas)
+  const handleNotifyPassengerDirect = async (
+    osData: OrderService,
+    passenger: { nome: string; email: string; celular: string; hasEmail: boolean; hasPhone: boolean; solicitanteId: string },
+    type: 'email' | 'whatsapp' | 'both'
+  ) => {
+    try {
+      const acceptUrl = `${BASE_URL}/a/p`;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        console.error('[handleNotifyPassengerDirect] Sessão expirada');
+        return;
+      }
+
+      console.log('[handleNotifyPassengerDirect] sending', { type, osId: osData.id, passageiroId: passenger.solicitanteId, hasPhone: passenger.hasPhone, celular: passenger.celular });
+      const res = await fetch('/api/notify-passenger', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          type,
+          passengerEmail: passenger.hasEmail ? passenger.email : undefined,
+          passengerPhone: passenger.hasPhone ? passenger.celular : undefined,
+          passengerName: passenger.nome,
+          osProtocol: osData.protocolo,
+          osId: osData.id,
+          passageiroId: passenger.solicitanteId || undefined,
+          acceptUrl,
+        }),
+      });
+      const data = await res.json();
+      console.log('[handleNotifyPassengerDirect] response', data);
+      if (data.success) {
+        console.log(`[handleNotifyPassengerDirect] Notificação enviada com sucesso para ${passenger.nome}`);
+      } else {
+        console.error(`[handleNotifyPassengerDirect] Erro ao enviar: ${data.error || res.status}`);
+      }
+    } catch (err) {
+      console.error('[handleNotifyPassengerDirect] catch error:', err);
+    }
   };
 
   const handleNotifyPassenger = async (
@@ -798,7 +903,7 @@ export default function OSOperationalPage() {
     if (!viewingOS) return;
     setNotifyLoadingKey(passengerKey);
     try {
-      const acceptUrl = `${BASE_URL}/a`;
+      const acceptUrl = `${BASE_URL}/a/p`;
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
         toast.error('Sessão expirada. Por favor, faça login novamente.');
@@ -889,9 +994,10 @@ export default function OSOperationalPage() {
       (wp.passengers || []).forEach((p) => {
         const passRecord = passageiros.find(x => x.id === p.solicitanteId);
         const cel = passRecord?.celular || '';
-        if (!allPassengers.some(x => x.nome === (p.nome || passRecord?.nomeCompleto || ''))) {
+        const nomeAtual = passRecord?.nomeCompleto || 'Não identificado';
+        if (!allPassengers.some(x => x.nome === nomeAtual)) {
           allPassengers.push({
-            nome: p.nome || passRecord?.nomeCompleto || 'Não identificado',
+            nome: nomeAtual,
             celular: cel ? cel.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3') : 'Não informado',
           });
         }
@@ -931,25 +1037,26 @@ export default function OSOperationalPage() {
         .from('os_link_shortcuts')
         .select('slug')
         .eq('os_id', osData.id)
-        .single();
+        .eq('type', 'driver')
+        .maybeSingle();
       if (existing?.slug) {
         shortSlug = existing.slug;
       } else {
         const newSlug = Math.random().toString(36).slice(2, 17);
         const { data: inserted } = await supabase
           .from('os_link_shortcuts')
-          .insert({ os_id: osData.id, slug: newSlug })
+          .insert({ os_id: osData.id, slug: newSlug, type: 'driver' })
           .select('slug')
-          .single();
+          .maybeSingle();
         if (inserted?.slug) shortSlug = inserted.slug;
       }
     } catch {
       /* fallback: usa o UUID */
     }
 
-    const acceptLink = `${BASE_URL}/a/${shortSlug}`;
+    const acceptLink = `${BASE_URL}/a/m/${shortSlug}`;
 
-    const osLine = osData.os ? `🆔 *OS:* ${osData.os}\n` : '';
+    const osLine = osData.os ? `🆔 *OS:* ${osData.os.toUpperCase()}\n` : '';
 
     const message =
       `📋 *Protocolo:* ${osData.protocolo}\n` +
@@ -1027,121 +1134,6 @@ export default function OSOperationalPage() {
     }
   };
 
-  const sendWhatsAppTextNotification = async (osData: OrderService) => {
-    if (!osData.motorista) {
-      toast.error("Motorista não atribuído a esta OS.");
-      return;
-    }
-
-    const driverObj = drivers.find(d =>
-      d.name.trim().toLowerCase() === osData.motorista.trim().toLowerCase()
-    );
-
-    let phone = driverObj?.phone || "5522997259180";
-
-    if (!driverObj?.phone) {
-      console.warn(`[WhatsApp Text] Motorista "${osData.motorista}" não encontrado ou sem telefone. Usando fallback.`);
-    }
-
-    phone = phone.replace(/\D/g, '');
-    if (phone.length > 0 && phone.length <= 11 && !phone.startsWith('55')) {
-      phone = `55${phone}`;
-    }
-
-    if (phone.length < 10) {
-      toast.error("Telefone do motorista é inválido ou não cadastrado.");
-      return;
-    }
-
-    const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
-
-    let vehicleInfo = { tipo: '', placa: '' };
-    if (osData.veiculoId) {
-      const v = vehicles.find(v => v.id === osData.veiculoId);
-      if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
-    } else if (driverObj?.id) {
-      const assoc = driverVehiclesAssoc.find(a => a.driver_id === driverObj.id);
-      if (assoc) {
-        const v = vehicles.find(v => v.id === assoc.vehicle_id);
-        if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
-      }
-    }
-
-    const tipoCapitalizado = vehicleInfo.tipo
-      ? vehicleInfo.tipo.charAt(0).toUpperCase() + vehicleInfo.tipo.slice(1)
-      : 'Não informado';
-    const placaDisplay = vehicleInfo.placa || 'Não informada';
-
-    const osLine = osData.os ? `🆔 *OS:* ${osData.os}\n` : '';
-
-    const message =
-      `📋 *Protocolo:* ${osData.protocolo}\n` +
-      `${osLine}` +
-      `📦 *Fornecedor:* Geolog Transporte Executivo\n` +
-      `📅 *Data:* ${osData.data.split('-').reverse().join('/')}\n` +
-      `⏰ *Horário:* ${osData.hora || 'Não informado'}\n` +
-      `🏢 *Empresa:* ${cliente}\n` +
-      `👤 *Solicitante:* ${osData.solicitante || 'Não informado'}\n` +
-      `🚗 *Transporte:* ${tipoCapitalizado}\n` +
-      `📝 *Placa:* ${placaDisplay}\n\n` +
-      `────────────────\n` +
-      `Para *aceitar* o serviço, digite: *1*\n` +
-      `Para *recusar*, digite: *0*\n`;
-
-    setNotifyLoadingKey('driver-whatsapp-text');
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (!session) {
-        toast.error("Sessão expirada. Por favor, faça login novamente.");
-        return;
-      }
-
-      console.log(`[WhatsApp Text] Enviando notificação para ${osData.motorista} (${phone})`);
-
-      const msgResponse = await fetch('/api/whatsapp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ phone, message })
-      });
-
-      const msgData = await msgResponse.json();
-
-      if (!msgResponse.ok || !msgData.success) {
-        console.error('[WhatsApp Text] Erro na API de mensagem:', msgData);
-        toast.error(`Falha ao enviar mensagem: ${msgData.error || 'Erro na API WAHA'}`);
-        setNotifyLoadingKey(null);
-        return;
-      }
-
-      toast.success("WhatsApp enviado para o motorista (modo texto)!");
-      setDriverNotificationSentByOS((prev) => ({
-        ...prev,
-        [osData.id]: true,
-      }));
-      try {
-        await supabase
-          .from('ordens_servico')
-          .update({
-            driver_message_sent_at: new Date().toISOString(),
-            driver_whatsapp_state: 'awaiting_accept',
-          })
-          .eq('id', osData.id);
-      } catch (dbErr) {
-        console.error('[WhatsApp Text] Erro ao registrar timestamp e estado:', dbErr);
-      }
-      void refreshData();
-    } catch (err) {
-      console.error("[WhatsApp Text] Erro crítico:", err);
-      toast.error("Erro ao conectar com a API de WhatsApp.");
-    } finally {
-      setNotifyLoadingKey(null);
-    }
-  };
-
   useEffect(() => {
     if (!openActionMenuId) return;
 
@@ -1208,7 +1200,7 @@ export default function OSOperationalPage() {
         .from('os_passenger_confirmations')
         .select('passageiro_id, aceito')
         .eq('os_id', viewingOSId);
-      
+
       if (data) {
         const map: Record<string, boolean> = {};
         data.forEach((row: { passageiro_id: string | null; aceito: boolean }) => {
@@ -1236,13 +1228,34 @@ export default function OSOperationalPage() {
       )
       .subscribe();
 
+    // Listen for OS status changes to keep UI updated when driver accepts/rejects
+    const osStatusChannel = supabase
+      .channel(`os-status-${viewingOSId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ordens_servico',
+          filter: `id=eq.${viewingOSId}`,
+        },
+        () => {
+          // Refresh the data table to reflect the new status
+          void osTable.refresh();
+        }
+      )
+      .subscribe();
+
     return () => {
       void supabase.removeChannel(channel);
+      void supabase.removeChannel(osStatusChannel);
     };
-  }, [viewingOSId, supabase]);
+  }, [viewingOSId, supabase, osTable]);
 
   const [formData, setFormData] = useState(initialForm);
   const [openWaypointComments, setOpenWaypointComments] = useState<Record<number, boolean>>({});
+  const waypointTimelineRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const [destinationPassengerLineEnds, setDestinationPassengerLineEnds] = useState<Record<number, number>>({});
   const initialQuickPassengerForm = {
     nomeCompleto: '',
     celular: '',
@@ -1282,15 +1295,48 @@ export default function OSOperationalPage() {
     return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').trim();
   };
 
-  // Auto-update trecho preview from waypoints
-  const trechoPreview = useMemo(() => {
-    const validWaypoints = formData.waypoints
-      .map(w => w.label.trim())
-      .filter(label => label !== '');
-    
-    if (validWaypoints.length < 2) return validWaypoints[0] || '';
-    return validWaypoints.join(' x ');
-  }, [formData.waypoints]);
+  const formItineraries = useMemo(() => getItineraries(formData.waypoints), [formData.waypoints]);
+
+  useLayoutEffect(() => {
+    const nextEnds: Record<number, number> = {};
+
+    formItineraries.forEach((it) => {
+      const destinationIndex = it.waypointIndices[it.waypointIndices.length - 1];
+      const waypoint = formData.waypoints[destinationIndex];
+      if (!waypoint || (waypoint.passengers?.length || 0) === 0) {
+        return;
+      }
+
+      const waypointElement = waypointTimelineRefs.current[destinationIndex];
+      if (!waypointElement) {
+        return;
+      }
+
+      const passengerLineElements = waypointElement.querySelectorAll('[data-passenger-line]') as NodeListOf<HTMLElement>;
+      if (!passengerLineElements || passengerLineElements.length === 0) {
+        return;
+      }
+
+      const lastPassengerLineElement = passengerLineElements[passengerLineElements.length - 1];
+      const containerRect = waypointElement.getBoundingClientRect();
+      const lineRect = lastPassengerLineElement.getBoundingClientRect();
+      const measuredHeight = Math.max(0, Math.round(lineRect.top - containerRect.top - 29));
+      nextEnds[destinationIndex] = measuredHeight;
+    });
+
+    setDestinationPassengerLineEnds((prev) => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(nextEnds);
+      if (
+        prevKeys.length === nextKeys.length &&
+        nextKeys.every((key) => prev[Number(key)] === nextEnds[Number(key)])
+      ) {
+        return prev;
+      }
+
+      return nextEnds;
+    });
+  }, [formData.waypoints, formItineraries]);
 
   const viewingOS = useMemo(() => {
     if (!viewingOSId) return null;
@@ -1307,7 +1353,7 @@ export default function OSOperationalPage() {
         return {
           key: `${waypointIndex}-${passenger.id}-${passengerIndex}`,
           waypointLabel: waypoint.label,
-          nome: passenger.nome || passengerRecord?.nomeCompleto || 'Passageiro não identificado',
+          nome: passengerRecord?.nomeCompleto || 'Passageiro não identificado',
           celular: passengerRecord?.celular || 'Não informado',
           email: passengerRecord?.email || 'Não informado',
           endereco: passengerRecord?.enderecos?.[0]?.enderecoCompleto || 'Não informado',
@@ -1347,47 +1393,126 @@ export default function OSOperationalPage() {
     };
   }, [driverNotificationSentByOS, viewingOS]);
 
-  const handleSwapRoute = () => {
-    setOpenWaypointComments((prev) => {
-      const entries = Object.entries(prev).map(([key, value]) => [Number(key), value] as const);
-      const reversed = entries.reduce<Record<number, boolean>>((acc, [key, value]) => {
-        acc[formData.waypoints.length - 1 - key] = value;
-        return acc;
-      }, {});
-      return reversed;
-    });
-    setFormData(prev => ({
-      ...prev,
-      waypoints: [...prev.waypoints].reverse()
-    }));
-  };
-
-  const handleAddWaypoint = () => {
-    setOpenWaypointComments((prev) => ({
-      ...prev,
-      [formData.waypoints.length]: false,
-    }));
-    setFormData(prev => ({
-      ...prev,
-      waypoints: [...prev.waypoints, { label: '', lat: null, lng: null, comment: '', passengers: [] }]
-    }));
-  };
-
-  const handleRemoveWaypoint = (index: number) => {
-    if (formData.waypoints.length <= 2) return;
+  const handleAddWaypoint = (targetItineraryIndex: number) => {
+    const itineraries = getItineraries(formData.waypoints);
+    const targetIt = itineraries.find(it => it.index === targetItineraryIndex);
+    if (!targetIt) return;
+    const insertIdx = targetIt.waypointIndices[targetIt.waypointIndices.length - 1]; // before destination
+    const newWaypoint = { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: targetIt.index };
+    const newWaypoints = [...formData.waypoints];
+    newWaypoints.splice(insertIdx, 0, newWaypoint);
     setOpenWaypointComments((prev) => {
       const next: Record<number, boolean> = {};
       Object.entries(prev).forEach(([key, value]) => {
-        const numericKey = Number(key);
-        if (numericKey < index) next[numericKey] = value;
-        if (numericKey > index) next[numericKey - 1] = value;
+        const k = Number(key);
+        if (k < insertIdx) next[k] = value;
+        if (k >= insertIdx) next[k + 1] = value;
+      });
+      next[insertIdx] = false;
+      return next;
+    });
+    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+  };
+
+  const handleAddItinerary = () => {
+    const itineraries = getItineraries(formData.waypoints);
+    const maxItineraryIndex = itineraries
+      .filter(it => it.index >= 0)
+      .reduce((max, it) => Math.max(max, it.index), -1);
+    const newItIndex = maxItineraryIndex + 1;
+    const newWaypoints = [...formData.waypoints];
+    newWaypoints.push(
+      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: newItIndex },
+      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: newItIndex }
+    );
+    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+  };
+
+  const handleAddReturn = () => {
+    const itineraries = getItineraries(formData.waypoints);
+    const lastGroup = itineraries[itineraries.length - 1];
+
+    if (!lastGroup || lastGroup.index < 0) {
+      toast.error('Adicione um itinerário antes de adicionar um retorno.');
+      return;
+    }
+
+    const returnIndex = -(lastGroup.index + 1);
+    const newWaypoints = [...formData.waypoints];
+    newWaypoints.push(
+      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: returnIndex },
+      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: returnIndex }
+    );
+    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+  };
+
+  const handleRemoveWaypoint = (index: number) => {
+    const itineraries = getItineraries(formData.waypoints);
+    const it = itineraries.find(g => g.waypointIndices.includes(index));
+    if (!it) return;
+    // Don't allow removing origin or destination if it would leave < 2 waypoints in itinerary
+    const isOrigin = it.waypointIndices[0] === index;
+    const isDestination = it.waypointIndices[it.waypointIndices.length - 1] === index;
+    if ((isOrigin || isDestination) && it.waypoints.length <= 2) return;
+    // If removing origin or destination of an itinerary with > 2 waypoints, convert next/prev stop
+    const newWaypoints = [...formData.waypoints];
+    newWaypoints.splice(index, 1);
+    setOpenWaypointComments((prev) => {
+      const next: Record<number, boolean> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        const k = Number(key);
+        if (k < index) next[k] = value;
+        if (k > index) next[k - 1] = value;
       });
       return next;
     });
-    setFormData(prev => ({
-      ...prev,
-      waypoints: prev.waypoints.filter((_, i) => i !== index)
-    }));
+    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+  };
+
+  const handleRemoveItinerary = async (itineraryIndex: number) => {
+    const itineraries = getItineraries(formData.waypoints);
+    if (itineraries.length <= 1) {
+      toast.error('Pelo menos 1 itinerário é obrigatório.');
+      return;
+    }
+    const targetIt = itineraries.find(it => it.index === itineraryIndex);
+    if (!targetIt) return;
+
+    const confirmed = await confirm({
+      title: 'Remover itinerário',
+      message: `Deseja realmente remover o ${itineraryIndex < 0 ? 'retorno' : `itinerário ${itineraryIndex + 1}`}? Esta ação não pode ser desfeita.`,
+      confirmText: 'Remover',
+      cancelText: 'Cancelar',
+      type: 'danger'
+    });
+    if (!confirmed) return;
+
+    const indicesToRemove = new Set(targetIt.waypointIndices);
+    const reindexedWaypoints = formData.waypoints
+      .filter((_, idx) => !indicesToRemove.has(idx))
+      .map(wp => {
+        const itIdx = wp.itineraryIndex ?? 0;
+        if (itineraryIndex >= 0 && itIdx > itineraryIndex) {
+          return { ...wp, itineraryIndex: itIdx - 1 };
+        }
+        if (itineraryIndex < 0 && itIdx < itineraryIndex) {
+          return { ...wp, itineraryIndex: itIdx + 1 };
+        }
+        return wp;
+      });
+    setOpenWaypointComments((prev) => {
+      const next: Record<number, boolean> = {};
+      let offset = 0;
+      formData.waypoints.forEach((_, idx) => {
+        if (indicesToRemove.has(idx)) {
+          offset++;
+        } else {
+          next[idx - offset] = prev[idx];
+        }
+      });
+      return next;
+    });
+    setFormData(prev => ({ ...prev, waypoints: reindexedWaypoints }));
   };
 
   const handleWaypointChange = (index: number, value: string) => {
@@ -1408,16 +1533,89 @@ export default function OSOperationalPage() {
     }));
   };
 
+  const handleWaypointHoraChange = (index: number, value: string) => {
+    let cleanValue = value.replace(/\D/g, '');
+    if (cleanValue.length > 4) cleanValue = cleanValue.slice(0, 4);
+
+    let hours = cleanValue.slice(0, 2);
+    let minutes = cleanValue.slice(2, 4);
+
+    if (hours && parseInt(hours) > 23) hours = '23';
+    if (minutes && parseInt(minutes) > 59) minutes = '59';
+
+    let formatted = hours;
+    if (minutes) {
+      formatted = `${hours}:${minutes}`;
+    } else if (hours.length === 2 && cleanValue.length > 2) {
+      formatted = `${hours}:`;
+    }
+
+    const newWaypoints = [...formData.waypoints];
+    newWaypoints[index] = { ...newWaypoints[index], hora: formatted };
+    setFormData(prev => ({
+      ...prev,
+      waypoints: newWaypoints
+    }));
+  };
+
+  const handleWaypointDataChange = (index: number, value: string) => {
+    let cleanValue = value.replace(/\D/g, '');
+    if (cleanValue.length > 8) cleanValue = cleanValue.slice(0, 8);
+
+    if (cleanValue === '') {
+      const newWaypoints = [...formData.waypoints];
+      newWaypoints[index] = { ...newWaypoints[index], data: '' };
+      setFormData(prev => ({
+        ...prev,
+        waypoints: newWaypoints
+      }));
+      return;
+    }
+
+    let day = cleanValue.slice(0, 2);
+    let month = cleanValue.slice(2, 4);
+    let year = cleanValue.slice(4, 8);
+
+    if (day && parseInt(day) > 31) day = '31';
+    if (month && parseInt(month) > 12) month = '12';
+    if (year && parseInt(year) > 5000) year = '5000';
+
+    const validatedClean = day + month + year;
+
+    let formatted = validatedClean;
+    if (month) formatted = `${day}/${month}`;
+    if (year) formatted = `${day}/${month}/${year}`;
+
+    const newWaypoints = [...formData.waypoints];
+    newWaypoints[index] = { ...newWaypoints[index], data: formatted };
+    setFormData(prev => ({
+      ...prev,
+      waypoints: newWaypoints
+    }));
+  };
+
+  const handleWaypointDataBlur = (index: number) => {
+    const waypoint = formData.waypoints[index];
+    if (!waypoint || waypoint.data) return;
+
+    const fallbackDate = formData.data
+      ? (formData.data.includes('-') ? formData.data.split('-').reverse().join('/') : formData.data)
+      : '';
+
+    if (!fallbackDate) return;
+
+    const newWaypoints = [...formData.waypoints];
+    newWaypoints[index] = { ...newWaypoints[index], data: fallbackDate };
+    setFormData(prev => ({
+      ...prev,
+      waypoints: newWaypoints
+    }));
+  };
+
   const toggleWaypointComment = (index: number) => {
-    const waypointComment = formData.waypoints[index]?.comment?.trim() || '';
     const isOpen = Boolean(openWaypointComments[index]);
 
     if (isOpen) {
-      if (waypointComment.length > 0) {
-        toast.error('Apague a observação antes de recolher.');
-        return;
-      }
-
       setOpenWaypointComments((prev) => {
         const next = { ...prev };
         delete next[index];
@@ -1740,6 +1938,14 @@ export default function OSOperationalPage() {
             if (vehiclesError) {
               console.error('Erro ao vincular veículos:', vehiclesError);
               toast.error('Motorista criado, mas houve erro ao vincular veículos.');
+            } else {
+              setDriverVehiclesAssoc((prev) => [
+                ...prev,
+                ...quickAddDriverForm.vehicle_ids.map((vehicleId) => ({
+                  driver_id: data.id,
+                  vehicle_id: vehicleId,
+                })),
+              ]);
             }
           }
 
@@ -1845,7 +2051,7 @@ export default function OSOperationalPage() {
 
     try {
       const novoPassageiro = await addPassageiro({
-        nomeCompleto: trimmedNome,
+        nomeCompleto: trimmedNome.toUpperCase(),
         celular: quickPassengerForm.celular.trim(),
         notificar: quickPassengerForm.notificar === 'Sim',
         enderecos
@@ -1868,40 +2074,124 @@ export default function OSOperationalPage() {
     }
   };
 
+  const processAutoNotifications = async (osIdParam: string) => {
+    const osIdParamStr = String(osIdParam || "");
+    console.log("[AutoNotif] Starting with osIdParam:", osIdParamStr);
+    // Pequeno delay para garantir que os dados estão disponíveis no Supabase
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // 1. Notificar Motorista
+    if (notificationConfig.motorista) {
+      try {
+        const latestOS = await fetchOSById(String(osIdParam));
+        if (latestOS) {
+          await sendWhatsAppNotification(latestOS);
+        }
+      } catch (err) {
+        console.error("Erro ao notificar motorista automaticamente:", err);
+      }
+    }
+
+    // Pequeno delay entre notificações para evitar bloqueios
+    await new Promise(resolve => setTimeout(resolve, 800));
+
+    // 2. Notificar Passageiros
+    if (notificationConfig.passageiros) {
+      try {
+        const latestOS = await fetchOSById(String(osIdParam));
+        if (latestOS && latestOS.rota?.waypoints) {
+          for (const wp of latestOS.rota.waypoints) {
+            for (const p of wp.passengers) {
+              const passRecord = passageiros.find(x => x.id === p.solicitanteId);
+              if (passRecord && passRecord.celular) {
+                await handleNotifyPassengerDirect(latestOS, {
+                  nome: passRecord.nomeCompleto,
+                  email: passRecord.email || '',
+                  celular: passRecord.celular,
+                  hasEmail: !!passRecord.email,
+                  hasPhone: true,
+                  solicitanteId: p.solicitanteId,
+                }, 'whatsapp');
+                // Delay entre passageiros
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Erro ao notificar passageiros automaticamente:", err);
+      }
+    }
+  };
+
+  const executeSaveOS = async (osData: PendingOSData, targetId?: string | null) => {
+    setIsSubmittingOS(true);
+    try {
+      if (targetId) {
+        await updateOS(targetId, osData);
+        await osTable.refresh();
+        setShowNotificationConfirm(false);
+        resetMainModalState();
+        toast.success('Atendimento atualizado com sucesso.');
+      } else {
+        const newOSId = await addOS(osData);
+        await osTable.refresh();
+        setShowNotificationConfirm(false);
+        resetMainModalState();
+        if (notificationConfig.auto) {
+          void processAutoNotifications(newOSId.id);
+        }
+      }
+    } catch (error) {
+      console.error('Error saving OS:', error);
+      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar a ordem de serviço.');
+    } finally {
+      setIsSubmittingOS(false);
+    }
+  };
+
   const handleAddOS = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Validação dos campos obrigatórios
-    if (!formData.data || !formData.clienteId || !formData.motorista || !formData.veiculoId ||
-        !formData.valorBruto || formData.custo === undefined) {
+    if (!formData.data || !formData.clienteId || !formData.motorista || !formData.veiculoId) {
       toast.error('Preencha todos os campos obrigatórios.');
       return;
     }
-    
-    if (formData.valorBruto <= 0 || formData.custo < 0) {
-      toast.error('Valores inválidos. Verifique os campos financeiros.');
-      return;
+
+    // Validação: origem do primeiro itinerário deve ter hora
+    const itineraries = getItineraries(formData.waypoints);
+    const firstItinerary = itineraries.find(it => it.index === 0);
+    const firstOriginIndex = firstItinerary?.waypointIndices[0];
+    if (firstOriginIndex !== undefined) {
+      const originHora = formData.waypoints[firstOriginIndex]?.hora;
+      if (!originHora || originHora.trim().length < 4) {
+        toast.error('Informe a hora de início do Itinerário 1.');
+        return;
+      }
     }
     
     const finalData = {
       ...formData,
-      trecho: trechoPreview,
+      hora: null,
       rota: { waypoints: formData.waypoints }
     };
 
+    setPendingOSData(finalData);
+
     if (editingOSId) {
-      updateOS(editingOSId, finalData);
-      resetMainModalState();
+      // Editar Atendimento: salva direto, sem modal de notificação
+      await executeSaveOS(finalData, editingOSId);
       return;
     }
 
-    try {
-      await addOS(finalData);
-      resetMainModalState();
-    } catch (error) {
-      console.error('Error in handleAddOS:', error);
-      toast.error(error instanceof Error ? error.message : 'Não foi possível criar a ordem de serviço.');
-    }
+    // Novo Atendimento: abre modal de notificação
+    setShowNotificationConfirm(true);
+  };
+
+  const executeAddOS = async () => {
+    if (!pendingOSData) return;
+    await executeSaveOS(pendingOSData, editingOSId);
   };
 
   const formatCurrency = (value: number) => {
@@ -1911,8 +2201,8 @@ export default function OSOperationalPage() {
     }).format(value);
   };
 
-  const currentImposto = formData.valorBruto * (impostoPercentual / 100);
-  const currentLucro = formData.valorBruto - currentImposto - formData.custo;
+  const currentImposto = (formData.valorBruto ?? 0) * (impostoPercentual / 100);
+  const currentLucro = (formData.valorBruto ?? 0) - currentImposto - (formData.custo ?? 0);
 
   const availableSolicitantes = useMemo(() => {
     if (!formData.clienteId) return [];
@@ -1931,7 +2221,8 @@ export default function OSOperationalPage() {
 
   const selectedDriverVehicleOptions = useMemo(() => {
     if (!formData.motorista) return [];
-    const driver = drivers.find(d => d.name === formData.motorista);
+    const driver = drivers.find(d => d.name === formData.motorista)
+      ?? quickAddedDriverOptions.find(d => d.nome === formData.motorista);
     if (!driver) return [];
     const vehicleIds = new Set(
       driverVehiclesAssoc
@@ -1941,7 +2232,7 @@ export default function OSOperationalPage() {
     return vehicles
       .filter(v => vehicleIds.has(v.id))
       .map(v => ({ id: v.id, nome: `${v.marca} ${v.modelo} - ${v.placa}` }));
-  }, [drivers, formData.motorista, driverVehiclesAssoc, vehicles]);
+  }, [drivers, formData.motorista, driverVehiclesAssoc, vehicles, quickAddedDriverOptions]);
 
   const availableCentrosCusto = useMemo(() => {
     if (!formData.clienteId) return [];
@@ -1975,7 +2266,6 @@ export default function OSOperationalPage() {
         item.os.toLowerCase().includes(searchValue) ||
         item.protocolo.toLowerCase().includes(searchValue) ||
         clienteNome.toLowerCase().includes(searchValue) ||
-        item.trecho.toLowerCase().includes(searchValue) ||
         item.motorista.toLowerCase().includes(searchValue);
       if (!matchSearch) return false;
 
@@ -1986,7 +2276,10 @@ export default function OSOperationalPage() {
       if (advancedFilters.motorista && !item.motorista.toLowerCase().includes(advancedFilters.motorista.toLowerCase())) return false;
       if (advancedFilters.veiculoId && item.veiculoId !== advancedFilters.veiculoId) return false;
       if (advancedFilters.passageiro) {
-        const passageirosOS = item.rota?.waypoints?.flatMap(w => w.passengers.map(p => p.nome.toLowerCase())) || [];
+        const passageirosOS = item.rota?.waypoints?.flatMap(w => w.passengers.map(p => {
+        const rec = passageiros.find(x => x.id === p.solicitanteId);
+        return (rec?.nomeCompleto || '').toLowerCase();
+      })) || [];
         if (!passageirosOS.some(p => p.includes(advancedFilters.passageiro.toLowerCase()))) return false;
       }
       if (advancedFilters.dataInicio && item.data < advancedFilters.dataInicio) return false;
@@ -1996,7 +2289,7 @@ export default function OSOperationalPage() {
 
       return true;
     });
-  }, [osList, clientes, osTable.searchTerm, advancedFilters]);
+  }, [osList, clientes, passageiros, osTable.searchTerm, advancedFilters]);
 
   const hasActiveAdvancedFilters = useMemo(() => {
     return Object.values(advancedFilters).some(v => v !== '');
@@ -2010,11 +2303,13 @@ export default function OSOperationalPage() {
 
   const tableItems = useMemo(() => {
     if (hasActiveAdvancedFilters) return clientPaginatedItems;
-    const start = (osTable.page - 1) * osTable.pageSize;
-    return filteredData.slice(start, start + osTable.pageSize);
-  }, [hasActiveAdvancedFilters, clientPaginatedItems, filteredData, osTable.page, osTable.pageSize]);
+    return osTable.items;
+  }, [hasActiveAdvancedFilters, clientPaginatedItems, osTable.items]);
 
-  const tableTotalCount = useMemo(() => filteredData.length, [filteredData]);
+  const tableTotalCount = useMemo(() => {
+    if (hasActiveAdvancedFilters) return filteredData.length;
+    return osTable.totalCount;
+  }, [hasActiveAdvancedFilters, filteredData.length, osTable.totalCount]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -2080,7 +2375,9 @@ export default function OSOperationalPage() {
 
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'valorBruto' || name === 'custo' ? parseFloat(value) || 0 : value
+      [name]: name === 'valorBruto' || name === 'custo'
+        ? (value === '' ? null : parseFloat(value))
+        : value
     }));
   };
 
@@ -2170,7 +2467,7 @@ export default function OSOperationalPage() {
             </svg>
             <input
               type="text"
-              placeholder="Pesquisar por Motorista, Trecho ou OS..."
+              placeholder="Pesquisar por Motorista ou OS..."
               className="w-full pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-2xl shadow-sm outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 font-bold text-sm transition-all"
               value={osTable.searchTerm}
               onChange={(e) => osTable.setSearchTerm(e.target.value)}
@@ -2408,7 +2705,7 @@ export default function OSOperationalPage() {
       {viewMode === 'table' ? (
         <DataTable
           data={tableItems}
-          loading={dataLoading && !hasActiveAdvancedFilters}
+          loading={(dataLoading || heavyLoading) && !hasActiveAdvancedFilters}
           disableClientSearch
           pagination={hasActiveAdvancedFilters ? {
             page: clientPage,
@@ -2431,7 +2728,10 @@ export default function OSOperationalPage() {
                 return (
                 <div className="space-y-1">
                   <p className="font-black text-base text-slate-800 tracking-tight">{item.protocolo}</p>
-                  <p className="text-sm font-semibold text-slate-400">{item.data.split('-').reverse().join('/')}</p>
+                  <p className="text-sm font-semibold text-slate-400">
+                    {item.data.split('-').reverse().join('/')}
+                    {item.hora && <span className="ml-1 text-slate-300">· {item.hora.slice(0, 5)}</span>}
+                  </p>
                 </div>
                 );
               }
@@ -2468,7 +2768,7 @@ export default function OSOperationalPage() {
               }
             },
             {
-              key: 'trecho',
+              key: 'itinerario',
               title: 'Itinerário',
               width: '200px',
               render: (value: unknown, item: OrderService) => {
@@ -2476,7 +2776,7 @@ export default function OSOperationalPage() {
                 const waypointCount = item.rota?.waypoints?.filter((waypoint) => waypoint.label.trim() !== '').length ?? 0;
                 const stopCount = waypointCount > 1 ? waypointCount - 2 : 0;
                 const displayCount = waypointCount > 0 ? waypointCount : 1;
-                
+
                 return (
                   <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 rounded-lg">
@@ -2711,6 +3011,7 @@ export default function OSOperationalPage() {
       {isModalOpen && (
         <StandardModal
           onClose={resetMainModalState}
+          disableBackdropClose
           title={editingOSId ? 'Editar Atendimento' : 'Novo Atendimento'}
           subtitle={editingOSId ? 'Atualização operacional Geolog' : 'Fluxo Operacional Geolog'}
           icon={editingOSId ? <Pencil className="w-6 h-6 md:w-7 md:h-7" /> : <PlusCircle className="w-6 h-6 md:w-7 md:h-7" />}
@@ -2746,55 +3047,25 @@ export default function OSOperationalPage() {
                         </h3>
                      </div>
 
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-2.5">
-                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                              <div className="relative space-y-1.5">
-                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1 mt-2">Data <span className="text-rose-300 text-base">*</span></label>
-                                 <input 
-                                   type="text" 
-                                   name="data" 
-                                   required 
-                                   value={formData.data.includes('-') ? formData.data.split('-').reverse().join('/') : formData.data} 
-                                   onChange={handleInputChange} 
-                                   placeholder="DD/MM/AAAA"
-                                   className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
-                                 />
-                                 <Calendar size={18} className="absolute right-5 top-1/2 text-slate-300 pointer-events-none" style={{ transform: 'translateY(15%)' }} />
-                              </div>
-                              <div className="space-y-1.5">
-                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1 mt-2">Hora <span className="text-rose-300 text-base">*</span></label>
-                                 <input 
-                                   type="text" 
-                                   name="hora" 
-                                   value={formData.hora} 
-                                   onChange={handleInputChange} 
-                                   placeholder="HH:MM"
-                                   maxLength={5}
-                                   className="w-full px-6 py-4 bg-white border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm tracking-[0.2em] font-mono" 
-                                 />
-                              </div>
-                              <div className="space-y-1.5">
-                                 <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2 mt-[10px]">OS <span className="text-slate-400 text-xs font-normal normal-case tracking-normal">Opcional</span></label>
-                                 <input 
-                                   type="text" 
-                                   name="os" 
-                                   value={formData.os} 
-                                   onChange={handleInputChange} 
-                                   placeholder="Ex: 9988" 
-                                   className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all uppercase placeholder:text-slate-300 shadow-sm" 
-                                 />
-                              </div>
-                           </div>
-                        </div>
-                       <div className="space-y-2.5">
+                     <div className="flex flex-col md:flex-row gap-8">
+                       <div className="space-y-2.5 w-full md:w-[80%]">
                           <GeologSearchableSelect 
                              label="Empresa / Cliente Final" 
                              options={clientes} 
                              value={formData.clienteId} 
                              onChange={handleClienteChange} 
                              required
-                             className="mt-1"
+                          />
+                       </div>
+                       <div className="space-y-2.5 w-full md:w-[20%]">
+                          <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">OS <span className="text-slate-400 text-xs font-normal normal-case tracking-normal">Opcional</span></label>
+                          <input 
+                            type="text" 
+                            name="os" 
+                            value={formData.os} 
+                            onChange={handleInputChange} 
+                            placeholder="Ex: 9988" 
+                            className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-lg text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all uppercase placeholder:text-slate-300 shadow-sm -mt-[6px]"
                           />
                        </div>
                     </div>
@@ -2851,189 +3122,274 @@ export default function OSOperationalPage() {
                      </div>
                   </div>
 
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1 border-t-2 border-dashed border-slate-300" />
+                    <div className="w-2 h-2 rounded-full bg-slate-300" />
+                    <div className="flex-1 border-t-2 border-dashed border-slate-300" />
+                  </div>
+
                   {/* 2. ITINERÁRIO */}
                   {/* 2. ITINERÁRIO DINÂMICO */}
                   <div className="space-y-8">
                      <div className="flex items-center justify-between border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
                         <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-2" style={{ lineHeight: '1.3' }}>
-                          <MapPin size={20} className="text-blue-600" /> Itinerário / Paradas
+                          <MapPin size={20} className="text-blue-600" />
+                          {getItinerarySectionTitle()}
                         </h3>
                         <div className="flex gap-2">
-                           <button type="button" onClick={handleSwapRoute} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-all shadow-sm cursor-pointer">
-                              <ArrowRightLeft size={16} /> Inverter
+                           <button type="button" onClick={handleAddItinerary} className="flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-amber-200 transition-all shadow-sm cursor-pointer">
+                              <Plus size={16} /> ITINERÁRIO
                            </button>
-                           <button type="button" onClick={handleAddWaypoint} className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer">
-                              <Plus size={16} /> Adicionar Parada
+                           <button type="button" onClick={handleAddReturn} className="flex items-center gap-2 px-4 py-2 bg-purple-100 text-purple-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-purple-200 transition-all shadow-sm cursor-pointer">
+                              <Plus size={16} /> RETORNO
                            </button>
                         </div>
                      </div>
 
                      <div className="relative pl-8 space-y-6">
-                        {formData.waypoints.map((waypoint, index) => (
-                           <div key={index} className="relative group">
-                              {index < formData.waypoints.length - 1 && (
-                                <div className="absolute -left-[1.125rem] top-8 -bottom-6 w-0.5 bg-slate-300" />
-                              )}
-                              {index === formData.waypoints.length - 1 && (waypoint.passengers?.length || 0) > 0 && (
-                                <div 
-                                  className="absolute -left-[1.125rem] top-8 w-0.5 bg-slate-300" 
-                                  style={{ 
-                                    height: `calc(100% - ${waypoint.passengers.length === 1 ? '94px' : waypoint.passengers.length === 2 ? '70px' : waypoint.passengers.length === 3 ? '82px' : '94px'})` 
+                        {formItineraries.map((it) => (
+                          <div key={it.index} className="space-y-6">
+                            {formItineraries.length > 1 && (
+                              <h4 className={`flex items-center gap-2 mb-6 ${it.index === 0 ? 'mt-6' : 'mt-20'}`}>
+                                {it.index < 0 ? (
+                                  <ArrowLeft size={18} className="text-purple-500" />
+                                ) : (
+                                  <ArrowRight size={18} className="text-amber-500" />
+                                )}
+                                <span className={`inline-flex items-center justify-center w-8 h-8 rounded-xl text-sm font-black shadow-sm ${it.index < 0 ? 'bg-purple-100 text-purple-700 ring-2 ring-purple-200' : 'bg-amber-100 text-amber-700 ring-2 ring-amber-200'}`}>
+                                  {it.index < 0 ? Math.abs(it.index) : (it.index + 1)}
+                                </span>
+                                <span className={`text-[13px] font-black uppercase tracking-[0.15em] ${it.index < 0 ? 'text-purple-700' : 'text-amber-700'}`}>
+                                  {getItineraryTitle(it.index)}
+                                </span>
+                              </h4>
+                            )}
+                            {it.waypointIndices.map((index, relIdx) => {
+                              const waypoint = formData.waypoints[index];
+                              const isOrigin = relIdx === 0;
+                              const isDestination = relIdx === it.waypointIndices.length - 1;
+                              const hasPassengers = (waypoint.passengers?.length || 0) > 0;
+                              const destinationPassengerLineEnd = destinationPassengerLineEnds[index];
+                              const stopLabel = isOrigin ? 'ORIGEM' : isDestination ? 'DESTINO FINAL' : `${relIdx}ª PARADA`;
+
+                              return (
+                                <div
+                                  key={index}
+                                  ref={(el) => {
+                                    waypointTimelineRefs.current[index] = el;
                                   }}
-                                />
-                              )}
-                              {/* Timeline Dot (Círculo) */}
-                              <div className={`absolute -left-[1.625rem] top-2 w-4 h-4 rounded-full border-4 border-white shadow-sm ring-2 z-10 ${index === 0 ? 'bg-emerald-500 ring-emerald-100' : index === formData.waypoints.length - 1 ? 'bg-blue-600 ring-blue-100' : 'bg-slate-400 ring-slate-100'}`} />
-                              
-                              <div className="flex items-start gap-4">
-                                 <div className="flex-1 space-y-4">
-                                    <div className="space-y-4">
-                                       <div className="flex-1 space-y-3">
-                                          <label className="block text-[10px] font-black uppercase tracking-[0.25em] ml-1 mb-2">
-                                             <div className={`inline-flex items-stretch rounded-xl overflow-hidden shadow-sm border text-[10px] md:text-[11px] ${index === 0 ? 'bg-emerald-500 border-emerald-400 text-white' : index === formData.waypoints.length - 1 ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
-                                                <span className={`px-3 py-1.5 flex items-center justify-center font-black text-sm ${index === 0 ? 'bg-emerald-600' : index === formData.waypoints.length - 1 ? 'bg-blue-700' : 'bg-slate-200 text-slate-700'}`}>
-                                                   {index + 1}°
+                                  className="relative group"
+                                >
+                                  {!isDestination && index < formData.waypoints.length - 1 && (
+                                    <div className="absolute -left-[1.125rem] top-8 -bottom-6 w-0.5 bg-slate-300" />
+                                  )}
+                                  {isDestination && hasPassengers && (
+                                    <div
+                                      className="absolute -left-[1.125rem] top-8 w-0.5 bg-slate-300"
+                                      style={{
+                                        height: destinationPassengerLineEnd !== undefined
+                                          ? `${destinationPassengerLineEnd}px`
+                                          : `calc(100% - ${waypoint.passengers.length === 1 ? '94px' : waypoint.passengers.length === 2 ? '70px' : waypoint.passengers.length === 3 ? '82px' : '94px'})`
+                                      }}
+                                    />
+                                  )}
+                                  {/* Timeline Dot (Círculo) */}
+                                  <div className={`absolute -left-[1.625rem] top-2 w-4 h-4 rounded-full border-4 border-white shadow-sm ring-2 z-10 ${isOrigin ? 'bg-emerald-500 ring-emerald-100' : isDestination ? 'bg-blue-600 ring-blue-100' : 'bg-slate-400 ring-slate-100'}`} />
+
+                                  <div className="flex items-start gap-4">
+                                    <div className="flex-1 space-y-4">
+                                      <div className="space-y-4">
+                                        <div className="flex-1 space-y-3">
+                                          <div className="flex items-center justify-between ml-1 mb-2">
+                                            <label className="text-[10px] font-black uppercase tracking-[0.25em]">
+                                              <div className={`inline-flex items-stretch rounded-xl overflow-hidden shadow-sm border text-[10px] md:text-[11px] ${isOrigin ? 'bg-emerald-500 border-emerald-400 text-white' : isDestination ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
+                                                <span className={`px-3 py-1.5 flex items-center justify-center ${isOrigin ? 'bg-emerald-600' : isDestination ? 'bg-blue-700' : 'bg-slate-200 text-slate-700'}`}>
+                                                  {isOrigin ? <MapPin size={14} /> : isDestination ? <Flag size={14} /> : <Circle size={14} />}
                                                 </span>
                                                 <span className="px-4 py-1.5 font-black tracking-wide text-[11px]">
-                                                   {index === 0 ? 'ORIGEM' : index === formData.waypoints.length - 1 ? 'DESTINO FINAL' : 'PARADA INTERMEDIÁRIA'}
+                                                  {stopLabel}
                                                 </span>
-                                             </div>
-                                          </label>
-                                          <div className="relative">
-                                             <input 
-                                                type="text" 
-                                                required 
-                                                value={waypoint.label} 
-                                                onChange={(e) => handleWaypointChange(index, e.target.value)} 
-                                                placeholder={index === 0 ? "Ex: Hotel H/Niterói" : "Próximo destino..."} 
-                                                className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm pr-36"
-                                             />
-                                             <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10">
+                                              </div>
+                                            </label>
+                                            {isOrigin && (
+                                              <div className="flex items-center gap-3">
+                                                <div className="flex items-center gap-1.5">
+                                                  <Calendar size={14} className="text-slate-400" />
+                                                  <input
+                                                    type="text"
+                                                    value={waypoint.data ?? ''}
+                                                    onChange={(e) => handleWaypointDataChange(index, e.target.value)}
+                                                    onBlur={() => handleWaypointDataBlur(index)}
+                                                    placeholder="DD/MM/AAAA"
+                                                    maxLength={10}
+                                                    required={it.index === 0}
+                                                    className="w-[9rem] px-2 py-[5px] bg-white border border-slate-200 rounded-lg text-base font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-all tracking-wider font-mono"
+                                                  />
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                  <Clock size={16} className="text-slate-400" />
+                                                  <input
+                                                    type="text"
+                                                    value={waypoint.hora ? waypoint.hora.slice(0, 5) : ''}
+                                                    onChange={(e) => handleWaypointHoraChange(index, e.target.value)}
+                                                    placeholder="HH:MM"
+                                                    maxLength={5}
+                                                    required={it.index === 0}
+                                                    className="w-[6rem] px-2 py-[5px] bg-white border border-slate-200 rounded-lg text-base font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-all tracking-wider font-mono"
+                                                  />
+                                                </div>
                                                 <button
                                                   type="button"
-                                                  onClick={() => toggleWaypointComment(index)}
-                                                  className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all cursor-pointer ${openWaypointComments[index] || waypoint.comment.trim() ? 'border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-600'}`}
-                                                  title="Adicionar observação"
+                                                  onClick={() => handleAddWaypoint(it.index)}
+                                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-xl text-sm font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer"
                                                 >
-                                                  <MessageSquareMore size={16} />
+                                                  <Plus size={16} /> Parada
                                                 </button>
-                                                <MapPin size={18} className="text-slate-300" />
-                                                <button 
-                                                   type="button" 
-                                                   onClick={() => handleAddPassenger(index)}
-                                                   className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all flex items-center justify-center shadow-sm border border-blue-100 cursor-pointer"
-                                                   title="Adicionar Passageiro"
+                                                {it.index !== 0 && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveItinerary(it.index)}
+                                                    className="flex items-center justify-center px-2 py-1.5 bg-red-100 text-red-500 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-red-200 transition-all shadow-sm cursor-pointer"
+                                                    title="Remover itinerário/retorno"
+                                                  >
+                                                    <Minus size={16} />
+                                                  </button>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                          <div className="relative">
+                                            <input
+                                              type="text"
+                                              required
+                                              value={waypoint.label}
+                                              onChange={(e) => handleWaypointChange(index, e.target.value)}
+                                              placeholder={isOrigin ? 'Ex: Hotel H/Niterói' : 'Próximo destino...'}
+                                              className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm pr-36"
+                                            />
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10">
+                                              <button
+                                                type="button"
+                                                onClick={() => toggleWaypointComment(index)}
+                                                className={`relative inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all cursor-pointer ${openWaypointComments[index] || waypoint.comment.trim() ? 'border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:scale-110 active:scale-95' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-600'}`}
+                                                title="Adicionar observação"
+                                              >
+                                                <MessageSquareMore size={16} />
+                                                {waypoint.comment.trim() && (
+                                                  <>
+                                                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white animate-ping"></span>
+                                                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white"></span>
+                                                  </>
+                                                )}
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAddPassenger(index)}
+                                                className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all flex items-center justify-center shadow-sm border border-blue-100 cursor-pointer"
+                                                title="Adicionar Passageiro"
+                                              >
+                                                <Plus size={18} />
+                                              </button>
+                                              {formData.waypoints.length > 2 && !isOrigin && !isDestination && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleRemoveWaypoint(index)}
+                                                  className="p-2 bg-red-50 text-red-400 rounded-lg hover:bg-red-100 transition-all flex items-center justify-center shadow-sm border border-red-100 cursor-pointer"
+                                                  title="Remover Parada"
                                                 >
-                                                   <Plus size={18} />
+                                                  <X size={18} />
                                                 </button>
-                                             </div>
+                                              )}
+                                            </div>
                                           </div>
                                           {openWaypointComments[index] && (
-                                            <div className="mt-3 ml-1">
-                                              <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">
-                                                Observação do trajeto
-                                              </label>
+                                            <div className="mt-3 ml-12">
                                               <textarea
                                                 value={waypoint.comment}
                                                 onChange={(e) => handleWaypointCommentChange(index, e.target.value)}
                                                 rows={2}
                                                 placeholder="Ex: aguardar na portaria, desembarque pela lateral..."
-                                                className="w-full resize-none rounded-xl border-2 border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none transition-all focus:border-blue-600 focus:bg-white shadow-sm"
+                                                className="waypoint-observation w-full resize-none rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 outline-none transition-all shadow-sm"
                                               />
                                             </div>
                                           )}
-                                       </div>
-                                    </div>
+                                        </div>
+                                      </div>
 
-                                    {/* Botão Remover Parada - apenas para paradas intermediárias */}
-                                    {formData.waypoints.length > 2 && (
-                                       <div className="flex items-center justify-end pt-1">
-                                          <button
-                                             type="button"
-                                             onClick={() => handleRemoveWaypoint(index)}
-                                             className="p-2 bg-red-50 text-red-400 rounded-lg hover:bg-red-100 transition-all flex items-center justify-center shadow-sm border border-red-100 cursor-pointer"
-                                             title="Remover Parada"
-                                          >
-                                             <X size={18} />
-                                          </button>
-                                       </div>
-                                    )}
-
-                                    {/* Linhas de Passageiros */}
-                                    {waypoint.passengers && waypoint.passengers.length > 0 && (
-                                       <div className="mt-4 border-t border-dashed border-slate-200">
+                                      {/* Linhas de Passageiros */}
+                                      {waypoint.passengers && waypoint.passengers.length > 0 && (
+                                        <div className="mt-4 border-t border-dashed border-slate-200">
                                           {waypoint.passengers.map((passenger, passengerIndex) => (
-                                             <div key={passenger.id} className={`relative flex items-center gap-4 group/pass ${passengerIndex === 0 ? 'mt-6' : 'mt-5'} ${passengerIndex === waypoint.passengers.length - 1 ? 'mb-10' : 'mb-5'}`}>
-                                                {/* Linha horizontal da trilha - começa na linha vertical */}
-                                                <div className="absolute -left-[1.125rem] top-1/2 -translate-y-1/2 w-12 h-0.5 bg-slate-300 z-10" />
-                                                
-                                                {/* Trilhas de passageiro (quadrado) - no final da linha */}
-                                                <div className={`absolute left-[1.375rem] top-1/2 -translate-y-1/2 w-4 h-4 rounded-sm border-4 border-white shadow-sm ring-2 z-20 ${index === 0 ? 'bg-emerald-500 ring-emerald-100' : index === formData.waypoints.length - 1 ? 'bg-blue-600 ring-blue-100' : 'bg-slate-400 ring-slate-100'}`} />
-                                                
-                                                <div className="flex-1 flex items-center gap-3 ml-8">
-                                                   <div className="w-3/5 ml-6">
-                                                      <div className="flex items-center gap-3">
-                                                        <div className="flex-1">
-                                                          <GeologSearchableSelect 
-                                                             label=""
-                                                             placeholder="Selecione o passageiro..."
-                                                             options={passageiros.map(p => ({ 
-                                                               id: p.id, 
-                                                               nome: p.nomeCompleto,
-                                                               sublabel: p.enderecos?.[0]?.rotulo || undefined
-                                                             }))}
-                                                             value={passenger.solicitanteId || ''}
-                                                             onChange={(val) => handlePassengerChange(index, passenger.id, val)}
-                                                          />
-                                                        </div>
-                                                        <div className="flex items-center justify-center h-[56px]">
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => openQuickPassengerModal(index, passenger.id)}
-                                                            className="p-3 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all opacity-0 group-hover/pass:opacity-100 flex items-center justify-center shadow-sm border border-blue-200 cursor-pointer"
-                                                            style={{ marginBottom: '-5px' }}
-                                                            title="Cadastrar passageiro"
-                                                          >
-                                                            <PlusCircle size={18} />
-                                                          </button>
-                                                        </div>
-                                                      </div>
-                                                   </div>
-                                                   <div className="flex items-center justify-center h-[56px]">
-                                                     <button
-                                                        type="button"
-                                                        onClick={() => handleRemovePassenger(index, passenger.id)}
-                                                        className="p-3 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover/pass:opacity-100 cursor-pointer"
-                                                        style={{ marginBottom: '-5px' }}
-                                                        title="Remover Passageiro"
-                                                     >
-                                                        <X size={18} />
-                                                     </button>
-                                                   </div>
-                                                </div>
-                                             </div>
-                                          ))}
-                                       </div>
-                                    )}
-                                 </div>
-                              </div>
-                           </div>
-                        ))}
-                     </div>
+                                            <div key={passenger.id} className={`relative flex items-center gap-4 group/pass ${passengerIndex === 0 ? 'mt-6' : 'mt-5'} ${passengerIndex === waypoint.passengers.length - 1 ? 'mb-10' : 'mb-5'}`}>
+                                              {/* Linha horizontal da trilha - começa na linha vertical */}
+                                              <div data-passenger-line className="absolute -left-[1.125rem] top-1/2 -translate-y-1/2 w-12 h-0.5 bg-slate-300 z-10" />
 
-                     <div className="p-6 bg-blue-50/70 rounded-2xl border-2 border-blue-100/50 shadow-inner">
-                        <div className="flex items-center gap-3 mb-2">
-                           <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" />
-                           <span className="text-[10px] font-black text-blue-600/80 uppercase tracking-[0.15em]">Visualização do Trecho Consolidado</span>
-                        </div>
-                        <p className="text-xl font-black text-slate-900 tracking-tight leading-none uppercase">
-                          {trechoPreview || 'Aguardando definição do itinerário...'}
-                        </p>
-                     </div>
+                                              {/* Trilhas de passageiro (quadrado) - no final da linha */}
+                                              <div className={`absolute left-[1.375rem] top-1/2 -translate-y-1/2 w-4 h-4 rounded-sm border-4 border-white shadow-sm ring-2 z-20 ${isOrigin ? 'bg-emerald-500 ring-emerald-100' : isDestination ? 'bg-blue-600 ring-blue-100' : 'bg-slate-400 ring-slate-100'}`} />
+
+                                              <div className="flex-1 flex items-center gap-3 ml-8">
+                                                <div className="w-3/5 ml-6">
+                                                  <div className="flex items-center gap-3">
+                                                    <div className="flex-1">
+                                                      <GeologSearchableSelect
+                                                        label=""
+                                                        placeholder="Selecione o passageiro..."
+                                                        options={passageiros.map(p => ({
+                                                          id: p.id,
+                                                          nome: p.nomeCompleto,
+                                                          sublabel: p.enderecos?.[0]?.rotulo || undefined
+                                                        }))}
+                                                        value={passenger.solicitanteId || ''}
+                                                        onChange={(val) => handlePassengerChange(index, passenger.id, val)}
+                                                      />
+                                                    </div>
+                                                    <div className="flex items-center justify-center h-[56px]">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => openQuickPassengerModal(index, passenger.id)}
+                                                        className="p-3 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all opacity-0 group-hover/pass:opacity-100 flex items-center justify-center shadow-sm border border-blue-200 cursor-pointer"
+                                                        style={{ marginBottom: '-5px' }}
+                                                        title="Cadastrar passageiro"
+                                                      >
+                                                        <PlusCircle size={18} />
+                                                      </button>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                                <div className="flex items-center justify-center h-[56px]">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleRemovePassenger(index, passenger.id)}
+                                                    className="p-3 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover/pass:opacity-100 cursor-pointer"
+                                                    style={{ marginBottom: '-5px' }}
+                                                    title="Remover Passageiro"
+                                                  >
+                                                    <X size={18} />
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+
+                  </div>
+
+                  <div className="flex items-center gap-4 mt-12">
+                    <div className="flex-1 border-t-2 border-dashed border-slate-300" />
+                    <div className="w-2 h-2 rounded-full bg-slate-300" />
+                    <div className="flex-1 border-t-2 border-dashed border-slate-300" />
                   </div>
 
                   {/* 3. RESUMO FINANCEIRO */}
-                  <div className="space-y-8">
+                  <div className="space-y-8 mt-8">
                      <div className="flex items-center border-b-2 border-slate-100 pb-4">
                         <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3">
                           <FileText size={20} className="text-emerald-600" /> Resumo Financeiro
@@ -3048,7 +3404,7 @@ export default function OSOperationalPage() {
                                 type="number" 
                                 name="valorBruto" 
                                 step="0.01" 
-                                value={formData.valorBruto || ''} 
+                                value={formData.valorBruto ?? ''} 
                                 onChange={handleInputChange} 
                                 className="w-full bg-slate-50 border-2 border-slate-200 px-6 h-[58px] rounded-xl font-bold text-lg text-blue-700 outline-none tabular-nums focus:bg-white focus:border-blue-600 transition-all shadow-sm" 
                               />
@@ -3062,7 +3418,7 @@ export default function OSOperationalPage() {
                                 type="number" 
                                 name="custo" 
                                 step="0.01" 
-                                value={formData.custo || ''} 
+                                value={formData.custo ?? ''} 
                                 onChange={handleInputChange} 
                                 className="w-full bg-slate-50 border-2 border-slate-200 px-6 h-[58px] rounded-xl font-bold text-lg text-red-500 outline-none tabular-nums focus:bg-white focus:border-red-300 transition-all shadow-sm" 
                               />
@@ -3098,13 +3454,14 @@ export default function OSOperationalPage() {
                            <div className="text-right space-y-2">
                               <span className="text-[10px] font-black uppercase opacity-60 block tracking-widest">Margem de Lucro</span>
                               <div className="px-5 py-2 bg-white/20 rounded-xl text-2xl font-black tabular-nums backdrop-blur-md">
-                                 {formData.valorBruto > 0 ? ((currentLucro / formData.valorBruto) * 100).toFixed(1) : 0}%
+                                 {(formData.valorBruto ?? 0) > 0 ? ((currentLucro / (formData.valorBruto ?? 0)) * 100).toFixed(1) : 0}%
                               </div>
                            </div>
                         </div>
                      </div>
                   </div>
                </div>
+            </div>
             </form>
         </StandardModal>
       )}
@@ -3369,7 +3726,22 @@ export default function OSOperationalPage() {
                   </div>
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Horário</p>
-                    <p className="text-base font-black text-slate-800">{viewingOS.hora ? viewingOS.hora.slice(0, 5) : '--:--'}</p>
+                    <p className="text-base font-black text-slate-800">
+                      {(() => {
+                        const itineraries = getItineraries((viewingOS.rota?.waypoints || []) as FormWaypoint[]);
+                        const firstItinerary = itineraries.find(it => it.index === 0);
+                        const firstWaypoint = firstItinerary?.waypoints[0];
+                        const data = firstWaypoint?.data;
+                        const hora = firstWaypoint?.hora;
+                        if (data && hora) {
+                          return `${data.split('-').reverse().join('/')} - ${hora.slice(0, 5)}`;
+                        }
+                        if (hora) {
+                          return hora.slice(0, 5);
+                        }
+                        return '--:--';
+                      })()}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -3456,21 +3828,21 @@ export default function OSOperationalPage() {
                               setDriverNotifyMenuPos({ x: rect.left + rect.width / 2, y: rect.bottom });
                               setOpenDriverNotifyMenu(!openDriverNotifyMenu);
                             }}
-                            disabled={notifyLoadingKey === 'driver-whatsapp' || notifyLoadingKey === 'driver-whatsapp-text'}
+                            disabled={notifyLoadingKey === 'driver-whatsapp'}
                           >
                             <div
                               className={`
                                 w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-lg
                                 ${!step.active ? 'bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300' : 'text-white'}
                                 group-hover:scale-110 group-active:scale-95
-                                ${(notifyLoadingKey === 'driver-whatsapp' || notifyLoadingKey === 'driver-whatsapp-text') && step.id === 'received' ? 'animate-pulse' : ''}
+                                ${notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? 'animate-pulse' : ''}
                               `}
                               style={step.active ? {
                                 backgroundColor: 'rgb(81, 222, 255)',
                                 boxShadow: '0 10px 15px -3px rgba(81, 222, 255, 0.4)'
                               } : {}}
                             >
-                              {(notifyLoadingKey === 'driver-whatsapp' || notifyLoadingKey === 'driver-whatsapp-text') && step.id === 'received' ? (
+                              {notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? (
                                 <Loader2 size={24} className="animate-spin" />
                               ) : step.icon}
                             </div>
@@ -3482,7 +3854,7 @@ export default function OSOperationalPage() {
                                 {step.sublabel}
                               </p>
                               {step.timestamp && (
-                                <p className="text-[9px] font-medium text-slate-400">
+                                <p className="text-[13px] font-medium text-slate-400">
                                   {new Date(step.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                                 </p>
                               )}
@@ -3526,24 +3898,7 @@ export default function OSOperationalPage() {
                                 className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
                               >
                                 <Link size={14} />
-                                {notifyLoadingKey === 'driver-whatsapp' ? 'Enviando...' : 'Com link (aceitar)'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (wppStatus !== 'open') {
-                                    toast.error("O WhatsApp da Geolog está offline. Verifique a conexão.");
-                                    setOpenDriverNotifyMenu(false);
-                                    return;
-                                  }
-                                  sendWhatsAppTextNotification(viewingOS);
-                                  setOpenDriverNotifyMenu(false);
-                                }}
-                                disabled={!!notifyLoadingKey}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-green-50 hover:text-green-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
-                              >
-                                <Keyboard size={14} />
-                                {notifyLoadingKey === 'driver-whatsapp-text' ? 'Enviando...' : 'Por texto (digite 1/0)'}
+                                {notifyLoadingKey === 'driver-whatsapp' ? 'Enviando...' : 'Enviar link de aceite'}
                               </button>
                             </div>
                           )}
@@ -3585,12 +3940,12 @@ export default function OSOperationalPage() {
                               {step.sublabel}
                             </p>
                             {step.timestamp && (
-                              <p className="text-[9px] font-medium text-slate-400">
+                              <p className="text-[13px] font-medium text-slate-400">
                                 {new Date(step.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                               </p>
                             )}
                             {typeof step.km === 'number' && (
-                              <p className="text-[9px] font-black text-slate-600">
+                              <p className="text-[13px] font-black text-slate-600">
                                 KM: {step.km.toLocaleString('pt-BR')}
                               </p>
                             )}
@@ -3629,60 +3984,82 @@ export default function OSOperationalPage() {
                     </div>
                   </div>
 
-                  <div className="relative flex flex-col gap-8 ml-4">
-                    {/* Linha vertical conectando os pontos */}
-                    <div className="absolute left-[11px] top-2 bottom-2 w-0.5 border-l-2 border-dashed border-slate-200"></div>
+                  <div className="relative pl-8 space-y-8">
+                    {(() => {
+                      const viewingItineraries = getItineraries((viewingOS.rota?.waypoints || []) as FormWaypoint[]);
+                      return viewingItineraries.map((it) => (
+                        <div key={it.index} className="space-y-6">
+                          {viewingItineraries.length > 1 && (
+                            <h4 className="flex items-center gap-2 mb-6">
+                              {it.index < 0 ? (
+                                <ArrowLeft size={18} className="text-purple-500" />
+                              ) : (
+                                <ArrowRight size={18} className="text-amber-500" />
+                              )}
+                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-xl text-sm font-black shadow-sm ${it.index < 0 ? 'bg-purple-100 text-purple-700 ring-2 ring-purple-200' : 'bg-amber-100 text-amber-700 ring-2 ring-amber-200'}`}>
+                                {it.index < 0 ? Math.abs(it.index) : (it.index + 1)}
+                              </span>
+                              <span className={`text-[13px] font-black uppercase tracking-[0.15em] ${it.index < 0 ? 'text-purple-700' : 'text-amber-700'}`}>
+                                {getItineraryTitle(it.index)}
+                              </span>
+                            </h4>
+                          )}
+                          <div className="relative flex flex-col gap-8">
+                            {/* Linha vertical conectando os pontos do itinerário */}
+                            <div className="absolute left-[11px] top-2 bottom-2 w-0.5 border-l-2 border-dashed border-slate-200"></div>
 
-                    {(viewingOS.rota?.waypoints || []).map((waypoint, idx) => {
-                      const isFirst = idx === 0;
-                      const isLast = idx === (viewingOS.rota?.waypoints?.length || 0) - 1;
-                      
-                      return (
-                        <div key={idx} className="relative flex items-center gap-6 group">
-                          <div className={`
-                            relative z-10 w-6 h-6 rounded-full border-4 border-white shadow-md transition-all duration-300
-                            ${isFirst ? 'bg-emerald-500 scale-125' : isLast ? 'bg-blue-600 scale-125' : 'bg-slate-300'}
-                            group-hover:scale-150
-                          `}></div>
-                          <div className={`
-                            flex-1 p-4 rounded-2xl border transition-all duration-300
-                            ${isFirst ? 'bg-emerald-50 border-emerald-100' : isLast ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-100'}
-                            group-hover:shadow-md group-hover:bg-white
-                          `}>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                              {isFirst ? 'Origem' : isLast ? 'Destino Final' : `Parada ${idx}`}
-                            </p>
-                            <p className="text-sm font-black text-slate-800 uppercase tracking-tight">
-                              {waypoint.label}
-                            </p>
-                            {waypoint.comment && (
-                              <p className="mt-2 text-xs font-semibold text-slate-500 bg-white/50 p-2 rounded-lg border border-slate-100 italic">
-                                &quot;{waypoint.comment}&quot;
-                              </p>
-                            )}
+                            {it.waypoints.map((waypoint, relIdx) => {
+                              const isOrigin = relIdx === 0;
+                              const isDestination = relIdx === it.waypoints.length - 1;
+                              const globalIdx = it.waypointIndices[relIdx];
+                              
+                              return (
+                                <div key={globalIdx} className="relative flex items-center gap-6 group">
+                                  <div className={`
+                                    relative z-10 w-6 h-6 rounded-full border-4 border-white shadow-md transition-all duration-300
+                                    ${isOrigin ? 'bg-emerald-500 scale-125' : isDestination ? 'bg-blue-600 scale-125' : 'bg-slate-300'}
+                                    group-hover:scale-150
+                                  `}></div>
+                                  <div className={`
+                                    flex-1 p-4 rounded-2xl border transition-all duration-300
+                                    ${isOrigin ? 'bg-emerald-50 border-emerald-100' : isDestination ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-100'}
+                                    group-hover:shadow-md group-hover:bg-white
+                                  `}>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
+                                      {isOrigin ? 'Origem' : isDestination ? 'Destino Final' : `${relIdx}ª Parada`}
+                                    </p>
+                                    <p className="text-base font-black text-slate-800 uppercase tracking-tight">
+                                      {waypoint.label}
+                                    </p>
+                                    {waypoint.comment && (
+                                      <p className="mt-2 text-sm font-semibold text-slate-500 bg-white/50 p-2 rounded-lg border border-slate-100 italic">
+                                        &quot;{waypoint.comment}&quot;
+                                      </p>
+                                    )}
+                                    {(waypoint.passengers || []).length > 0 && (
+                                      <div className="mt-3 flex flex-wrap gap-2">
+                                        {(waypoint.passengers || []).map((p, pi) => {
+                                          const pRec = passageiros.find(x => x.id === p.solicitanteId);
+                                          return (
+                                            <span key={pi} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-100 text-sm font-bold text-blue-700">
+                                              <User size={12} />
+                                              {pRec?.nomeCompleto || 'Passageiro'}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
-                      );
-                    })}
+                      ));
+                    })()}
                   </div>
                 </div>
 
-                {/* Resumo de Contatos - Mesma altura que o Trajeto */}
-                <div className="rounded-[2rem] border border-slate-200 bg-white p-8 space-y-6 shadow-sm h-full flex flex-col">
-                  <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-                    <Users className="text-blue-600" size={22} />
-                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.08em]">Resumo do Itinerário</h3>
-                  </div>
-                  
-                  <div className="space-y-4 flex-1 flex flex-col">
-                    <div className="p-5 rounded-3xl bg-blue-50 border border-blue-100 h-full flex flex-col justify-center">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400 mb-3">Itinerário Simplificado</p>
-                      <p className="text-sm font-black text-blue-900 leading-relaxed uppercase">
-                        {viewingOS.trecho}
-                      </p>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -4512,6 +4889,123 @@ export default function OSOperationalPage() {
         cancelText={confirmState.cancelText}
         type={confirmState.type}
       />
+
+      {/* Modal de Confirmação de Notificação */}
+      {showNotificationConfirm && (
+        <StandardModal
+          onClose={() => setShowNotificationConfirm(false)}
+          title="Notificações da OS"
+          subtitle="Escolha como deseja notificar os envolvidos"
+          icon={<Bell className="w-6 h-6 md:w-7 md:h-7" />}
+          maxWidthClassName="max-w-xl"
+        >
+          <div className="space-y-8">
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h4 className="font-black text-slate-800 uppercase tracking-widest text-sm">Modo de Envio</h4>
+                  <p className="text-xs text-slate-500 font-bold mt-1">Como as notificações serão processadas?</p>
+                </div>
+                <div className="flex bg-white p-1.5 rounded-xl border border-slate-200">
+                  <button
+                    onClick={() => setNotificationConfig(prev => ({ ...prev, auto: true }))}
+                    className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${notificationConfig.auto ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                    AUTOMÁTICO
+                  </button>
+                  <button
+                    onClick={() => setNotificationConfig(prev => ({ ...prev, auto: false }))}
+                    className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${!notificationConfig.auto ? 'bg-slate-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                    MANUAL
+                  </button>
+                </div>
+              </div>
+
+              {notificationConfig.auto && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Destinatários automáticos</p>
+
+                  <button
+                    onClick={() => setNotificationConfig(prev => ({ ...prev, motorista: !prev.motorista }))}
+                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${notificationConfig.motorista ? 'bg-blue-50/50 border-blue-200 text-blue-900' : 'bg-white border-slate-100 text-slate-400'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${notificationConfig.motorista ? 'bg-blue-100 text-blue-600' : 'bg-slate-50 text-slate-300'}`}>
+                        <Truck size={18} />
+                      </div>
+                      <span className="font-bold text-sm">Motorista Alocado</span>
+                    </div>
+                    <div className={`w-10 h-6 rounded-full relative transition-all ${notificationConfig.motorista ? 'bg-blue-600' : 'bg-slate-200'}`}>
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationConfig.motorista ? 'left-5' : 'left-1'}`} />
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => setNotificationConfig(prev => ({ ...prev, passageiros: !prev.passageiros }))}
+                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${notificationConfig.passageiros ? 'bg-blue-50/50 border-blue-200 text-blue-900' : 'bg-white border-slate-100 text-slate-400'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${notificationConfig.passageiros ? 'bg-blue-100 text-blue-600' : 'bg-slate-50 text-slate-300'}`}>
+                        <Users size={18} />
+                      </div>
+                      <span className="font-bold text-sm">Passageiros da Rota</span>
+                    </div>
+                    <div className={`w-10 h-6 rounded-full relative transition-all ${notificationConfig.passageiros ? 'bg-blue-600' : 'bg-slate-200'}`}>
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationConfig.passageiros ? 'left-5' : 'left-1'}`} />
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => setNotificationConfig(prev => ({ ...prev, solicitante: !prev.solicitante }))}
+                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${notificationConfig.solicitante ? 'bg-blue-50/50 border-blue-200 text-blue-900' : 'bg-white border-slate-100 text-slate-400'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${notificationConfig.solicitante ? 'bg-blue-100 text-blue-600' : 'bg-slate-50 text-slate-300'}`}>
+                        <User size={18} />
+                      </div>
+                      <span className="font-bold text-sm">Solicitante da Empresa</span>
+                    </div>
+                    <div className={`w-10 h-6 rounded-full relative transition-all ${notificationConfig.solicitante ? 'bg-blue-600' : 'bg-slate-200'}`}>
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationConfig.solicitante ? 'left-5' : 'left-1'}`} />
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-4 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowNotificationConfirm(false)}
+                className="flex-1 px-6 py-4 bg-slate-100 text-slate-600 font-black rounded-xl hover:bg-slate-200 transition-all text-xs uppercase tracking-widest"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={executeAddOS}
+                className="flex-[2] px-6 py-4 bg-emerald-600 text-white font-black rounded-xl shadow-xl shadow-emerald-900/20 hover:bg-emerald-700 hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest flex items-center justify-center gap-3"
+              >
+                <CheckCircle2 size={18} />
+                Confirmar e {editingOSId ? 'Salvar' : 'Criar OS'}
+              </button>
+            </div>
+          </div>
+        </StandardModal>
+      )}
+
+      {/* Loader overlay durante salvamento de OS */}
+      {isSubmittingOS && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-[#001C3A]/60 backdrop-blur-md">
+          <div className="bg-white rounded-[2.5rem] p-10 flex flex-col items-center gap-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-300">
+            <Loader2 className="animate-spin text-[var(--color-geolog-blue)]" size={48} />
+            <p className="text-sm font-black uppercase tracking-widest text-slate-600">
+              {editingOSId ? 'Salvando alterações...' : 'Criando atendimento...'}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

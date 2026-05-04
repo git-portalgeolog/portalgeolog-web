@@ -1,0 +1,6 @@
+echo "node_modules/" >> .claudignore
+echo "__pycache__/" >> .claudignore
+echo ".git/" >> .claudignore
+node_modules/
+__pycache__/
+.git/

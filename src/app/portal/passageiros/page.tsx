@@ -133,7 +133,7 @@ export default function PassageirosPage() {
 
     try {
       await addPassageiro({
-        nomeCompleto: formData.nomeCompleto.trim(),
+        nomeCompleto: formData.nomeCompleto.trim().toUpperCase(),
         email: formData.email?.trim(),
         celular: formData.celular.trim(),
         cpf: formData.cpf?.trim(),
@@ -182,7 +182,7 @@ export default function PassageirosPage() {
 
     try {
       await updatePassageiro(selectedPassenger.id, {
-        nomeCompleto: formData.nomeCompleto.trim(),
+        nomeCompleto: formData.nomeCompleto.trim().toUpperCase(),
         email: formData.email?.trim(),
         celular: formData.celular.trim(),
         cpf: formData.cpf?.trim(),

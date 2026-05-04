@@ -16,12 +16,31 @@ const WAHA_API_URL = process.env.WAHA_API_URL || '';
 const WAHA_API_KEY = process.env.WAHA_API_KEY || '';
 const WAHA_SESSION = process.env.WAHA_SESSION || 'default';
 
+function resolveReplyChatId(chatId: string, fallbackPhoneDigits: string): string {
+  const trimmedChatId = chatId.trim();
+
+  if (trimmedChatId.endsWith('@c.us') || trimmedChatId.endsWith('@g.us')) {
+    return trimmedChatId;
+  }
+
+  if (trimmedChatId.endsWith('@s.whatsapp.net')) {
+    return trimmedChatId.replace('@s.whatsapp.net', '@c.us');
+  }
+
+  if (fallbackPhoneDigits) {
+    return `${fallbackPhoneDigits}@c.us`;
+  }
+
+  return trimmedChatId;
+}
+
 async function sendBotReply(chatId: string, text: string): Promise<void> {
   if (!WAHA_API_URL || !WAHA_API_KEY) {
     console.error('[whatsapp/webhook] WAHA não configurada para enviar respostas');
     return;
   }
   try {
+    console.log(`[whatsapp/webhook] Sending bot reply to ${chatId}`);
     const response = await fetch(`${WAHA_API_URL}/api/sendText`, {
       method: 'POST',
       headers: {
@@ -35,8 +54,10 @@ async function sendBotReply(chatId: string, text: string): Promise<void> {
       }),
     });
     if (!response.ok) {
-      console.error('[whatsapp/webhook] Erro ao enviar resposta do bot:', response.status);
+      const responseText = await response.text().catch(() => '');
+      throw new Error(`WAHA reply error ${response.status}: ${responseText}`);
     }
+    console.log(`[whatsapp/webhook] Bot reply sent with status ${response.status}`);
   } catch (err) {
     console.error('[whatsapp/webhook] Falha ao enviar resposta do bot:', err);
   }
@@ -109,8 +130,8 @@ function mapWahaState(rawStatus: string | null | undefined, rawEngineState: stri
 export async function POST(request: Request) {
   try {
     const bodyText = await request.text();
+    console.log('[whatsapp/webhook] RAW BODY:', bodyText.substring(0, 2000));
 
-    // Prioridade: HMAC da WAHA; fallback transitório para X-Api-Key
     let authorized = false;
 
     if (WAHA_WEBHOOK_HMAC_KEY) {
@@ -120,9 +141,16 @@ export async function POST(request: Request) {
     } else if (WAHA_WEBHOOK_API_KEY) {
       const apiKey = request.headers.get('X-Api-Key') ?? request.headers.get('apikey') ?? '';
       authorized = Boolean(apiKey && apiKey === WAHA_WEBHOOK_API_KEY);
+    } else if (process.env.NODE_ENV !== 'production') {
+      authorized = true;
     }
 
     if (!authorized) {
+      console.warn('[whatsapp/webhook] Unauthorized webhook request', {
+        hasHmacKey: Boolean(WAHA_WEBHOOK_HMAC_KEY),
+        hasApiKey: Boolean(WAHA_WEBHOOK_API_KEY),
+        nodeEnv: process.env.NODE_ENV,
+      });
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -149,217 +177,286 @@ export async function POST(request: Request) {
     };
 
     const event = body.event ?? body.payload?.event;
+    console.log(`[whatsapp/webhook] Event type: "${event}"`);
 
-    // Processa mensagens de texto do motorista (fluxo por respostas)
+    // Log persistente no Supabase para debug
+    try {
+      const supabaseLog = createAdminClient();
+      await supabaseLog.from('webhook_logs').insert({
+        source: 'waha',
+        event_type: event || 'unknown',
+        payload: body,
+      });
+    } catch {
+      // ignore log errors
+    }
+
     if (event === 'message' || event === 'message.any') {
-      const messagePayload = body.payload as {
+      const messagePayload = (body.payload ?? body.data ?? body) as {
         id?: string;
         from?: string;
         body?: string;
+        text?: string;
+        message?: { body?: string; text?: string } | null;
         replyTo?: { id?: string | null } | null;
+        participant?: string | null;
+        fromMe?: boolean;
       } | null;
 
-      const selectedText = (messagePayload?.body || '').trim();
-      const fromJid = messagePayload?.from || '';
+      const rawPayloadForDebug = JSON.stringify({
+        event,
+        session: body.session,
+        from: messagePayload?.from,
+        fromMe: messagePayload?.fromMe,
+        body: messagePayload?.body,
+        text: messagePayload?.text,
+        replyTo: messagePayload?.replyTo?.id,
+      });
+
+      if (messagePayload?.fromMe === true) {
+        console.log(`[whatsapp/webhook] Ignored fromMe message: ${rawPayloadForDebug}`);
+        return NextResponse.json({ ignored: true, reason: 'fromMe' });
+      }
+
+      const selectedText = (
+        messagePayload?.body ||
+        messagePayload?.text ||
+        messagePayload?.message?.body ||
+        messagePayload?.message?.text ||
+        ''
+      ).trim();
+      const fromJid = messagePayload?.from || messagePayload?.participant || '';
       const replyToId = messagePayload?.replyTo?.id || null;
       const normalizedChoice = selectedText.toLowerCase();
+      const isNumericChoice = /^\d+$/.test(selectedText);
+      const expectedStates =
+        normalizedChoice === '1' || normalizedChoice === '0'
+          ? ['awaiting_accept']
+          : normalizedChoice === 'iniciar'
+            ? ['awaiting_start']
+            : normalizedChoice === 'finalizar'
+              ? ['awaiting_finish']
+              : isNumericChoice
+                ? ['awaiting_km_start', 'awaiting_km_finish']
+                : [];
+
+      console.log(`[whatsapp/webhook] Received message: text="${selectedText}" from="${fromJid}" replyTo="${replyToId ?? 'null'}"`);
+
+      if (!fromJid) {
+        console.log('[whatsapp/webhook] Ignored: no fromJid');
+        return NextResponse.json({ ignored: true, reason: 'no fromJid' });
+      }
+
+      const phoneDigits = fromJid.replace(/\D/g, '').replace(/@.*$/, '');
+      console.log(`[whatsapp/webhook] Extracted phone digits: "${phoneDigits}" (len=${phoneDigits.length})`);
+      const replyChatId = resolveReplyChatId(fromJid, phoneDigits);
+
+      if (phoneDigits.length < 10) {
+        console.log(`[whatsapp/webhook] Ignored: phone too short (${phoneDigits.length})`);
+        return NextResponse.json({ ignored: true, reason: 'phone too short' });
+      }
 
       const supabase = createAdminClient();
 
-      // --- NOVO FLUXO: respostas de texto (1/0, INICIAR, FINALIZAR, números) ---
-      if (fromJid) {
-        const phoneDigits = fromJid.replace(/\D/g, '').replace(/@.*$/, '');
+      const { data: drivers } = await supabase
+        .from('drivers')
+        .select('id, name, phone')
+        .or(`phone.ilike.%${phoneDigits.slice(-10)}%,phone.ilike.%${phoneDigits.slice(-11)}%`)
+        .limit(5);
 
-        if (phoneDigits.length >= 10) {
-          // Busca motorista pelo telefone (comparação flexível)
-          const { data: drivers } = await supabase
-            .from('drivers')
-            .select('id, name, phone')
-            .or(`phone.ilike.%${phoneDigits.slice(-10)}%,phone.ilike.%${phoneDigits.slice(-11)}%`)
-            .limit(5);
+      console.log(`[whatsapp/webhook] Found ${drivers?.length ?? 0} drivers for phone ${phoneDigits}`);
 
-          const driver = drivers?.find((d) => {
-            const dPhone = (d.phone || '').replace(/\D/g, '');
-            return dPhone === phoneDigits || dPhone.endsWith(phoneDigits.slice(-10)) || dPhone.endsWith(phoneDigits.slice(-11));
-          });
+      const driver = drivers?.find((d) => {
+        const dPhone = (d.phone || '').replace(/\D/g, '');
+        return dPhone === phoneDigits || dPhone.endsWith(phoneDigits.slice(-10)) || dPhone.endsWith(phoneDigits.slice(-11));
+      });
 
-          if (driver) {
-            // Busca OS mais recente do motorista com driver_whatsapp_state ativo
-            const { data: osList } = await supabase
-              .from('ordens_servico')
-              .select('id, status_operacional, motorista, veiculo_id, driver_whatsapp_state, protocolo, os_number, trecho')
-              .eq('motorista', driver.name)
-              .not('driver_whatsapp_state', 'is', null)
-              .order('created_at', { ascending: false })
-              .limit(1);
+      console.log(`[whatsapp/webhook] Matched driver: ${driver ? driver.name : 'NONE'}`);
 
-            const os = osList?.[0];
-
-            if (os && os.driver_whatsapp_state) {
-              const now = new Date().toISOString();
-
-              // Helper para formatar KM
-              const fmtKm = (n: number) => n.toLocaleString('pt-BR');
-
-              // --- ESTADO: aguardando aceite (1 ou 0) ---
-              if (os.driver_whatsapp_state === 'awaiting_accept') {
-                if (normalizedChoice === '1') {
-                  await supabase.from('ordens_servico').update({
-                    status_operacional: 'Aguardando',
-                    driver_accepted_at: now,
-                    driver_whatsapp_state: 'awaiting_start',
-                    updated_at: now,
-                  }).eq('id', os.id);
-
-                  await sendBotReply(fromJid, '✅ *Aceite registrado!*\n\nQuando for iniciar a rota, digite: *INICIAR*');
-                  return NextResponse.json({ success: true, action: 'accept', osId: os.id });
-                }
-                if (normalizedChoice === '0') {
-                  await supabase.from('ordens_servico').update({
-                    status_operacional: 'Cancelado',
-                    driver_whatsapp_state: null,
-                    updated_at: now,
-                  }).eq('id', os.id);
-
-                  await sendBotReply(fromJid, '❌ *Serviço recusado.*');
-                  return NextResponse.json({ success: true, action: 'reject', osId: os.id });
-                }
-                await sendBotReply(fromJid, '⚠️ Digite *1* para aceitar ou *0* para recusar.');
-                return NextResponse.json({ ignored: true, reason: 'invalid choice' });
-              }
-
-              // --- ESTADO: aguardando INICIAR ---
-              if (os.driver_whatsapp_state === 'awaiting_start') {
-                if (normalizedChoice === 'iniciar') {
-                  // Busca veículo para confirmar
-                  let vehicleText = '';
-                  if (os.veiculo_id) {
-                    const { data: v } = await supabase
-                      .from('veiculos')
-                      .select('marca, modelo, placa')
-                      .eq('id', os.veiculo_id)
-                      .single();
-                    if (v) vehicleText = `\n🚘 *Veículo:* ${v.marca} ${v.modelo}\n📝 *Placa:* ${v.placa}`;
-                  }
-
-                  await supabase.from('ordens_servico').update({
-                    driver_whatsapp_state: 'awaiting_km_start',
-                    updated_at: now,
-                  }).eq('id', os.id);
-
-                  await sendBotReply(fromJid, `🚦 *Iniciar Rota*${vehicleText}\n\nDigite a *quilometragem inicial* do veículo:`);
-                  return NextResponse.json({ success: true, action: 'start_prompt', osId: os.id });
-                }
-                await sendBotReply(fromJid, '⚠️ Digite *INICIAR* quando for começar a rota.');
-                return NextResponse.json({ ignored: true, reason: 'expected iniciar' });
-              }
-
-              // --- ESTADO: aguardando KM inicial ---
-              if (os.driver_whatsapp_state === 'awaiting_km_start') {
-                const km = Number(selectedText.replace(/\D/g, ''));
-                if (Number.isFinite(km) && km >= 0 && selectedText.replace(/\D/g, '').length > 0) {
-                  await supabase.from('ordens_servico').update({
-                    status_operacional: 'Em Rota',
-                    route_started_at: now,
-                    route_started_km: km,
-                    driver_whatsapp_state: 'awaiting_finish',
-                    updated_at: now,
-                  }).eq('id', os.id);
-
-                  await sendBotReply(fromJid, `✅ *Rota iniciada!*\n\nKM inicial: *${fmtKm(km)}*\n\nAo finalizar a viagem, digite: *FINALIZAR*`);
-                  return NextResponse.json({ success: true, action: 'route_started', osId: os.id, km });
-                }
-                await sendBotReply(fromJid, '⚠️ Informe apenas *números* para a quilometragem inicial.');
-                return NextResponse.json({ ignored: true, reason: 'expected numeric km_start' });
-              }
-
-              // --- ESTADO: aguardando FINALIZAR ---
-              if (os.driver_whatsapp_state === 'awaiting_finish') {
-                if (normalizedChoice === 'finalizar') {
-                  await supabase.from('ordens_servico').update({
-                    driver_whatsapp_state: 'awaiting_km_finish',
-                    updated_at: now,
-                  }).eq('id', os.id);
-
-                  await sendBotReply(fromJid, '🏁 *Finalizar Viagem*\n\nDigite a *quilometragem final* do veículo:');
-                  return NextResponse.json({ success: true, action: 'finish_prompt', osId: os.id });
-                }
-                await sendBotReply(fromJid, '⚠️ Digite *FINALIZAR* para encerrar a viagem.');
-                return NextResponse.json({ ignored: true, reason: 'expected finalizar' });
-              }
-
-              // --- ESTADO: aguardando KM final ---
-              if (os.driver_whatsapp_state === 'awaiting_km_finish') {
-                const km = Number(selectedText.replace(/\D/g, ''));
-                if (Number.isFinite(km) && km >= 0 && selectedText.replace(/\D/g, '').length > 0) {
-                  const { data: currentOs } = await supabase
-                    .from('ordens_servico')
-                    .select('route_started_km')
-                    .eq('id', os.id)
-                    .single();
-
-                  const startKm = currentOs?.route_started_km ?? 0;
-                  const diff = km - startKm;
-
-                  await supabase.from('ordens_servico').update({
-                    status_operacional: 'Concluído',
-                    route_finished_at: now,
-                    route_finished_km: km,
-                    driver_whatsapp_state: 'completed',
-                    updated_at: now,
-                  }).eq('id', os.id);
-
-                  const diffText = diff > 0 ? `\n📏 *KM percorrido:* ${fmtKm(diff)}` : '';
-                  await sendBotReply(fromJid, `✅ *OS finalizada com sucesso!*${diffText}\n\nKM final: *${fmtKm(km)}*\n\nObrigado! 🙏`);
-                  return NextResponse.json({ success: true, action: 'route_finished', osId: os.id, km });
-                }
-                await sendBotReply(fromJid, '⚠️ Informe apenas *números* para a quilometragem final.');
-                return NextResponse.json({ ignored: true, reason: 'expected numeric km_finish' });
-              }
-            }
-          }
-        }
+      if (!driver) {
+        return NextResponse.json({ ignored: true, reason: 'driver not found', phoneDigits });
       }
 
-      // --- FALLBACK: lógica antiga de lista interativa ---
-      const isKnownChoice = normalizedChoice === 'aceitar' || normalizedChoice === 'recusar';
-      if (!isKnownChoice || !replyToId) {
-        return NextResponse.json({ ignored: true, reason: 'not a recognized command' });
+      if (expectedStates.length === 0) {
+        console.log(`[whatsapp/webhook] Mensagem ignorada: comando sem estado esperado (${normalizedChoice})`);
+        return NextResponse.json({ ignored: true, reason: 'no expected state', choice: normalizedChoice });
       }
 
-      const { data: listRecord, error: listError } = await supabase
-        .from('os_driver_polls')
-        .select('os_id, id')
-        .eq('poll_id', replyToId)
-        .single();
+      const { data: osList } = await supabase
+        .from('ordens_servico')
+        .select('id, status_operacional, motorista, veiculo_id, driver_whatsapp_state, protocolo, os_number')
+        .eq('motorista', driver.name)
+        .in('driver_whatsapp_state', expectedStates)
+        .order('updated_at', { ascending: false })
+        .limit(1);
 
-      if (listError || !listRecord) {
-        console.error('[whatsapp/webhook] List message not found:', replyToId, listError);
-        return NextResponse.json({ ignored: true, reason: 'list message not found' });
+      console.log(`[whatsapp/webhook] Found ${osList?.length ?? 0} OS for driver ${driver.name}`);
+
+      const os = osList?.[0];
+
+      if (!os || !os.driver_whatsapp_state) {
+        console.log(`[whatsapp/webhook] Ignored: no OS in expected states for driver ${driver.name}`);
+        return NextResponse.json({ ignored: true, reason: 'no os in expected state', driver: driver.name, expectedStates });
       }
 
+      console.log(`[whatsapp/webhook] Processing OS ${os.id} state=${os.driver_whatsapp_state} choice="${normalizedChoice}"`);
       const now = new Date().toISOString();
+      const fmtKm = (n: number) => n.toLocaleString('pt-BR');
 
-      await supabase.from('os_driver_polls').update({
-        status: 'voted',
-        voted_option: selectedText,
-        voted_at: now,
-        updated_at: now,
-      }).eq('id', listRecord.id);
+      if (os.driver_whatsapp_state === 'awaiting_accept') {
+        if (normalizedChoice === '1') {
+          const { error: acceptError } = await supabase.from('ordens_servico').update({
+            status_operacional: 'Aguardando',
+            driver_accepted_at: now,
+            driver_whatsapp_state: 'awaiting_start',
+            updated_at: now,
+          }).eq('id', os.id);
 
-      const operationalStatus = normalizedChoice === 'aceitar' ? 'Aguardando' : 'Cancelado';
+          if (acceptError) {
+            console.error('[whatsapp/webhook] Error updating accept state:', acceptError);
+            return NextResponse.json({ error: 'accept update failed' }, { status: 500 });
+          }
 
-      await supabase.from('ordens_servico').update({
-        status_operacional: operationalStatus,
-        updated_at: now,
-      }).eq('id', listRecord.os_id);
+          await sendBotReply(replyChatId, '✅ *Serviço aceito com sucesso!*\n\nQuando for iniciar a rota, digite: *INICIAR*');
+          return NextResponse.json({ success: true, action: 'accept', osId: os.id });
+        }
 
-      return NextResponse.json({ success: true, choice: selectedText, osId: listRecord.os_id, operationalStatus });
+        if (normalizedChoice === '0') {
+          const { error: rejectError } = await supabase.from('ordens_servico').update({
+            status_operacional: 'Cancelado',
+            driver_whatsapp_state: null,
+            updated_at: now,
+          }).eq('id', os.id);
+
+          if (rejectError) {
+            console.error('[whatsapp/webhook] Error updating reject state:', rejectError);
+            return NextResponse.json({ error: 'reject update failed' }, { status: 500 });
+          }
+
+          await sendBotReply(replyChatId, '❌ *Serviço recusado.*');
+          return NextResponse.json({ success: true, action: 'reject', osId: os.id });
+        }
+
+        await sendBotReply(replyChatId, '⚠️ Digite *1* para aceitar ou *0* para recusar.');
+        return NextResponse.json({ ignored: true, reason: 'invalid choice' });
+      }
+
+      if (os.driver_whatsapp_state === 'awaiting_start') {
+        if (normalizedChoice === 'iniciar') {
+          let vehicleText = '';
+          if (os.veiculo_id) {
+            const { data: v } = await supabase
+              .from('veiculos')
+              .select('marca, modelo, placa')
+              .eq('id', os.veiculo_id)
+              .single();
+            if (v) vehicleText = `\n🚘 *Veículo:* ${v.marca} ${v.modelo}\n📝 *Placa:* ${v.placa}`;
+          }
+
+          const { error: startPromptError } = await supabase.from('ordens_servico').update({
+            driver_whatsapp_state: 'awaiting_km_start',
+            updated_at: now,
+          }).eq('id', os.id);
+
+          if (startPromptError) {
+            console.error('[whatsapp/webhook] Error updating start prompt state:', startPromptError);
+            return NextResponse.json({ error: 'start prompt update failed' }, { status: 500 });
+          }
+
+          await sendBotReply(replyChatId, `🚦 *Iniciar Rota*${vehicleText}\n\nDigite a *quilometragem inicial* do veículo:`);
+          return NextResponse.json({ success: true, action: 'start_prompt', osId: os.id });
+        }
+
+        await sendBotReply(replyChatId, '⚠️ Digite *INICIAR* quando for começar a rota.');
+        return NextResponse.json({ ignored: true, reason: 'expected iniciar' });
+      }
+
+      if (os.driver_whatsapp_state === 'awaiting_km_start') {
+        const km = Number(selectedText.replace(/\D/g, ''));
+        if (Number.isFinite(km) && km >= 0 && selectedText.replace(/\D/g, '').length > 0) {
+          const { error: kmStartError } = await supabase.from('ordens_servico').update({
+            status_operacional: 'Em Rota',
+            route_started_at: now,
+            route_started_km: km,
+            driver_whatsapp_state: 'awaiting_finish',
+            updated_at: now,
+          }).eq('id', os.id);
+
+          if (kmStartError) {
+            console.error('[whatsapp/webhook] Error updating route start km:', kmStartError);
+            return NextResponse.json({ error: 'route start update failed' }, { status: 500 });
+          }
+
+          await sendBotReply(replyChatId, `✅ *Rota iniciada!*\n\nKM inicial: *${fmtKm(km)}*\n\nAo finalizar a viagem, digite: *FINALIZAR*`);
+          return NextResponse.json({ success: true, action: 'route_started', osId: os.id, km });
+        }
+
+        await sendBotReply(replyChatId, '⚠️ Informe apenas *números* para a quilometragem inicial.');
+        return NextResponse.json({ ignored: true, reason: 'expected numeric km_start' });
+      }
+
+      if (os.driver_whatsapp_state === 'awaiting_finish') {
+        if (normalizedChoice === 'finalizar') {
+          const { error: finishPromptError } = await supabase.from('ordens_servico').update({
+            driver_whatsapp_state: 'awaiting_km_finish',
+            updated_at: now,
+          }).eq('id', os.id);
+
+          if (finishPromptError) {
+            console.error('[whatsapp/webhook] Error updating finish prompt state:', finishPromptError);
+            return NextResponse.json({ error: 'finish prompt update failed' }, { status: 500 });
+          }
+
+          await sendBotReply(replyChatId, '🏁 *Finalizar Viagem*\n\nDigite a *quilometragem final* do veículo:');
+          return NextResponse.json({ success: true, action: 'finish_prompt', osId: os.id });
+        }
+
+        await sendBotReply(replyChatId, '⚠️ Digite *FINALIZAR* para encerrar a viagem.');
+        return NextResponse.json({ ignored: true, reason: 'expected finalizar' });
+      }
+
+      if (os.driver_whatsapp_state === 'awaiting_km_finish') {
+        const km = Number(selectedText.replace(/\D/g, ''));
+        if (Number.isFinite(km) && km >= 0 && selectedText.replace(/\D/g, '').length > 0) {
+          const { data: currentOs } = await supabase
+            .from('ordens_servico')
+            .select('route_started_km')
+            .eq('id', os.id)
+            .single();
+
+          const startKm = currentOs?.route_started_km ?? 0;
+          const diff = km - startKm;
+
+          const { error: finishError } = await supabase.from('ordens_servico').update({
+            status_operacional: 'Concluído',
+            route_finished_at: now,
+            route_finished_km: km,
+            driver_whatsapp_state: 'completed',
+            updated_at: now,
+          }).eq('id', os.id);
+
+          if (finishError) {
+            console.error('[whatsapp/webhook] Error finishing route:', finishError);
+            return NextResponse.json({ error: 'route finish update failed' }, { status: 500 });
+          }
+
+          const diffText = diff > 0 ? `\n📏 *KM percorrido:* ${fmtKm(diff)}` : '';
+          await sendBotReply(replyChatId, `✅ *OS finalizada com sucesso!*${diffText}\n\nKM final: *${fmtKm(km)}*\n\nObrigado! 🙏`);
+          return NextResponse.json({ success: true, action: 'route_finished', osId: os.id, km });
+        }
+
+        await sendBotReply(replyChatId, '⚠️ Informe apenas *números* para a quilometragem final.');
+        return NextResponse.json({ ignored: true, reason: 'expected numeric km_finish' });
+      }
+
+      return NextResponse.json({ ignored: true, reason: 'unhandled driver state', state: os.driver_whatsapp_state });
     }
 
-    // Só processa eventos de status da sessão
     if (event !== 'session.status' && event !== 'connection.update') {
-      return NextResponse.json({ ignored: true, event });
+      const isKnownChoice = body.event === 'message' || body.event === 'message.any';
+      if (!isKnownChoice) {
+        return NextResponse.json({ ignored: true, event });
+      }
     }
 
     const sessionName = body.session ?? body.payload?.session ?? body.instance ?? 'default';
@@ -368,7 +465,6 @@ export async function POST(request: Request) {
     const ownerJid = body.payload?.me?.id ?? body.payload?.data?.me?.id ?? body.me?.id ?? null;
 
     const mappedState = mapWahaState(rawStatus, rawEngineState);
-
     const supabase = createAdminClient();
 
     const { error } = await supabase

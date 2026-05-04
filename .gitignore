@@ -47,3 +47,6 @@ next-env.d.ts
 .inputrc
 .windsurf/
 .npm/
+node_modules/
+venv/
+*.log

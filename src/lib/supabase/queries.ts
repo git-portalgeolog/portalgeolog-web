@@ -77,7 +77,6 @@ export async function createNotification(
 }
 
 
-type ClienteRow = { id: string; nome: string; contato: string | null };
 type CentroCustoRow = { id: string; nome: string; cliente_id: string };
 type SolicitanteRow = { id: string; nome: string; cliente_id: string; centro_custo_id: string | null };
 type PassageiroRow = {
@@ -107,13 +106,12 @@ type OSRow = {
   centro_custo?: string | null;
   solicitante: string | null;
   tipo_servico: string | null;
-  trecho: string | null;
   motorista: string | null;
   veiculo_id?: string | null;
-  valor_bruto: number | string;
-  imposto: number | string;
-  custo: number | string;
-  lucro: number | string;
+  valor_bruto: number | string | null;
+  imposto: number | string | null;
+  custo: number | string | null;
+  lucro: number | string | null;
   status_operacional: OrderService['status']['operacional'];
   status_financeiro: OrderService['status']['financeiro'];
   distancia: string | null;
@@ -134,13 +132,47 @@ type OSWaypointRow = {
   lat: number | null;
   lng: number | null;
   comment: string | null;
+  itinerary_index: number | null;
+  hora: string | null;
+  data: string | null;
 };
 type OSWaypointPassengerRow = {
   id: string;
   waypoint_id: string;
   passageiro_id: string | null;
-  nome: string | null;
 };
+
+const formatWaypointDateForUi = (value: string | null | undefined): string | undefined => {
+  if (!value) return undefined;
+
+  if (value.includes('/')) return value;
+
+  const parts = value.split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    if (year && month && day) return `${day}/${month}/${year}`;
+  }
+
+  return value;
+};
+
+const normalizeWaypointDateForDb = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.includes('-')) return trimmed;
+
+  const parts = trimmed.split('/');
+  if (parts.length === 3) {
+    const [day, month, year] = parts;
+    if (day && month && year) return `${year}-${month}-${day}`;
+  }
+
+  return trimmed;
+};
+
 type DriverRow = {
   id: string;
   name: string;
@@ -173,12 +205,15 @@ const mapOSRecord = (
       lat: w.lat,
       lng: w.lng,
       comment: w.comment || undefined,
+      itineraryIndex: w.itinerary_index ?? undefined,
+      hora: w.hora ?? undefined,
+      data: formatWaypointDateForUi(w.data),
       passengers: wpPassRaw
         .filter((p) => p.waypoint_id === w.id)
         .map((p) => ({
           id: p.id,
           solicitanteId: p.passageiro_id || '',
-          nome: p.nome || '',
+          nome: '',
         })),
     }));
 
@@ -187,18 +222,17 @@ const mapOSRecord = (
     protocolo: o.protocolo || '',
     os: o.os_number || '',
     data: o.data || '',
-    hora: o.hora || '',
+    hora: o.hora,
     horaExtra: o.hora_extra || '',
     clienteId: o.cliente_id || '',
     solicitante: o.solicitante || '',
     centroCustoId: o.centro_custo || '',
-    trecho: o.trecho || '',
     motorista: o.motorista || '',
     veiculoId: o.veiculo_id || undefined,
-    valorBruto: Number(o.valor_bruto),
-    imposto: Number(o.imposto),
-    custo: Number(o.custo),
-    lucro: Number(o.lucro),
+    valorBruto: o.valor_bruto !== null ? Number(o.valor_bruto) : null,
+    imposto: o.imposto !== null ? Number(o.imposto) : null,
+    custo: o.custo !== null ? Number(o.custo) : null,
+    lucro: o.lucro !== null ? Number(o.lucro) : null,
     status: {
       operacional: o.status_operacional as OrderService['status']['operacional'],
       financeiro: o.status_financeiro as OrderService['status']['financeiro'],
@@ -225,14 +259,14 @@ export async function fetchClientes(): Promise<Cliente[]> {
 
   if (error) throw error;
 
-  return (clientesRaw || []).map((c: any) => ({
-    id: c.id,
-    nome: c.nome,
-    contato: c.contato || undefined,
-    centrosCusto: (c.centros_custo || []).map((cc: any) => ({
-      id: cc.id,
-      nome: cc.nome,
-      clienteId: cc.cliente_id,
+  return (clientesRaw || []).map((c: Record<string, unknown>) => ({
+    id: String(c.id),
+    nome: String(c.nome),
+    contato: c.contato ? String(c.contato) : undefined,
+    centrosCusto: ((c.centros_custo || []) as Record<string, unknown>[]).map((cc) => ({
+      id: String(cc.id),
+      nome: String(cc.nome),
+      clienteId: String(cc.cliente_id),
     })),
   }));
 }
@@ -365,19 +399,19 @@ export async function fetchPassageiros(): Promise<Passageiro[]> {
 
   if (error) throw error;
 
-  return (passRaw || []).map((p: any) => ({
-    id: p.id,
-    nomeCompleto: p.nome_completo,
-    email: p.email || undefined,
-    celular: p.celular || '',
-    cpf: p.cpf || undefined,
-    notificar: p.notificar ?? undefined,
-    genero: p.genero ?? undefined,
-    enderecos: (p.passageiro_enderecos || []).map((e: any) => ({
-      id: e.id,
-      rotulo: e.rotulo,
-      enderecoCompleto: e.endereco_completo,
-      referencia: e.referencia || undefined,
+  return (passRaw || []).map((p: Record<string, unknown>) => ({
+    id: String(p.id),
+    nomeCompleto: String(p.nome_completo),
+    email: p.email ? String(p.email) : undefined,
+    celular: p.celular ? String(p.celular) : '',
+    cpf: p.cpf ? String(p.cpf) : undefined,
+    notificar: typeof p.notificar === 'boolean' ? p.notificar : undefined,
+    genero: typeof p.genero === 'string' ? p.genero : undefined,
+    enderecos: ((p.passageiro_enderecos || []) as Record<string, unknown>[]).map((e) => ({
+      id: String(e.id),
+      rotulo: String(e.rotulo),
+      enderecoCompleto: String(e.endereco_completo),
+      referencia: e.referencia ? String(e.referencia) : undefined,
     })),
   }));
 }
@@ -613,7 +647,7 @@ export async function fetchOSList(): Promise<OrderService[]> {
     .select('*')
     .eq('arquivado', false)
     .order('created_at', { ascending: false })
-    .limit(500);
+    .limit(100);
 
   if (error) throw error;
 
@@ -625,7 +659,7 @@ export async function fetchOSList(): Promise<OrderService[]> {
   if (osIds.length > 0) {
     const { data: wpData } = await getSupabase()
       .from('os_waypoints')
-      .select('id, ordem_servico_id, position, label, lat, lng, comment')
+      .select('id, ordem_servico_id, position, label, lat, lng, comment, itinerary_index, hora, data')
       .in('ordem_servico_id', osIds)
       .order('position');
 
@@ -635,7 +669,7 @@ export async function fetchOSList(): Promise<OrderService[]> {
     if (wpIds.length > 0) {
       const { data: passData } = await getSupabase()
         .from('os_waypoint_passengers')
-        .select('id, waypoint_id, passageiro_id, nome')
+        .select('id, waypoint_id, passageiro_id')
         .in('waypoint_id', wpIds);
 
       wpPassRaw = (passData || []) as OSWaypointPassengerRow[];
@@ -657,7 +691,7 @@ export async function fetchOSById(id: string): Promise<OrderService | null> {
 
   const { data: wpData, error: wpError } = await getSupabase()
     .from('os_waypoints')
-    .select('id, ordem_servico_id, position, label, lat, lng, comment')
+    .select('id, ordem_servico_id, position, label, lat, lng, comment, itinerary_index, hora, data')
     .eq('ordem_servico_id', id)
     .order('position');
 
@@ -670,7 +704,7 @@ export async function fetchOSById(id: string): Promise<OrderService | null> {
   if (wpIds.length > 0) {
     const { data: passData, error: passError } = await getSupabase()
       .from('os_waypoint_passengers')
-      .select('id, waypoint_id, passageiro_id, nome')
+      .select('id, waypoint_id, passageiro_id')
       .in('waypoint_id', wpIds);
 
     if (passError) throw passError;
@@ -698,7 +732,7 @@ export async function fetchOSPage({
 
   if (likeTerm) {
     query = query.or(
-      `protocolo.ilike.${likeTerm},os_number.ilike.${likeTerm},trecho.ilike.${likeTerm},motorista.ilike.${likeTerm}`
+      `protocolo.ilike.${likeTerm},os_number.ilike.${likeTerm},motorista.ilike.${likeTerm}`
     );
   }
 
@@ -713,7 +747,7 @@ export async function fetchOSPage({
   if (osIds.length > 0) {
     const { data: wpData } = await getSupabase()
       .from('os_waypoints')
-      .select('id, ordem_servico_id, position, label, lat, lng, comment')
+      .select('id, ordem_servico_id, position, label, lat, lng, comment, itinerary_index, hora, data')
       .in('ordem_servico_id', osIds)
       .order('position');
 
@@ -723,7 +757,7 @@ export async function fetchOSPage({
     if (wpIds.length > 0) {
       const { data: passData } = await getSupabase()
         .from('os_waypoint_passengers')
-        .select('id, waypoint_id, passageiro_id, nome')
+        .select('id, waypoint_id, passageiro_id')
         .in('waypoint_id', wpIds);
 
       wpPassRaw = (passData || []) as OSWaypointPassengerRow[];
@@ -739,12 +773,15 @@ export async function fetchOSPage({
           lat: w.lat,
           lng: w.lng,
           comment: w.comment || undefined,
+          itineraryIndex: w.itinerary_index ?? undefined,
+          hora: w.hora ?? undefined,
+          data: w.data ?? undefined,
           passengers: wpPassRaw
             .filter((p) => p.waypoint_id === w.id)
             .map((p) => ({
               id: p.id,
               solicitanteId: p.passageiro_id || '',
-              nome: p.nome || '',
+              nome: '',
             })),
         }));
 
@@ -758,7 +795,6 @@ export async function fetchOSPage({
         clienteId: o.cliente_id || '',
         solicitante: o.solicitante || '',
         centroCustoId: o.centro_custo || '',
-        trecho: o.trecho || '',
         motorista: o.motorista || '',
         veiculoId: o.veiculo_id || undefined,
         valorBruto: Number(o.valor_bruto),
@@ -784,12 +820,86 @@ export async function fetchOSPage({
   };
 }
 
+export async function fetchOSFinancePage({
+  page = 1,
+  pageSize = 10,
+  searchTerm = '',
+  month = '',
+}: PaginationParams & { month?: string } = {}): Promise<PaginatedResult<OrderService>> {
+  const { from, to } = normalizePagination(page, pageSize);
+  const term = searchTerm.trim();
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+
+  let query = getSupabase()
+    .from('ordens_servico')
+    .select('*', { count: 'exact' })
+    .eq('arquivado', false)
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (month) {
+    query = query.gte('data', `${month}-01`).lt('data', getNextMonthFirstDay(month));
+  }
+
+  if (likeTerm) {
+    query = query.or(
+      `protocolo.ilike.${likeTerm},os_number.ilike.${likeTerm},motorista.ilike.${likeTerm}`
+    );
+  }
+
+  const { data: osRaw, error, count } = await query;
+  if (error) throw error;
+
+  const typedOrders = (osRaw || []) as OSRow[];
+
+  return {
+    items: typedOrders.map((o) => ({
+      id: o.id,
+      protocolo: o.protocolo || '',
+      os: o.os_number || '',
+      data: o.data || '',
+      hora: o.hora || '',
+      horaExtra: o.hora_extra || '',
+      clienteId: o.cliente_id || '',
+      solicitante: o.solicitante || '',
+      centroCustoId: o.centro_custo || '',
+      motorista: o.motorista || '',
+      veiculoId: o.veiculo_id || undefined,
+      valorBruto: o.valor_bruto !== null ? Number(o.valor_bruto) : null,
+      imposto: o.imposto !== null ? Number(o.imposto) : null,
+      custo: o.custo !== null ? Number(o.custo) : null,
+      lucro: o.lucro !== null ? Number(o.lucro) : null,
+      status: {
+        operacional: o.status_operacional as OrderService['status']['operacional'],
+        financeiro: o.status_financeiro as OrderService['status']['financeiro'],
+      },
+      distancia: o.distancia ? Number(o.distancia) : undefined,
+      driverMessageSentAt: o.driver_message_sent_at ?? undefined,
+      driverAcceptedAt: o.driver_accepted_at ?? undefined,
+      driverKmInitial: o.driver_km_initial ?? undefined,
+      routeStartedAt: o.route_started_at ?? undefined,
+      routeStartedKm: o.route_started_km ?? undefined,
+      routeFinishedAt: o.route_finished_at ?? undefined,
+      routeFinishedKm: o.route_finished_km ?? undefined,
+    })),
+    totalCount: count ?? typedOrders.length,
+  };
+}
+
+function getNextMonthFirstDay(month: string): string {
+  const [year, monthNum] = month.split('-').map(Number);
+  if (monthNum === 12) return `${year + 1}-01-01`;
+  return `${year}-${String(monthNum + 1).padStart(2, '0')}-01`;
+}
+
 type OSInput = Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>;
 
 export async function insertOS(osData: OSInput): Promise<OrderService> {
   const impostoPercentual = await getImpostoPercentualForDate(osData.data);
-  const imposto = osData.valorBruto * (impostoPercentual / 100);
-  const lucro = osData.valorBruto - imposto - osData.custo;
+  const vBruto = osData.valorBruto ?? 0;
+  const vCusto = osData.custo ?? 0;
+  const imposto = vBruto * (impostoPercentual / 100);
+  const lucro = vBruto - imposto - vCusto;
   const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
 
   const { data: osRow, error: osError } = await getSupabase()
@@ -797,18 +907,17 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
     .insert({
       protocolo: '', // trigger will generate
       data: osData.data,
-      hora: osData.hora || '',
+      hora: osData.hora || null,
       hora_extra: osData.horaExtra || '',
       os_number: osData.os || '',
       cliente_id: osData.clienteId || null,
       solicitante: osData.solicitante || '',
       centro_custo: centroCusto,
-      trecho: osData.trecho || '',
       motorista: osData.motorista || '',
       veiculo_id: (osData as OSInput & { veiculoId?: string }).veiculoId || null,
-      valor_bruto: osData.valorBruto,
+      valor_bruto: osData.valorBruto ?? 0,
       imposto,
-      custo: osData.custo,
+      custo: osData.custo ?? 0,
       lucro,
       status_operacional: 'Pendente',
       status_financeiro: 'Pendente',
@@ -833,11 +942,16 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
         lat: wp.lat || null,
         lng: wp.lng || null,
         comment: wp.comment?.trim() || '',
+        itinerary_index: wp.itineraryIndex ?? null,
+        hora: wp.hora?.trim() || null,
+        data: normalizeWaypointDateForDb(wp.data),
       })
       .select('id')
       .single();
 
-    if (wpError) continue;
+    if (wpError) {
+      throw wpError;
+    }
 
     const passengers = wp.passengers || [];
     const insertedPassengers: { id: string; solicitanteId: string; nome: string }[] = [];
@@ -849,17 +963,16 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
           passengers.map((p) => ({
             waypoint_id: wpRow.id,
             passageiro_id: p.solicitanteId || null,
-            nome: p.nome || '',
           }))
         )
-        .select('id, passageiro_id, nome');
+        .select('id, passageiro_id');
 
       if (passRows) {
         (passRows as OSWaypointPassengerRow[]).forEach((pr) =>
           insertedPassengers.push({
             id: pr.id,
             solicitanteId: pr.passageiro_id || '',
-            nome: pr.nome || '',
+            nome: '',
           })
         );
       }
@@ -880,6 +993,9 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
       lat: wp.lat,
       lng: wp.lng,
       comment: wp.comment?.trim() || undefined,
+      itineraryIndex: wp.itineraryIndex ?? undefined,
+      hora: wp.hora?.trim() || undefined,
+      data: formatWaypointDateForUi(wp.data),
       passengers: insertedPassengers,
     });
   }
@@ -888,13 +1004,12 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
     id: osRow.id,
     protocolo: osRow.protocolo,
     data: osRow.data,
-    hora: osRow.hora || '',
+    hora: osRow.hora,
     horaExtra: osRow.hora_extra || '',
     os: osRow.os_number || '',
     clienteId: osRow.cliente_id || '',
     solicitante: osRow.solicitante || '',
     centroCustoId: osRow.centro_custo || '',
-    trecho: osRow.trecho || '',
     motorista: osRow.motorista || '',
     veiculoId: osRow.veiculo_id || undefined,
     valorBruto: Number(osRow.valor_bruto),
@@ -914,26 +1029,27 @@ export async function updateOSInDB(
   osData: OSInput
 ): Promise<void> {
   const impostoPercentual = await getImpostoPercentualForDate(osData.data);
-  const imposto = osData.valorBruto * (impostoPercentual / 100);
-  const lucro = osData.valorBruto - imposto - osData.custo;
+  const vBruto = osData.valorBruto ?? 0;
+  const vCusto = osData.custo ?? 0;
+  const imposto = vBruto * (impostoPercentual / 100);
+  const lucro = vBruto - imposto - vCusto;
   const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
 
   const { error: osError } = await getSupabase()
     .from('ordens_servico')
     .update({
       data: osData.data,
-      hora: osData.hora || '',
+      hora: osData.hora || null,
       hora_extra: osData.horaExtra || '',
       os_number: osData.os || '',
       cliente_id: osData.clienteId || null,
       solicitante: osData.solicitante || '',
       centro_custo: centroCusto,
-      trecho: osData.trecho || '',
       motorista: osData.motorista || '',
       veiculo_id: (osData as OSInput & { veiculoId?: string }).veiculoId || null,
-      valor_bruto: osData.valorBruto,
+      valor_bruto: osData.valorBruto ?? 0,
       imposto,
-      custo: osData.custo,
+      custo: osData.custo ?? 0,
       lucro,
     })
     .eq('id', id);
@@ -956,16 +1072,22 @@ export async function updateOSInDB(
         lat: wp.lat || null,
         lng: wp.lng || null,
         comment: wp.comment?.trim() || '',
+        itinerary_index: wp.itineraryIndex ?? null,
+        hora: wp.hora?.trim() || null,
+        data: normalizeWaypointDateForDb(wp.data),
       })
       .select('id')
       .single();
+
+    if (!wpRow) {
+      throw new Error('Falha ao recriar waypoint da ordem de serviço.');
+    }
 
     if (wpRow && wp.passengers && wp.passengers.length > 0) {
       await getSupabase().from('os_waypoint_passengers').insert(
         wp.passengers.map((p) => ({
           waypoint_id: wpRow.id,
           passageiro_id: p.solicitanteId || null,
-          nome: p.nome || '',
         }))
       );
     }

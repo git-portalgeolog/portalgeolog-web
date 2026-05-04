@@ -11,7 +11,6 @@ interface PreviewData {
     id: string;
     protocolo: string;
     os_number: string;
-    trecho: string;
   };
   alreadyFinished: boolean;
   canFinish: boolean;
@@ -106,9 +105,7 @@ export default function FinalizarRotaPage() {
                 <Flag size={32} className="text-emerald-600" />
               </div>
               <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Finalizar Rota</h1>
-              <p className="text-sm font-semibold text-slate-500">
-                OS {preview.os.os_number || preview.os.protocolo} — {preview.os.trecho}
-              </p>
+              <p className="text-sm font-semibold text-slate-500">OS {preview.os.os_number || preview.os.protocolo}</p>
             </div>
 
             <div className="space-y-2">

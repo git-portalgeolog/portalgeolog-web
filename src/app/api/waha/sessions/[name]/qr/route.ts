@@ -21,7 +21,7 @@ export async function GET(
   { params }: { params: Promise<{ name: string }> }
 ) {
   try {
-    if (!checkRateLimit(request, 30, 60)) {
+    if (!checkRateLimit(request, 200, 60)) {
       return rateLimitResponse(request);
     }
 
@@ -41,8 +41,9 @@ export async function GET(
 
     const { name } = await params;
 
-    const response = await fetch(
-      `${WAHA_API_URL}/api/${encodeURIComponent(name)}/auth/qr?format=image`,
+    // Tentar endpoint v2 primeiro, fallback para v1
+    let response = await fetch(
+      `${WAHA_API_URL}/api/sessions/${encodeURIComponent(name)}/auth/qr`,
       {
         method: 'GET',
         headers: {
@@ -51,6 +52,19 @@ export async function GET(
         },
       }
     );
+
+    if (response.status === 404) {
+      response = await fetch(
+        `${WAHA_API_URL}/api/${encodeURIComponent(name)}/auth/qr`,
+        {
+          method: 'GET',
+          headers: {
+            'X-Api-Key': WAHA_API_KEY,
+            Accept: 'application/json',
+          },
+        }
+      );
+    }
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -66,7 +80,7 @@ export async function GET(
       );
     }
 
-    const data = await response.json().catch(() => null) as { mimetype?: string; data?: string; value?: string } | null;
+    const data = await response.json().catch(() => null) as { qr?: string; mimetype?: string; data?: string; value?: string } | null;
 
     if (!data) {
       return NextResponse.json(
@@ -75,8 +89,8 @@ export async function GET(
       );
     }
 
-    const base64 = data.data || data.value;
-    if (!base64) {
+    const qrCode = data.qr || (data.data || data.value ? `data:${data.mimetype || 'image/png'};base64,${data.data || data.value}` : null);
+    if (!qrCode) {
       return NextResponse.json(
         { success: false, error: 'QR code indisponível no momento' },
         { status: 404 }
@@ -84,7 +98,7 @@ export async function GET(
     }
 
     return NextResponse.json(
-      { success: true, qrCode: `data:${data.mimetype || 'image/png'};base64,${base64}` },
+      { success: true, qrCode },
       { headers: getRateLimitHeaders(request) }
     );
   } catch (error: unknown) {

@@ -136,6 +136,12 @@ body {
     background-color: #ffffff !important;
   }
 
+  .modal-content textarea.waypoint-observation,
+  .modal-content textarea.waypoint-observation:focus {
+    border-color: rgb(167, 243, 208) !important;
+    background-color: rgb(236, 253, 245) !important;
+  }
+
   .required-asterisk {
     color: #fca5a5;
     font-weight: 700;

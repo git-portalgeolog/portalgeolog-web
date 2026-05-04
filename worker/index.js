@@ -9,15 +9,20 @@ export default {
       globalThis.process = { env: {} };
     }
 
-    // Cria um Proxy para process.env que consulta o env do Cloudflare como fallback.
-    // Isso resolve capturas top-level no bundle server que ocorrem quando o módulo
-    // é avaliado antes do Object.assign ter efeito completo.
-    const originalEnv = globalThis.process.env || {};
+    // Primeiro, copia todas as variáveis do env do Cloudflare para process.env
+    // Isso garante que referências top-level no bundle server funcionem
+    Object.assign(globalThis.process.env, env);
+
+    // Depois cria um Proxy para consultar env como fallback para novas propriedades
+    const originalEnv = globalThis.process.env;
     globalThis.process.env = new Proxy(originalEnv, {
       get(target, prop) {
         if (prop in target) return target[prop];
         if (prop in env) return env[prop];
         return undefined;
+      },
+      has(target, prop) {
+        return prop in target || prop in env;
       }
     });
 

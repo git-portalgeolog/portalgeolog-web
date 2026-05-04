@@ -15,7 +15,6 @@ import {
   Menu, 
   Building,
   ShieldCheck,
-  Package,
   DollarSign,
   UserSquare2,
   CheckCircle,

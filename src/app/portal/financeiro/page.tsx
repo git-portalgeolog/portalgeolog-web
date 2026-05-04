@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { 
+  CalendarRange,
   DollarSign, 
   TrendingUp, 
   Download, 
@@ -11,12 +12,21 @@ import {
 import { useData } from '@/context/DataContext';
 import { useAuth } from '@/context/AuthContext';
 import { DataTable } from '@/components/ui/DataTable';
+import { useServerPaginatedTable } from '@/hooks/useServerPaginatedTable';
+import { fetchOSFinancePage } from '@/lib/supabase/queries';
 
 export default function MedicaoFinanceiraPage() {
   const { osList, clientes, updateOSStatus, impostoPercentual } = useData();
   const { user } = useAuth();
-  const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+
+  const financeTable = useServerPaginatedTable(
+    useCallback(
+      async (params) => fetchOSFinancePage({ ...params, month: selectedMonth }),
+      [selectedMonth]
+    ),
+    10
+  );
 
   // Simulating Admin check (since real role isn't in AuthContext yet)
   const isAdmin = user?.email?.includes('admin') || true; // Force true for demo or if admin email is used
@@ -28,24 +38,25 @@ export default function MedicaoFinanceiraPage() {
     }).format(value);
   };
 
+  // Stats usam osList do DataContext (lightweight) para calcular totais do mês
   const filteredData = useMemo(() => {
     return osList.filter(item => {
       const matchMonth = item.data.startsWith(selectedMonth);
       const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || '';
-      const matchSearch = searchTerm === '' || 
-        item.os.includes(searchTerm) || 
-        clienteNome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.motorista.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchSearch = financeTable.searchTerm === '' ||
+        item.os.includes(financeTable.searchTerm) ||
+        clienteNome.toLowerCase().includes(financeTable.searchTerm.toLowerCase()) ||
+        item.motorista.toLowerCase().includes(financeTable.searchTerm.toLowerCase());
       return matchMonth && matchSearch;
     });
-  }, [osList, selectedMonth, searchTerm, clientes]);
+  }, [osList, selectedMonth, financeTable.searchTerm, clientes]);
 
   const totals = useMemo(() => {
     return filteredData.reduce((acc, current) => {
-      acc.bruto += current.valorBruto;
-      acc.custo += current.custo;
-      acc.imposto += current.imposto;
-      acc.lucro += current.lucro;
+      acc.bruto += current.valorBruto ?? 0;
+      acc.custo += current.custo ?? 0;
+      acc.imposto += current.imposto ?? 0;
+      acc.lucro += current.lucro ?? 0;
       return acc;
     }, { bruto: 0, custo: 0, imposto: 0, lucro: 0 });
   }, [filteredData]);
@@ -69,20 +80,23 @@ export default function MedicaoFinanceiraPage() {
   return (
     <div className="space-y-6">
       {/* Action Bar */}
-      <div className="flex justify-end items-center gap-3">
-        <input 
-          type="month" 
-          className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:ring-4 focus:ring-blue-500/10 outline-none"
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-        />
-        <button className="flex items-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-emerald-900/10 hover:bg-emerald-700 transition-all text-sm">
-          <Download size={18} />
+      <div className="flex flex-col gap-3 rounded-[1.75rem] border border-slate-200 bg-white/80 px-4 py-4 shadow-sm shadow-slate-200/50 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-end">
+        <div className="relative">
+          <CalendarRange className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input 
+            type="month" 
+            className="h-11 min-w-[180px] rounded-2xl border border-slate-200 bg-slate-50 px-11 py-2 text-sm font-bold text-slate-700 shadow-sm outline-none transition-all focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+          />
+        </div>
+        <button className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm font-black text-emerald-700 shadow-sm shadow-emerald-100/60 transition-all hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 active:scale-[0.98]">
+          <Download size={17} />
           Exportar CSV
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
         <FinanceStatCard 
           label="Total faturamento mensal" 
           value={formatCurrency(totals.bruto)} 
@@ -108,16 +122,28 @@ export default function MedicaoFinanceiraPage() {
 
       {/* Finance Table */}
       <DataTable
-        data={filteredData}
+        data={financeTable.items}
+        loading={financeTable.loading}
+        pagination={{
+          page: financeTable.page,
+          pageSize: financeTable.pageSize,
+          totalItems: financeTable.totalCount,
+          onPageChange: financeTable.setPage,
+        }}
+        searchTerm={financeTable.searchTerm}
+        onSearchChange={financeTable.setSearchTerm}
+        searchPlaceholder="Buscar por OS, Cliente ou Motorista..."
         columns={[
           {
             key: 'documento',
             title: 'Documento / Data',
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             render: (_: any, item: any) => (
-              <div className="flex flex-col gap-1">
-                <span className="text-base font-bold text-slate-800 leading-none">#{item.os}</span>
-                <span className="text-xs text-slate-400 font-semibold">{new Date(item.data).toLocaleDateString('pt-BR')}</span>
+              <div className="flex flex-col gap-2">
+                <span className="inline-flex w-fit items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-black text-slate-800 shadow-sm">
+                  #{item.os}
+                </span>
+                <span className="text-xs font-semibold text-slate-400">{new Date(item.data).toLocaleDateString('pt-BR')}</span>
               </div>
             )
           },
@@ -133,14 +159,20 @@ export default function MedicaoFinanceiraPage() {
             }
           },
           {
-            key: 'trecho',
+            key: 'itinerario',
             title: 'Itinerário / KM',
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             render: (_: any, item: any) => (
-              <div className="flex flex-col">
-                <span className="text-sm font-bold text-slate-800">{item.trecho}</span>
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-bold text-slate-800">
+                  {item.rota?.waypoints?.filter((waypoint: { label: string }) => waypoint.label.trim() !== '').length
+                    ? `${item.rota.waypoints.filter((waypoint: { label: string }) => waypoint.label.trim() !== '').length} pontos`
+                    : 'Sem pontos'}
+                </span>
                 {item.distancia && (
-                  <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">{item.distancia} KM</span>
+                  <span className="inline-flex w-fit items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-blue-700 shadow-sm">
+                    {item.distancia} KM
+                  </span>
                 )}
               </div>
             )
@@ -193,15 +225,16 @@ export default function MedicaoFinanceiraPage() {
             render: (_: any, item: any) => (
               <div className="flex justify-center">
                 {item.status.financeiro === 'Faturado' ? (
-                  <span className="inline-flex items-center gap-2 px-5 py-2 bg-emerald-100 text-emerald-700 rounded-full text-xs font-black uppercase shadow-sm border border-emerald-200">
-                    <CheckCircle2 size={16} />
+                  <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black uppercase tracking-wide text-emerald-700 shadow-sm shadow-emerald-100/50">
+                    <CheckCircle2 size={15} />
                     Faturado
                   </span>
                 ) : (
                   <button 
                     onClick={() => handleDarBaixa(item.id)}
-                    className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-black uppercase hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-2.5 text-xs font-black uppercase tracking-wide text-blue-700 shadow-sm shadow-blue-100/60 transition-all hover:border-blue-300 hover:bg-blue-100 hover:text-blue-800 active:scale-[0.98]"
                   >
+                    <CheckCircle2 size={15} />
                     Dar Baixa
                   </button>
                 )}
@@ -209,9 +242,6 @@ export default function MedicaoFinanceiraPage() {
             )
           }
         ]}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        searchPlaceholder="Buscar por OS, Cliente ou Motorista..."
         emptyMessage="Nenhuma transação financeira encontrada."
         emptyIcon={<DollarSign size={48} />}
       />
@@ -221,20 +251,22 @@ export default function MedicaoFinanceiraPage() {
 
 function FinanceStatCard({ label, value, subValue, icon, color }: { label: string, value: string, subValue: string, icon: React.ReactNode, color: string }) {
   const bgColors: Record<string, string> = {
-    blue: 'bg-blue-50 border-blue-100',
-    orange: 'bg-orange-50 border-orange-100',
-    emerald: 'bg-emerald-50 border-emerald-100',
+    blue: 'bg-blue-50/80 border-blue-100 text-blue-600',
+    orange: 'bg-orange-50/80 border-orange-100 text-orange-600',
+    emerald: 'bg-emerald-50/80 border-emerald-100 text-emerald-600',
   };
 
   return (
-    <div className={`p-8 rounded-[2.5rem] border bg-white shadow-sm flex items-start gap-6 hover:shadow-xl hover:scale-[1.02] transition-all`}>
-      <div className={`p-5 rounded-2xl ${bgColors[color]} shadow-inner`}>
-        {icon}
+    <div className="flex items-start gap-5 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/40 transition-all hover:-translate-y-0.5 hover:shadow-md">
+      <div className={`rounded-2xl border p-4 shadow-sm ${bgColors[color]}`}>
+        <div className="[&>svg]:h-7 [&>svg]:w-7">
+          {icon}
+        </div>
       </div>
       <div>
-        <p className="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-2">{label}</p>
-        <h3 className="text-3xl font-black text-slate-800 tabular-nums tracking-tighter">{value}</h3>
-        <p className="text-sm font-semibold text-slate-600 mt-2">{subValue}</p>
+        <p className="mb-2 text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">{label}</p>
+        <h3 className="text-3xl font-black tracking-tighter text-slate-800 tabular-nums">{value}</h3>
+        <p className="mt-2 text-sm font-semibold text-slate-500">{subValue}</p>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { writeFile, cp, rm } from 'node:fs/promises';
+import { writeFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -8,7 +8,6 @@ import {
   Power,
   PowerOff,
   QrCode,
-  RefreshCw,
   Clock,
   CheckCircle2,
   XCircle,
@@ -16,7 +15,6 @@ import {
   Wifi,
   WifiOff,
   AlertTriangle,
-  X,
   Copy,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -38,11 +36,11 @@ interface SessionWithMeta extends WahaSession {
 
 export default function WahaConnectionsPanel() {
   const [sessions, setSessions] = useState<SessionWithMeta[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [vpsHealth, setVpsHealth] = useState<'checking' | 'connected' | 'error'>('checking');
-  const [vpsInfo, setVpsInfo] = useState('');
+  const [, setVpsInfo] = useState('');
   const [wahaHealth, setWahaHealth] = useState<'checking' | 'connected' | 'error'>('checking');
-  const [lastSyncAt, setLastSyncAt] = useState('');
+  const [, setLastSyncAt] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [qrSessionName, setQrSessionName] = useState('');
@@ -55,6 +53,7 @@ export default function WahaConnectionsPanel() {
   const qrPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const connectionSuccessShownRef = useRef(false);
   const qrWasShownRef = useRef(false);
+  const connectionInProgressRef = useRef(false);
   const WAHA_SESSION_NAME = 'default';
 
   const getAccessToken = useCallback(async () => {
@@ -137,7 +136,7 @@ export default function WahaConnectionsPanel() {
 
     pollIntervalRef.current = setInterval(() => {
       void fetchSessions();
-    }, 3000);
+    }, 5000);
 
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
@@ -146,6 +145,10 @@ export default function WahaConnectionsPanel() {
   }, [checkVpsConnection, fetchSessions]);
 
   const handleCreateDefaultSession = async () => {
+    if (connectionInProgressRef.current) {
+      return;
+    }
+
     const hasConnectedSession = sessions.some((s) => s.isConnected);
     if (hasConnectedSession) {
       toast.info('Já existe uma sessão WhatsApp conectada. Use a opção de reconectar se necessário.');
@@ -153,6 +156,7 @@ export default function WahaConnectionsPanel() {
     }
 
     setIsCreating(true);
+    connectionInProgressRef.current = true;
     try {
       connectionSuccessShownRef.current = false;
       qrWasShownRef.current = false;
@@ -182,12 +186,18 @@ export default function WahaConnectionsPanel() {
       toast.error(err instanceof Error ? err.message : 'Erro ao criar sessão');
     } finally {
       setIsCreating(false);
+      connectionInProgressRef.current = false;
     }
   };
 
   const handleConnect = async () => {
+    if (connectionInProgressRef.current) {
+      return;
+    }
+
     const sessionName = WAHA_SESSION_NAME;
 
+    connectionInProgressRef.current = true;
     connectionSuccessShownRef.current = false;
     qrWasShownRef.current = false;
     setConnectionSuccessModalOpen(false);
@@ -205,6 +215,15 @@ export default function WahaConnectionsPanel() {
       const startData = await startRes.json();
       if (!startData.success) throw new Error(startData.error);
 
+      const webhookRes = await fetch('/api/whatsapp/configure-webhook', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const webhookData = await webhookRes.json();
+      if (!webhookData.success) {
+        throw new Error(webhookData.error || 'Erro ao configurar webhook');
+      }
+
       toast.success('Sessão iniciada. Escaneie o QR code.');
       setQrSessionName(sessionName);
       setQrModalOpen(true);
@@ -215,7 +234,7 @@ export default function WahaConnectionsPanel() {
       if (qrPollIntervalRef.current) clearInterval(qrPollIntervalRef.current);
 
       let attempts = 0;
-      const maxAttempts = 180; // 90 seconds at 500ms interval
+      const maxAttempts = 60; // ~3 minutes at 3s interval
 
       const isConnectedSession = (session?: WahaSession | null) => {
         return Boolean(
@@ -288,11 +307,12 @@ export default function WahaConnectionsPanel() {
       void pollQrAndStatus();
       qrPollIntervalRef.current = setInterval(() => {
         void pollQrAndStatus();
-      }, 500);
+      }, 3000);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erro ao conectar');
     } finally {
       setActionLoading(prev => ({ ...prev, [sessionName]: false }));
+      connectionInProgressRef.current = false;
     }
   };
 
@@ -400,7 +420,7 @@ export default function WahaConnectionsPanel() {
                 Nenhuma sessão configurada
               </p>
               <p className="text-sm text-slate-400 font-semibold mt-1">
-                Clique em "Nova Sessão" para criar ou reconectar a sessão padrão.
+                Clique em &quot;Nova Sessão&quot; para criar ou reconectar a sessão padrão.
               </p>
             </div>
           ) : (
@@ -546,6 +566,7 @@ export default function WahaConnectionsPanel() {
             ) : qrImage ? (
               <div className="space-y-4">
                 <div className="bg-white p-4 rounded-2xl border-2 border-slate-200 inline-block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={qrImage}
                     alt="QR Code WhatsApp"

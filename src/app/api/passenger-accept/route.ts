@@ -53,18 +53,6 @@ export async function GET(request: Request) {
       );
     }
 
-    const { error: osError } = await getAdmin()
-      .from('ordens_servico')
-      .update({ status_operacional: 'Aguardando' })
-      .eq('id', confirmation.os_id);
-
-    if (osError) {
-      return NextResponse.json(
-        { success: false, error: 'Erro ao atualizar status da viagem.' },
-        { status: 500 }
-      );
-    }
-
     return NextResponse.json({
       success: true,
       message: 'Viagem confirmada com sucesso! O motorista será notificado.',

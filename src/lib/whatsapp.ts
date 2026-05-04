@@ -27,17 +27,23 @@ function getClientIp(request: Request): string {
   );
 }
 
+function getRateLimitKey(request: Request): string {
+  const ip = getClientIp(request);
+  const url = new URL(request.url);
+  return `${ip}:${request.method}:${url.pathname}`;
+}
+
 export function checkRateLimit(
   request: Request,
   maxRequests = 5,
   windowSeconds = 60
 ): boolean {
-  const ip = getClientIp(request);
+  const key = getRateLimitKey(request);
   const now = Date.now();
-  const entry = rateLimitMap.get(ip);
+  const entry = rateLimitMap.get(key);
 
   if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + windowSeconds * 1000 });
+    rateLimitMap.set(key, { count: 1, resetAt: now + windowSeconds * 1000 });
     return true;
   }
 
@@ -50,8 +56,8 @@ export function checkRateLimit(
 }
 
 export function getRateLimitHeaders(request: Request, maxRequests = 5, windowSeconds = 60): Record<string, string> {
-  const ip = getClientIp(request);
-  const entry = rateLimitMap.get(ip);
+  const key = getRateLimitKey(request);
+  const entry = rateLimitMap.get(key);
   const remaining = entry ? Math.max(0, maxRequests - entry.count) : maxRequests;
   const reset = entry ? Math.ceil((entry.resetAt - Date.now()) / 1000) : windowSeconds;
 

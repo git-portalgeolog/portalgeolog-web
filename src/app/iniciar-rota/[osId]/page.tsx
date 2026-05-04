@@ -4,15 +4,19 @@ export const runtime = 'edge';
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { CheckCircle2, AlertCircle, Loader2, Navigation } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Loader2, Navigation, Car, Gauge } from 'lucide-react';
 
 interface PreviewData {
   os: {
     id: string;
     protocolo: string;
     os_number: string;
-    trecho: string;
   };
+  vehicle: {
+    marca: string;
+    modelo: string;
+    placa: string;
+  } | null;
   alreadyStarted: boolean;
 }
 
@@ -23,6 +27,8 @@ export default function IniciarRotaPage() {
   const [status, setStatus] = useState<'loading' | 'confirm' | 'submitting' | 'success' | 'already' | 'error'>('loading');
   const [message, setMessage] = useState('Carregando dados da rota...');
   const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [kmInitial, setKmInitial] = useState('');
+  const [kmError, setKmError] = useState('');
 
   useEffect(() => {
     if (!osId) return;
@@ -50,12 +56,20 @@ export default function IniciarRotaPage() {
   }, [osId]);
 
   const handleStart = async () => {
+    setKmError('');
+
+    const km = Number(kmInitial);
+    if (!kmInitial.trim() || Number.isNaN(km) || km < 0) {
+      setKmError('Informe a quilometragem inicial do veículo.');
+      return;
+    }
+
     setStatus('submitting');
     try {
       const res = await fetch('/api/os-start-route', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ os_id: osId }),
+        body: JSON.stringify({ os_id: osId, km_initial: km }),
       });
       const data = await res.json();
       if (data.success) {
@@ -83,23 +97,55 @@ export default function IniciarRotaPage() {
         )}
 
         {status === 'confirm' && preview && (
-          <>
+          <form onSubmit={(e) => { e.preventDefault(); void handleStart(); }} className="space-y-6 text-left">
             <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto">
               <Navigation size={32} className="text-blue-600" />
             </div>
             <div className="space-y-1">
               <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Iniciar Rota</h1>
-              <p className="text-sm font-semibold text-slate-500">
-                OS {preview.os.os_number || preview.os.protocolo} — {preview.os.trecho}
-              </p>
+              <p className="text-sm font-semibold text-slate-500">OS {preview.os.os_number || preview.os.protocolo}</p>
             </div>
+            {preview.vehicle && (
+              <div className="bg-slate-50 rounded-2xl p-5 space-y-3 border border-slate-200">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 text-center">Veículo Designado</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
+                    <Car size={20} className="text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-800">{preview.vehicle.marca} {preview.vehicle.modelo}</p>
+                    <p className="text-xs font-bold text-slate-500">Placa: {preview.vehicle.placa}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <label htmlFor="km-initial" className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                <Gauge size={18} className="text-blue-600" />
+                Quilometragem Inicial
+              </label>
+              <input
+                id="km-initial"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                value={kmInitial}
+                onChange={(e) => setKmInitial(e.target.value)}
+                placeholder="Ex: 45230"
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
+                required
+              />
+              {kmError && <p className="text-xs font-bold text-rose-500">{kmError}</p>}
+            </div>
+
             <button
-              onClick={handleStart}
+              type="submit"
               className="w-full bg-blue-600 text-white font-black text-sm uppercase tracking-widest py-4 rounded-2xl shadow-lg shadow-blue-600/20 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
             >
               Confirmar Início da Rota
             </button>
-          </>
+          </form>
         )}
 
         {status === 'submitting' && (

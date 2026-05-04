@@ -35,7 +35,7 @@ export async function GET(request: Request) {
 
     const { data: os, error: findError } = await getAdmin()
       .from('ordens_servico')
-      .select('id, status_operacional, motorista, veiculo_id, protocolo, os_number, trecho, data, hora')
+      .select('id, status_operacional, motorista, veiculo_id, protocolo, os_number, data, hora')
       .eq('id', osId)
       .single();
 
@@ -84,15 +84,11 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { os_id?: string; km_initial?: number };
+    const body = (await request.json()) as { os_id?: string };
     const osId = body.os_id;
-    const kmInitial = body.km_initial;
 
     if (!osId) {
       return NextResponse.json({ success: false, error: 'ID da OS não informado.' }, { status: 400 });
-    }
-    if (typeof kmInitial !== 'number' || kmInitial < 0 || !Number.isFinite(kmInitial)) {
-      return NextResponse.json({ success: false, error: 'Quilometragem inicial inválida.' }, { status: 400 });
     }
 
     const { data: os, error: findError } = await getAdmin()
@@ -119,7 +115,6 @@ export async function POST(request: Request) {
       .update({
         status_operacional: 'Aguardando',
         driver_accepted_at: new Date().toISOString(),
-        driver_km_initial: kmInitial,
       })
       .eq('id', osId);
 
@@ -159,9 +154,9 @@ export async function POST(request: Request) {
           const startRouteLink = `https://portalgeolog.com.br/iniciar-rota/${osId}`;
 
           const acceptMessage =
-            `✅ *Viagem aceita!*\n\n` +
-            `Obrigado.\n\n` +
-            `Quando for iniciar a rota, clique aqui:\n` +
+            `✅ *Obrigado pelo aceite!*\n\n` +
+            `Sua viagem foi confirmada com sucesso.\n\n` +
+            `Quando estiver pronto para começar, clique no link abaixo para seguir para o próximo passo:\n` +
             `${startRouteLink}`;
 
           console.log('[os-driver-accept] Enviando msg para', driverPhone);

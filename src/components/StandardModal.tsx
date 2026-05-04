@@ -13,6 +13,7 @@ interface StandardModalProps {
   maxWidthClassName?: string;
   containerClassName?: string;
   bodyClassName?: string;
+  disableBackdropClose?: boolean;
 }
 
 export default function StandardModal({
@@ -24,7 +25,8 @@ export default function StandardModal({
   footer,
   maxWidthClassName = 'max-w-2xl',
   containerClassName = '',
-  bodyClassName = 'p-6 md:p-10 pb-16 space-y-12'
+  bodyClassName = 'p-6 md:p-10 pb-16 space-y-12',
+  disableBackdropClose = false,
 }: StandardModalProps) {
   useEffect(() => {
     // Salvar posição de scroll atual
@@ -49,7 +51,7 @@ export default function StandardModal({
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 modal-font">
-      <div className="absolute inset-0 bg-[#001C3A]/60 backdrop-blur-md" onClick={onClose} />
+      <div className="absolute inset-0 bg-[#001C3A]/60 backdrop-blur-md" onClick={() => !disableBackdropClose && onClose()} />
       <div
         className={`relative bg-white w-full ${maxWidthClassName} max-h-[92vh] rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-300 border border-slate-200 modal-content ${containerClassName}`}
         style={{ textRendering: 'geometricPrecision' }}

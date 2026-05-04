@@ -46,7 +46,7 @@ export default function OSCard({ os, onClick }: OSCardProps) {
         </div>
         <div className="flex items-center gap-2 text-slate-600">
           <Clock size={16} />
-          <span>{os.hora}</span>
+          <span>{os.hora || '--:--'}</span>
         </div>
         <div className="flex items-center gap-2 text-slate-600">
           <User size={16} />

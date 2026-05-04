@@ -25,7 +25,7 @@ export async function GET(request: Request) {
 
     const { data: os, error: findError } = await getAdmin()
       .from('ordens_servico')
-      .select('id, status_operacional, motorista, protocolo, os_number, trecho')
+      .select('id, status_operacional, motorista, protocolo, os_number')
       .eq('id', osId)
       .single();
 
@@ -55,11 +55,15 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { os_id?: string };
+    const body = (await request.json()) as { os_id?: string; km_initial?: number };
     const osId = body.os_id;
+    const kmInitial = body.km_initial;
 
     if (!osId) {
       return NextResponse.json({ success: false, error: 'ID da OS não informado.' }, { status: 400 });
+    }
+    if (typeof kmInitial !== 'number' || kmInitial < 0 || !Number.isFinite(kmInitial)) {
+      return NextResponse.json({ success: false, error: 'Quilometragem inicial inválida.' }, { status: 400 });
     }
 
     const { data: os, error: findError } = await getAdmin()
@@ -84,6 +88,8 @@ export async function POST(request: Request) {
       .update({
         status_operacional: 'Em Rota',
         route_started_at: new Date().toISOString(),
+        driver_km_initial: kmInitial,
+        route_started_km: kmInitial,
       })
       .eq('id', osId);
 
@@ -105,8 +111,9 @@ export async function POST(request: Request) {
         if (driverPhone?.phone) {
           const finishLink = `https://portalgeolog.com.br/finalizar-rota/${osId}`;
           const message =
-            `🚗 *Rota iniciada!*\n\nBoa viagem.\n\n` +
-            `Quando chegar ao destino, clique no link abaixo para finalizar a rota:\n` +
+            `🚗 *Rota iniciada!*\n\n` +
+            `KM inicial registrado: *${kmInitial.toLocaleString('pt-BR')}*\n\n` +
+            `Quando chegar ao destino, clique no link abaixo para finalizar a rota e informar apenas o KM final:\n` +
             `${finishLink}\n\n` +
             `_Após clicar, o status será atualizado automaticamente no painel._`;
           await sendWhatsAppMessage(driverPhone.phone, message);

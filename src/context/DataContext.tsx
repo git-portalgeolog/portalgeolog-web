@@ -67,6 +67,9 @@ export interface Waypoint {
   lat: number | null;
   lng: number | null;
   comment?: string;
+  itineraryIndex?: number;
+  hora?: string;
+  data?: string;
   passengers: {
     id: string;
     solicitanteId: string;
@@ -79,19 +82,18 @@ export interface OrderService {
   protocolo: string;
   os: string;
   data: string;
-  hora: string;
+  hora: string | null;
   horaExtra?: string;
   clienteId: string;
   solicitante: string;
   centroCustoId?: string;
   motorista: string;
   veiculoId?: string;
-  valorBruto: number;
-  custo: number;
-  imposto: number;
-  lucro: number;
+  valorBruto: number | null;
+  custo: number | null;
+  imposto: number | null;
+  lucro: number | null;
   status: OSStatus;
-  trecho: string;
   distancia?: number;
   rota?: {
     waypoints: Waypoint[];
@@ -230,6 +232,7 @@ interface DataContextType {
   drivers: Driver[];
   parceiros: ParceiroServico[];
   loading: boolean;
+  heavyLoading: boolean;
   impostoPercentual: number;
   setImpostoPercentual: (value: number, effectiveFrom?: string) => Promise<void>;
 
@@ -261,9 +264,9 @@ interface DataContextType {
   updateCentroCusto: (id: string, updates: Partial<CentroCusto>) => void;
   deleteCentroCusto: (id: string) => void;
 
-  addOS: (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => OrderService;
-  updateOS: (id: string, osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => void;
-  updateOSStatus: (id: string, updates: Partial<OSStatus>) => void;
+  addOS: (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => Promise<OrderService>;
+  updateOS: (id: string, osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => Promise<void>;
+  updateOSStatus: (id: string, updates: Partial<OSStatus>) => Promise<void>;
   deleteOS: (id: string) => Promise<void>;
 
   refreshData: () => Promise<void>;
@@ -283,6 +286,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [parceiros, setParceiros] = useState<ParceiroServico[]>([]);
   const [loading, setLoading] = useState(true);
+  const [heavyLoading, setHeavyLoading] = useState(false);
   const [impostoPercentual, setImpostoPercentualState] = useState<number>(12);
   const [lastOSUpdate, setLastOSUpdate] = useState(0);
   const { user, loading: authLoading } = useAuth();
@@ -298,24 +302,37 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const refreshData = useCallback(async () => {
     try {
-      const [clientesData, solicitantesData, passageirosData, parceirosData, osData, driversData, impostoPct] = await Promise.all([
+      // Fase 1: Dados leves — liberam a UI rapidamente
+      const [clientesData, solicitantesData, driversData, impostoPct] = await Promise.all([
         dbFetchClientes(),
         dbFetchSolicitantes(),
-        dbFetchPassageiros(),
-        dbFetchParceiros(),
-        dbFetchOSList(),
         dbFetchDrivers(),
         getImpostoPercentual(),
       ]);
 
       setClientes(clientesData);
       setSolicitantes(solicitantesData);
-      setPassageiros(passageirosData);
-      setParceiros(parceirosData);
-      setOsList(osData);
       setDrivers(driversData);
       setImpostoPercentualState(impostoPct);
-      setLastOSUpdate(Date.now());
+
+      // Fase 2: Dados pesados — carregam em background sem bloquear a UI
+      setHeavyLoading(true);
+      try {
+        const [passageirosData, parceirosData, osData] = await Promise.all([
+          dbFetchPassageiros(),
+          dbFetchParceiros(),
+          dbFetchOSList(),
+        ]);
+        setPassageiros(passageirosData);
+        setParceiros(parceirosData);
+        setOsList(osData);
+        setLastOSUpdate(Date.now());
+      } catch (heavyErr) {
+        console.error('⚠️ Erro ao carregar dados pesados:', heavyErr);
+        toast.error('Alguns dados pesados não foram carregados. Tente atualizar.');
+      } finally {
+        setHeavyLoading(false);
+      }
     } catch (err) {
       console.error('🔥 CRITICAL: Error refreshing global data:', err);
       toast.error('Erro ao sincronizar dados. Tente atualizar a página.');
@@ -393,6 +410,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         debouncedFetch('passageiros', async () => {
           const data = await dbFetchPassageiros();
           setPassageiros(data);
+        });
+        debouncedFetch('os', async () => {
+          const data = await dbFetchOSList();
+          setOsList(data);
+          setLastOSUpdate(Date.now());
         });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'drivers' }, () => {
@@ -549,7 +571,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addPassageiro = async (passageiro: NovoPassageiroInput): Promise<Passageiro> => {
-    const cleanNome = passageiro.nomeCompleto.trim();
+    const cleanNome = passageiro.nomeCompleto.trim().toUpperCase();
     const cleanEmail = passageiro.email?.trim() || '';
     const cleanCelular = passageiro.celular.trim();
     const cleanCpf = passageiro.cpf?.trim() || '';
@@ -619,7 +641,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updatePassageiro = async (id: string, passageiro: NovoPassageiroInput): Promise<Passageiro> => {
-    const cleanNome = passageiro.nomeCompleto.trim();
+    const cleanNome = passageiro.nomeCompleto.trim().toUpperCase();
     const cleanEmail = passageiro.email?.trim() || '';
     const cleanCelular = passageiro.celular.trim();
     const cleanCpf = passageiro.cpf?.trim() || '';
@@ -750,10 +772,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     void refreshData();
   };
 
-  const addOS = (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>): OrderService => {
+  const addOS = async (osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>): Promise<OrderService> => {
     const taxa = impostoPercentual / 100;
-    const imposto = osData.valorBruto * taxa;
-    const lucro = osData.valorBruto - imposto - osData.custo;
+    const vBruto = osData.valorBruto ?? 0;
+    const vCusto = osData.custo ?? 0;
+    const imposto = vBruto * taxa;
+    const lucro = vBruto - imposto - vCusto;
     const tempId = `temp-${Date.now()}`;
 
     const optimistic: OrderService = {
@@ -764,49 +788,55 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       lucro,
       status: { operacional: 'Pendente', financeiro: 'Pendente' },
     };
+    // Atualizar osData com valores numéricos para o backend
+    const osDataWithNumbers = { ...osData, valorBruto: vBruto, custo: vCusto };
 
     setOsList((prev) => [optimistic, ...prev]);
 
-    insertOS(osData)
-      .then((real) => {
-        setOsList((prev) => prev.map((o) => (o.id === tempId ? real : o)));
-        void refreshData();
-      })
-      .catch((err) => {
-        console.error('Error adding OS:', err);
-        console.error('OS Data that failed:', osData);
-        setOsList((prev) => prev.filter((o) => o.id !== tempId));
-        throw err; // Re-throw para que o erro possa ser tratado no componente
-      });
-
-    return optimistic;
-  };
-
-  const updateOS = (id: string, osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>) => {
-    const currentOS = osList.find((os) => os.id === id);
-    if (currentOS) {
-      const taxa = impostoPercentual / 100;
-      const imposto = osData.valorBruto * taxa;
-      const lucro = osData.valorBruto - imposto - osData.custo;
-
-      setOsList((prev) => prev.map((os) => (os.id === id ? {
-        ...currentOS,
-        ...osData,
-        imposto,
-        lucro,
-        status: currentOS.status,
-        protocolo: currentOS.protocolo,
-      } : os)));
+    try {
+      const real = await insertOS(osDataWithNumbers);
+      setOsList((prev) => prev.map((o) => (o.id === tempId ? real : o)));
+      return real;
+    } catch (err) {
+      console.error('Error adding OS:', err);
+      console.error('OS Data that failed:', osData);
+      setOsList((prev) => prev.filter((o) => o.id !== tempId));
+      throw err;
     }
 
-    updateOSInDB(id, osData)
-      .then(() => {
-        void refreshData();
-      })
-      .catch(err => console.error('Error updateOSInDB:', err));
+    
   };
 
-  const updateOSStatus = (id: string, updates: Partial<OSStatus>) => {
+  const updateOS = async (id: string, osData: Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>): Promise<void> => {
+    const currentOS = osList.find((os) => os.id === id);
+    if (!currentOS) return;
+
+    const taxa = impostoPercentual / 100;
+    const vBruto = osData.valorBruto ?? 0;
+    const vCusto = osData.custo ?? 0;
+    const imposto = vBruto * taxa;
+    const lucro = vBruto - imposto - vCusto;
+
+    setOsList((prev) => prev.map((os) => (os.id === id ? {
+      ...currentOS,
+      ...osData,
+      valorBruto: vBruto,
+      custo: vCusto,
+      imposto,
+      lucro,
+      status: currentOS.status,
+      protocolo: currentOS.protocolo,
+    } : os)));
+
+    try {
+      await updateOSInDB(id, osData);
+    } catch (err) {
+      console.error('Error updateOSInDB:', err);
+      throw err;
+    }
+  };
+
+  const updateOSStatus = async (id: string, updates: Partial<OSStatus>): Promise<void> => {
     setOsList((prev) => prev.map((os) => (os.id === id ? {
       ...os,
       status: {
@@ -815,11 +845,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       },
     } : os)));
 
-    updateOSStatusInDB(id, updates)
-      .then(() => {
-        void refreshData();
-      })
-      .catch(err => console.error('Error updateOSStatusInDB:', err));
+    try {
+      await updateOSStatusInDB(id, updates);
+    } catch (err) {
+      console.error('Error updateOSStatusInDB:', err);
+      throw err;
+    }
   };
 
   const deleteOS = async (id: string): Promise<void> => {
@@ -827,10 +858,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     try {
       await archiveOSFromDB(id);
-      void refreshData();
     } catch (err) {
       console.error('Error archiveOSFromDB:', err);
-      void refreshData();
       throw err;
     }
   };
@@ -1030,6 +1059,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         drivers,
         parceiros,
         loading,
+        heavyLoading,
         impostoPercentual,
         setImpostoPercentual,
         lastOSUpdate,
