@@ -14,7 +14,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Truck,
-  User
+  User,
+  Loader2
 } from 'lucide-react';
 
 interface Cliente {
@@ -33,6 +34,7 @@ interface OSCalendarProps {
   osList: OrderService[];
   clientes: Cliente[];
   onEventClick: (osId: string, position?: { x: number; y: number }) => void;
+  loading?: boolean;
 }
 
 // Cores por status — backgrounds mais saturados para legibilidade no calendário
@@ -251,7 +253,7 @@ const EventContent = ({ os, clientes, itineraryLabel, displayDateTime }: EventCo
   );
 };
 
-export default function OSCalendar({ osList, clientes, onEventClick }: OSCalendarProps) {
+export default function OSCalendar({ osList, clientes, onEventClick, loading }: OSCalendarProps) {
   const [currentView, setCurrentView] = useState<'dayGridMonth' | 'dayGridWeek' | 'dayGridDay' | 'listWeek'>('dayGridWeek');
   const calendarRef = React.useRef<FullCalendar>(null);
 
@@ -385,6 +387,17 @@ export default function OSCalendar({ osList, clientes, onEventClick }: OSCalenda
       />
     );
   };
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-[2rem] border border-slate-200 shadow-xl shadow-slate-200/40 p-16">
+        <div className="flex flex-col items-center justify-center gap-4 text-slate-400">
+          <Loader2 size={48} className="text-blue-500 animate-spin" />
+          <p className="font-bold text-lg text-slate-500">Carregando ordens de serviço...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (osList.length === 0) {
     return (

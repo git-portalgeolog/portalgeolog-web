@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { formatItineraryGroups, type ItineraryGroup, type ItineraryStop } from '@/lib/os-messages';
 
 const WAHA_STATUS_TIMEOUT_MS = 8000;
 const WAHA_SEND_TIMEOUT_MS = 15000;
@@ -389,19 +390,57 @@ export async function sendAdminOSHistoryToGroup(
 
   const { data: waypointsData, error: waypointsError } = await adminSupabase
     .from('os_waypoints')
-    .select('label, comment, position')
+    .select('label, comment, position, itinerary_index, data, hora')
     .eq('ordem_servico_id', osId)
     .order('position');
 
   if (waypointsError) throw waypointsError;
 
-  const waypoints = ((waypointsData || []) as Array<{ label?: string | null; comment?: string | null; position?: number | null }>).sort(
-    (a, b) => (a.position ?? 0) - (b.position ?? 0)
-  );
-  const itinerarySummary =
-    waypoints.length > 0
-      ? `${waypoints[0]?.label || 'Não informado'} → ${waypoints[waypoints.length - 1]?.label || 'Não informado'}`
-      : 'Não informado';
+  const rawWaypoints = (waypointsData || []) as Array<{
+    label?: string | null;
+    comment?: string | null;
+    position?: number | null;
+    itinerary_index?: number | null;
+    data?: string | null;
+    hora?: string | null;
+  }>;
+
+  const groupsMap = new Map<number, { index: number; firstPosition: number; waypoints: typeof rawWaypoints }>();
+  rawWaypoints.forEach((wp, idx) => {
+    const itIdx = wp.itinerary_index ?? 0;
+    if (!groupsMap.has(itIdx)) {
+      groupsMap.set(itIdx, { index: itIdx, firstPosition: wp.position ?? idx, waypoints: [] });
+    }
+    const g = groupsMap.get(itIdx)!;
+    g.waypoints.push(wp);
+    if (typeof wp.position === 'number' && wp.position < g.firstPosition) {
+      g.firstPosition = wp.position;
+    }
+  });
+
+  const sortedGroups = Array.from(groupsMap.values()).sort((a, b) => a.firstPosition - b.firstPosition);
+
+  const itineraryGroups: ItineraryGroup[] = sortedGroups.map((g) => {
+    const firstWp = g.waypoints[0];
+    const itData = firstWp?.data || os.data;
+    const itHora = firstWp?.hora || os.hora;
+    const dateTime = itData
+      ? `${itData.split('-').reverse().join('/')}${itHora ? ` - ${itHora.slice(0, 5)}` : ''}`
+      : (itHora ? itHora.slice(0, 5) : null);
+    return {
+      index: g.index,
+      dateTime,
+      stops: g.waypoints.map((w, relIdx) => ({
+        label: w.label?.trim() || 'Não informado',
+        comment: w.comment?.trim() || null,
+        isOrigin: relIdx === 0,
+        isDestination: relIdx === g.waypoints.length - 1,
+        isPassengerAddress: false,
+      } as ItineraryStop)),
+    };
+  });
+
+  const itineraryText = formatItineraryGroups(itineraryGroups);
 
   const message = [
     '📚 *HISTÓRICO ADMINISTRATIVO DA OS*',
@@ -414,7 +453,8 @@ export async function sendAdminOSHistoryToGroup(
     `👨‍✈️ *Motorista:* ${os.motorista || 'Não informado'}`,
     `🚘 *Veículo:* ${vehicleLabel}`,
     `📝 *Placa:* ${vehiclePlate}`,
-    `📍 *Itinerário:* ${itinerarySummary}`,
+    `📍 *Itinerário:*`,
+    `${itineraryText}`,
     `📅 *Data:* ${formatHistoryDate(os.data)}`,
     `⏰ *Horário:* ${formatHistoryTime(os.hora)}`,
     `📌 *Status atual:* ${os.arquivado ? 'Arquivada' : (os.status_operacional || 'Não informado')}`,

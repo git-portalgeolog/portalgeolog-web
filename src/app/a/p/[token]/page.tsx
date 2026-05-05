@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { AlertCircle, CalendarDays, CheckCircle2, MapPin, Phone, Route, User } from 'lucide-react';
 import { CopyableText } from '@/components/CopyableText';
+import PassengerConfirmButton from '@/components/passenger/PassengerConfirmButton';
 
 export const runtime = 'edge';
 
@@ -251,7 +252,6 @@ export default async function PassengerShortLinkPage({ params }: PageProps): Pro
   const filteredItineraryGroups = passengerItineraryGroups.length > 0 ? [passengerItineraryGroups[0]] : [];
   const passengerPrimaryAddress = passengerAddresses[0];
   const osProtocol = os.protocolo || os.os_number || 'Viagem';
-  const reviewLink = `/api/passenger-accept?token=${encodeURIComponent(resolvedToken)}`;
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6 lg:px-8">
@@ -389,18 +389,7 @@ export default async function PassengerShortLinkPage({ params }: PageProps): Pro
                 Ao confirmar, você informa que conferiu os dados do trajeto e do atendimento.
               </p>
 
-              {!confirmation.aceito ? (
-                <a
-                  href={reviewLink}
-                  className="inline-flex w-full items-center justify-center rounded-2xl bg-emerald-600 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.01] active:scale-95"
-                >
-                  Confirmar Viagem
-                </a>
-              ) : (
-                <div className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-100 px-6 py-4 text-sm font-black uppercase tracking-widest text-slate-500">
-                  Viagem já confirmada
-                </div>
-              )}
+              <PassengerConfirmButton token={resolvedToken} alreadyAccepted={!!confirmation.aceito} />
             </div>
           </div>
 

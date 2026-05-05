@@ -25,7 +25,7 @@ export async function GET(request: Request) {
 
     const { data: confirmation, error: findError } = await getAdmin()
       .from('os_passenger_confirmations')
-      .select('id, os_id, aceito, aceito_em')
+      .select('id, os_id, passageiro_id, aceito, aceito_em')
       .eq('token', token)
       .single();
 

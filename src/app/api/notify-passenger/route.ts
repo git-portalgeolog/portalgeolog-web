@@ -316,7 +316,7 @@ export async function POST(request: Request) {
         itineraryLines.push(`${title} — ${dateTime}`);
 
         group.waypoints.forEach((wp, wpIndex) => {
-          const prefix = wpIndex === 0 ? '▶️ Origem' : wpIndex === group.waypoints.length - 1 ? '🏁 Destino final' : `⏹️ Parada ${wpIndex}`;
+          const prefix = wpIndex === 0 ? '🟢 *Origem:*' : wpIndex === group.waypoints.length - 1 ? '🔵 *Destino Final:*' : `🔘 *Parada ${wpIndex}:*`;
           const wpDateTime = wp.data || wp.hora ? ` (${formatDateTime(wp.data, wp.hora)})` : '';
           const marker = passengerWaypointIds.has(wp.id) ? ' 📍 (seu endereço)' : '';
           itineraryLines.push(`   ${prefix}: ${wp.label || 'Não informado'}${wpDateTime}${marker}`);

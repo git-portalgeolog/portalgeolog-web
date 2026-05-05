@@ -417,7 +417,7 @@ export default function OSOperationalPage() {
     auto: true,
     motorista: true,
     passageiros: true,
-    solicitante: true
+    solicitante: false
   });
   const [isSubmittingOS, setIsSubmittingOS] = useState(false);
 
@@ -1198,7 +1198,9 @@ export default function OSOperationalPage() {
   };
 
   const sendAdminGroupMessage = async (osData: OrderService) => {
-    const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
+    const clienteRecord = clientes.find(c => c.id === osData.clienteId);
+    const cliente = clienteRecord?.nome || 'Empresa não informada';
+    const centroCusto = clienteRecord?.centrosCusto?.find(cc => cc.id === osData.centroCustoId)?.nome || 'Não informado';
 
     // Motorista e contato
     const driverObj = drivers.find(d =>
@@ -1207,15 +1209,15 @@ export default function OSOperationalPage() {
     const driverPhone = driverObj?.phone || 'Não informado';
 
     // Veículo
-    let vehicleInfo = { tipo: '', placa: '' };
+    let vehicleInfo = { tipo: '', placa: '', marca: '', modelo: '' };
     if (osData.veiculoId) {
       const v = vehicles.find(v => v.id === osData.veiculoId);
-      if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
+      if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '', marca: v.marca || '', modelo: v.modelo || '' };
     } else if (driverObj?.id) {
       const assoc = driverVehiclesAssoc.find(a => a.driver_id === driverObj.id);
       if (assoc) {
         const v = vehicles.find(v => v.id === assoc.vehicle_id);
-        if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
+        if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '', marca: v.marca || '', modelo: v.modelo || '' };
       }
     }
     const tipoCapitalizado = vehicleInfo.tipo
@@ -1247,9 +1249,15 @@ export default function OSOperationalPage() {
     const itineraries = getItineraries(waypoints as FormWaypoint[]);
     if (itineraries.length > 0) {
       itineraryText = itineraries.map((it) => {
+        const firstWp = it.waypoints[0];
+        const itData = firstWp?.data || osData.data;
+        const itHora = firstWp?.hora || osData.hora;
+        const dateTimeLine = itData
+          ? ` — ${itData.split('-').reverse().join('/')}${itHora ? ` - ${itHora.slice(0, 5)}` : ''}`
+          : (itHora ? ` — ${itHora.slice(0, 5)}` : '');
         const itTitle = it.index < 0
-          ? `🔄 *${numeroParaOrdinal(Math.abs(it.index))} Retorno*`
-          : `📍 *${numeroParaOrdinal(it.index + 1)} Itinerário*`;
+          ? `🔄 *${numeroParaOrdinal(Math.abs(it.index))} Retorno${dateTimeLine}*`
+          : `📍 *${numeroParaOrdinal(it.index + 1)} Itinerário${dateTimeLine}*`;
         const stops = it.waypoints.map((w, relIdx) => {
           const label = w.label.trim();
           const comment = w.comment?.trim();
@@ -1260,7 +1268,7 @@ export default function OSOperationalPage() {
           if (comment) line += `\n   _Obs: ${comment}_`;
           return line;
         }).join('\n\n');
-        return itTitle ? `────────────────\n${itTitle}\n${stops}` : stops;
+        return `────────────────\n${itTitle}\n\n${stops}`;
       }).join('\n\n');
     }
 
@@ -1270,22 +1278,26 @@ export default function OSOperationalPage() {
 
     const osLine = osData.os ? `🆔 *OS:* ${osData.os.toUpperCase()}\n` : '';
 
+    const marcaModeloLine = (vehicleInfo.marca || vehicleInfo.modelo)
+      ? `🏭 *Marca/Modelo:* ${[vehicleInfo.marca, vehicleInfo.modelo].filter(Boolean).join(' ')}\n`
+      : '';
+
     const message =
       `📋 *NOVO ATENDIMENTO*\n` +
-      `📋 *Protocolo:* ${osData.protocolo}\n` +
+      `🏷️ *Protocolo:* ${osData.protocolo}\n` +
+      `🚛 *Fornecedor:* Geolog Transporte Executivo\n` +
       `${osLine}` +
-      `📅 *Data:* ${osData.data.split('-').reverse().join('/')}\n` +
-      `⏰ *Horário:* ${osData.hora || 'Não informado'}\n` +
       `🏢 *Empresa:* ${cliente}\n` +
-      `👤 *Solicitante:* ${osData.solicitante || 'Não informado'}\n\n` +
+      `👤 *Solicitante:* ${osData.solicitante || 'Não informado'}\n` +
+      `💼 *C. Custo:* ${centroCusto}\n\n` +
       `────────────────\n` +
       `👥 *Passageiro(s):*\n${paxText}\n\n` +
-      `────────────────\n` +
-      `📍 *Itinerário:*\n${itineraryText || 'Não informado'}\n\n` +
+      `${itineraryText ? `${itineraryText}\n\n` : '────────────────\n📍 *Itinerário:* Não informado\n\n'}` +
       `────────────────\n` +
       `👨‍✈️ *Motorista:* ${osData.motorista}\n` +
       `📞 *Contato:* ${driverPhone}\n` +
       `🚘 *Veículo:* ${tipoCapitalizado}\n` +
+      `${marcaModeloLine}` +
       `📝 *Placa:* ${vehicleInfo.placa || 'Não informada'}\n\n` +
       `────────────────\n` +
       `💰 *Financeiro:*\n` +
@@ -2358,8 +2370,29 @@ export default function OSOperationalPage() {
       }
     }
     
+    // Sincroniza a data da OS com a data do primeiro waypoint (fonte de verdade)
+    const firstWaypointData = firstItinerary?.waypoints[0]?.data;
+    let syncedData = formData.data;
+    
+    if (firstWaypointData) {
+      if (firstWaypointData.includes('-')) {
+        syncedData = firstWaypointData;
+      } else if (firstWaypointData.includes('/')) {
+        const [d, m, y] = firstWaypointData.split('/');
+        if (d && m && y) {
+          syncedData = `${y}-${m}-${d}`;
+        }
+      } else if (firstWaypointData.length === 8) {
+        const d = firstWaypointData.slice(0, 2);
+        const m = firstWaypointData.slice(2, 4);
+        const y = firstWaypointData.slice(4);
+        syncedData = `${y}-${m}-${d}`;
+      }
+    }
+
     const finalData = {
       ...formData,
+      data: syncedData,
       hora: null,
       rota: { waypoints: formData.waypoints }
     };
@@ -2912,12 +2945,18 @@ export default function OSOperationalPage() {
               render: (value: unknown, item: OrderService) => {
                 void value;
 
+                // Fonte de verdade: data/hora do primeiro waypoint; fallback para item.data/item.hora (legacy)
+                const waypoints = item.rota?.waypoints || [];
+                const firstWp = waypoints[0];
+                const displayDate = firstWp?.data || item.data;
+                const displayHora = firstWp?.hora || item.hora;
+
                 return (
                 <div className="space-y-1">
                   <p className="font-black text-base text-slate-800 tracking-tight">{item.protocolo}</p>
-                  <p className="text-sm font-semibold text-slate-400">
-                    {item.data.split('-').reverse().join('/')}
-                    {item.hora && <span className="ml-1 text-slate-300">· {item.hora.slice(0, 5)}</span>}
+                  <p className="text-sm font-semibold" style={{ color: 'rgb(97, 130, 209)' }}>
+                    {displayDate.split('-').reverse().join('/')}
+                    {displayHora && <span className="ml-1 text-slate-500">· {displayHora.slice(0, 5)}</span>}
                   </p>
                 </div>
                 );
@@ -3131,6 +3170,7 @@ export default function OSOperationalPage() {
           <OSCalendar 
             osList={filteredData} 
             clientes={clientes}
+            loading={dataLoading || heavyLoading}
             onEventClick={(osId: string, position?: { x: number; y: number }) => {
               setOpenActionMenuId(osId);
               setCalendarMenuPosition(position || null);
@@ -5144,8 +5184,8 @@ export default function OSOperationalPage() {
                   </button>
 
                   <button
-                    onClick={() => setNotificationConfig(prev => ({ ...prev, solicitante: !prev.solicitante }))}
-                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${notificationConfig.solicitante ? 'bg-blue-50/50 border-blue-200 text-blue-900' : 'bg-white border-slate-100 text-slate-400'}`}
+                    disabled
+                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all cursor-not-allowed opacity-60 ${notificationConfig.solicitante ? 'bg-blue-50/50 border-blue-200 text-blue-900' : 'bg-white border-slate-100 text-slate-400'}`}
                   >
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${notificationConfig.solicitante ? 'bg-blue-100 text-blue-600' : 'bg-slate-50 text-slate-300'}`}>

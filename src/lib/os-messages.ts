@@ -90,7 +90,7 @@ function numeroParaOrdinal(n: number): string {
   return String(n);
 }
 
-function formatItineraryGroups(groups: ItineraryGroup[]): string {
+export function formatItineraryGroups(groups: ItineraryGroup[]): string {
   if (groups.length === 0) return '';
 
   return groups
@@ -105,9 +105,9 @@ function formatItineraryGroups(groups: ItineraryGroup[]): string {
       const stops = it.stops
         .map((stop, idx) => {
           let line = '';
-          if (stop.isOrigin) line = `▶️ Origem: ${stop.label}`;
-          else if (stop.isDestination) line = `🏁 Destino final: ${stop.label}`;
-          else line = `⏹️ Parada ${idx}: ${stop.label}`;
+          if (stop.isOrigin) line = `🟢 *Origem:* ${stop.label}`;
+          else if (stop.isDestination) line = `🔵 *Destino Final:* ${stop.label}`;
+          else line = `🔘 *Parada ${idx}:* ${stop.label}`;
 
           if (stop.dateTime) line += ` (${stop.dateTime})`;
           if (stop.isPassengerAddress) line += ' 📍 (seu endereço)';
@@ -115,7 +115,7 @@ function formatItineraryGroups(groups: ItineraryGroup[]): string {
         })
         .join('\n');
 
-      return `────────────────\n${title}${dateTimeLine}\n${stops}\n`;
+      return `────────────────\n${title}${dateTimeLine}\n\n${stops}\n`;
     })
     .join('\n');
 }
@@ -157,7 +157,6 @@ export function buildDriverNotificationMessage(data: DriverNotificationData): st
     `────────────────\n` +
     `👇 *Aceitar o serviço:*\n` +
     `${data.acceptLink}\n\n` +
-    `────────────────\n` +
     `${itineraryText}\n`
   );
 }
