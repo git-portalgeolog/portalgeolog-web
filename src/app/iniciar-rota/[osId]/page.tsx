@@ -30,6 +30,13 @@ export default function IniciarRotaPage() {
   const [kmInitial, setKmInitial] = useState('');
   const [kmError, setKmError] = useState('');
 
+  const formatKmInput = (raw: string): string => {
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return '';
+    const num = Number(digits);
+    return num.toLocaleString('pt-BR');
+  };
+
   useEffect(() => {
     if (!osId) return;
 
@@ -58,7 +65,7 @@ export default function IniciarRotaPage() {
   const handleStart = async () => {
     setKmError('');
 
-    const km = Number(kmInitial);
+    const km = Number(kmInitial.replace(/\./g, ''));
     if (!kmInitial.trim() || Number.isNaN(km) || km < 0) {
       setKmError('Informe a quilometragem inicial do veículo.');
       return;
@@ -103,7 +110,7 @@ export default function IniciarRotaPage() {
             </div>
             <div className="space-y-1">
               <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Iniciar Rota</h1>
-              <p className="text-sm font-semibold text-slate-500">OS {preview.os.os_number || preview.os.protocolo}</p>
+              <p className="text-sm font-semibold text-slate-500">Protocolo: {preview.os.protocolo || preview.os.os_number}</p>
             </div>
             {preview.vehicle && (
               <div className="bg-slate-50 rounded-2xl p-5 space-y-3 border border-slate-200">
@@ -127,12 +134,11 @@ export default function IniciarRotaPage() {
               </label>
               <input
                 id="km-initial"
-                type="number"
+                type="text"
                 inputMode="numeric"
-                min={0}
                 value={kmInitial}
-                onChange={(e) => setKmInitial(e.target.value)}
-                placeholder="Ex: 45230"
+                onChange={(e) => setKmInitial(formatKmInput(e.target.value))}
+                placeholder="Ex: 45.230"
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
                 required
               />

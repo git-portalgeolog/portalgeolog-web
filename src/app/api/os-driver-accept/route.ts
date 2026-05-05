@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
+import { buildDriverAcceptConfirmationMessage } from '@/lib/os-messages';
 
 export const runtime = 'edge';
 
@@ -152,12 +153,7 @@ export async function POST(request: Request) {
 
         if (driverPhone) {
           const startRouteLink = `https://portalgeolog.com.br/iniciar-rota/${osId}`;
-
-          const acceptMessage =
-            `✅ *Obrigado pelo aceite!*\n\n` +
-            `Sua viagem foi confirmada com sucesso.\n\n` +
-            `Quando estiver pronto para começar, clique no link abaixo para seguir para o próximo passo:\n` +
-            `${startRouteLink}`;
+          const acceptMessage = buildDriverAcceptConfirmationMessage({ startRouteLink });
 
           console.log('[os-driver-accept] Enviando msg para', driverPhone);
           await sendWhatsAppMessage(driverPhone, acceptMessage);

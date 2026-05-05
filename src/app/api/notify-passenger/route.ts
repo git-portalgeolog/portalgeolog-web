@@ -9,6 +9,7 @@ import {
   unauthorizedResponse,
   validateAuth,
 } from '@/lib/whatsapp';
+import { buildPassengerNotificationMessage } from '@/lib/os-messages';
 
 export const runtime = 'edge';
 
@@ -21,6 +22,31 @@ const getAdmin = () => {
   );
   return _supabaseAdmin;
 };
+
+function numeroParaOrdinal(n: number): string {
+  const unidades = ['', 'Primeiro', 'Segundo', 'Terceiro', 'Quarto', 'Quinto', 'Sexto', 'Sétimo', 'Oitavo', 'Nono'];
+  const especiais: Record<number, string> = {
+    10: 'Décimo', 11: 'Décimo Primeiro', 12: 'Décimo Segundo', 13: 'Décimo Terceiro',
+    14: 'Décimo Quarto', 15: 'Décimo Quinto', 16: 'Décimo Sexto', 17: 'Décimo Sétimo',
+    18: 'Décimo Oitavo', 19: 'Décimo Nono',
+  };
+  const dezenas: Record<number, string> = {
+    2: 'Vigésimo', 3: 'Trigésimo', 4: 'Quadragésimo', 5: 'Quinquagésimo',
+    6: 'Sexagésimo', 7: 'Septuagésimo', 8: 'Octogésimo', 9: 'Nonagésimo',
+  };
+  if (n >= 1 && n <= 9) return unidades[n];
+  if (n >= 10 && n <= 19) return especiais[n] || '';
+  if (n >= 20 && n <= 99) {
+    const d = Math.floor(n / 10);
+    const u = n % 10;
+    const dt = dezenas[d] || '';
+    const ut = u > 0 ? unidades[u] : '';
+    if (dt && ut) return `${dt} ${ut}`;
+    return dt || ut || String(n);
+  }
+  if (n === 100) return 'Centésimo';
+  return String(n);
+}
 
 function createResendClient() {
   const apiKey = process.env.RESEND_API_KEY;
@@ -239,32 +265,70 @@ export async function POST(request: Request) {
         passengerAddress = passengerAddresses[0];
       }
 
-      const itineraryGroups = new Map<number, { firstIndex: number; waypoints: Array<{ label?: string | null; data?: string | null; hora?: string | null }> }>();
+      const passengerWaypointIds = new Set<string>();
+      if (passageiroId && waypointsData && waypointsData.length > 0) {
+        const { data: wpPassengers } = await getAdmin()
+          .from('os_waypoints_passageiros')
+          .select('waypoint_id')
+          .in('waypoint_id', waypointsData.map((wp) => wp.id))
+          .eq('passageiro_id', passageiroId);
+
+        (wpPassengers || []).forEach((row: Record<string, unknown>) => {
+          const id = String(row.waypoint_id || '');
+          if (id) passengerWaypointIds.add(id);
+        });
+      }
+
+      const waypointItineraryMap = new Map<string, number>();
+      const itineraryGroups = new Map<number, { firstIndex: number; waypoints: Array<{ id: string; label?: string | null; data?: string | null; hora?: string | null }> }>();
       (waypointsData || []).forEach((waypoint) => {
         const itineraryIndex = typeof waypoint.itinerary_index === 'number' ? waypoint.itinerary_index : 0;
+        waypointItineraryMap.set(waypoint.id, itineraryIndex);
         if (!itineraryGroups.has(itineraryIndex)) {
           itineraryGroups.set(itineraryIndex, { firstIndex: waypoint.position ?? 0, waypoints: [] });
         }
         const group = itineraryGroups.get(itineraryIndex);
         if (!group) return;
-        group.waypoints.push({ label: waypoint.label, data: waypoint.data, hora: waypoint.hora });
+        group.waypoints.push({ id: waypoint.id, label: waypoint.label, data: waypoint.data, hora: waypoint.hora });
         if (typeof waypoint.position === 'number' && waypoint.position < group.firstIndex) {
           group.firstIndex = waypoint.position;
         }
       });
 
-      const itineraryLines = Array.from(itineraryGroups.entries())
-        .sort((a, b) => a[1].firstIndex - b[1].firstIndex)
-        .map(([index, group]) => {
-          const firstWaypoint = group.waypoints[0];
-          const dateTime = formatDateTime(firstWaypoint?.data || osData?.data || null, firstWaypoint?.hora || osData?.hora || null);
-          const title = index < 0 ? 'Retorno' : `Itinerário ${index + 1}`;
-          const waypointLabel = firstWaypoint?.label ? ` • ${firstWaypoint.label}` : '';
-          return `${title}: ${dateTime}${waypointLabel}`;
+      const passengerItineraryIndices = new Set<number>();
+      passengerWaypointIds.forEach((wpId) => {
+        const idx = waypointItineraryMap.get(wpId);
+        if (typeof idx === 'number') passengerItineraryIndices.add(idx);
+      });
+
+      const filteredGroups = Array.from(itineraryGroups.entries())
+        .filter(([index]) => passengerItineraryIndices.has(index))
+        .sort((a, b) => a[1].firstIndex - b[1].firstIndex);
+
+      const itineraryLines: string[] = [];
+      filteredGroups.forEach(([index, group]) => {
+        const title = index < 0
+          ? `🔄 *${numeroParaOrdinal(Math.abs(index))} Retorno*`
+          : `� *${numeroParaOrdinal(index + 1)} Itinerário*`;
+        const firstWaypoint = group.waypoints[0];
+        const dateTime = formatDateTime(firstWaypoint?.data || osData?.data || null, firstWaypoint?.hora || osData?.hora || null);
+        itineraryLines.push('────────────────');
+        itineraryLines.push(`${title} — ${dateTime}`);
+
+        group.waypoints.forEach((wp, wpIndex) => {
+          const prefix = wpIndex === 0 ? '▶️ Origem' : wpIndex === group.waypoints.length - 1 ? '🏁 Destino final' : `⏹️ Parada ${wpIndex}`;
+          const wpDateTime = wp.data || wp.hora ? ` (${formatDateTime(wp.data, wp.hora)})` : '';
+          const marker = passengerWaypointIds.has(wp.id) ? ' 📍 (seu endereço)' : '';
+          itineraryLines.push(`   ${prefix}: ${wp.label || 'Não informado'}${wpDateTime}${marker}`);
         });
+
+        itineraryLines.push('');
+      });
 
       if (itineraryLines.length > 0) {
         itinerarySummary = itineraryLines.join('\n');
+      } else if (itineraryGroups.size > 0) {
+        itinerarySummary = 'Itinerário geral disponível. Consulte o link para detalhes completos.';
       }
     }
 
@@ -323,7 +387,17 @@ export async function POST(request: Request) {
         cleanPhone = `55${cleanPhone}`;
       }
 
-      const text = `Olá, *${passengerName || 'Passageiro'}*! ✨\n\nPara garantir sua reserva e nos ajudar na organização do trajeto, pedimos a gentileza de *revisar os dados da viagem* clicando no link abaixo:\n\n👇 *Confirmar viagem:*\n${confirmationLink}\n\n🚗 *Motorista:* ${driverName}\n📞 *Contato:* ${driverPhone}\n🪪 *Veículo:* ${vehicleLabel}\n📝 *Placa:* ${vehiclePlate}\n📍 *Seu endereço:* ${passengerAddress}\n🗓️ *Itinerários:*\n${itinerarySummary}\n\n_Após revisar, confirme a viagem no botão da página para garantir que tudo está correto._`;
+      const text = buildPassengerNotificationMessage({
+        passengerName: passengerName || null,
+        osProtocol: osProtocol || null,
+        driverName,
+        driverPhone,
+        vehicleLabel,
+        vehiclePlate,
+        passengerAddress,
+        itinerarySummary,
+        confirmationLink: confirmationLink || '',
+      });
 
       console.log('[notify-passenger] sending WhatsApp to', passengerPhone, 'text length', text.length);
 

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { AlertCircle, CalendarDays, CheckCircle2, MapPin, Phone, Route, User } from 'lucide-react';
+import { CopyableText } from '@/components/CopyableText';
 
 export const runtime = 'edge';
 
@@ -230,7 +231,7 @@ export default async function PassengerShortLinkPage({ params }: PageProps): Pro
   const passengerWaypointIds = new Set<string>();
   if (confirmation.passageiro_id && waypoints.length > 0) {
     const { data: waypointPassengers } = await supabase
-      .from('os_waypoints_passageiros')
+      .from('os_waypoint_passengers')
       .select('waypoint_id, passageiro_id')
       .in('waypoint_id', waypoints.map((wp) => wp.id))
       .eq('passageiro_id', confirmation.passageiro_id);
@@ -244,8 +245,12 @@ export default async function PassengerShortLinkPage({ params }: PageProps): Pro
   }
 
   const itineraryGroups = groupWaypoints(waypoints);
+  const passengerItineraryGroups = itineraryGroups
+    .filter((group) => group.waypoints.some((waypoint) => passengerWaypointIds.has(waypoint.id)))
+    .sort((a, b) => a.firstPosition - b.firstPosition);
+  const filteredItineraryGroups = passengerItineraryGroups.length > 0 ? [passengerItineraryGroups[0]] : [];
   const passengerPrimaryAddress = passengerAddresses[0];
-  const osTitle = os.os_number || os.protocolo || 'Viagem';
+  const osProtocol = os.protocolo || os.os_number || 'Viagem';
   const reviewLink = `/api/passenger-accept?token=${encodeURIComponent(resolvedToken)}`;
 
   return (
@@ -259,7 +264,10 @@ export default async function PassengerShortLinkPage({ params }: PageProps): Pro
                 Confirmar viagem
               </div>
               <div className="space-y-1">
-                <h1 className="text-2xl sm:text-3xl font-black text-slate-900 uppercase tracking-tight">{osTitle}</h1>
+                <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-tight leading-tight">
+                  <span className="text-sm sm:text-base font-semibold text-slate-500 normal-case tracking-normal">Protocolo: </span>
+                  <span className="text-slate-900">{osProtocol}</span>
+                </h1>
                 <p className="text-sm sm:text-base font-semibold text-slate-500">
                   Confira endereço, itinerários, motorista e veículo antes de confirmar.
                 </p>
@@ -304,23 +312,38 @@ export default async function PassengerShortLinkPage({ params }: PageProps): Pro
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-1">
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Motorista</p>
                   <p className="text-sm font-black text-slate-800">{driverName}</p>
-                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-                    <Phone size={12} />
-                    <span>{driverPhone}</span>
+                  <div className="flex items-center gap-2 text-base font-semibold text-slate-600">
+                    <Phone size={16} className="text-slate-400 shrink-0" />
+                    {driverPhone !== 'Não informado' ? (
+                      <CopyableText text={driverPhone} className="text-slate-600">
+                        {driverPhone}
+                      </CopyableText>
+                    ) : (
+                      <span>{driverPhone}</span>
+                    )}
                   </div>
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-1">
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Veículo</p>
                   <p className="text-sm font-black text-slate-800">{vehicleLabel}</p>
-                  <p className="text-xs font-semibold text-slate-500">Placa: {vehiclePlate}</p>
+                  <p className="text-base font-semibold text-slate-600">
+                    Placa:{' '}
+                    {vehiclePlate !== 'Não informado' ? (
+                      <CopyableText text={vehiclePlate} className="text-slate-600">
+                        {vehiclePlate}
+                      </CopyableText>
+                    ) : (
+                      <span>{vehiclePlate}</span>
+                    )}
+                  </p>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <MapPin size={16} className="text-rose-500" />
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Seu endereço</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Itinerário completo</p>
                 </div>
 
                 {passengerPrimaryAddress ? (
@@ -392,9 +415,9 @@ export default async function PassengerShortLinkPage({ params }: PageProps): Pro
               </div>
             </div>
 
-            {itineraryGroups.length > 0 ? (
+            {filteredItineraryGroups.length > 0 ? (
               <div className="space-y-4">
-                {itineraryGroups.map((group) => {
+                {filteredItineraryGroups.map((group) => {
                   const firstWaypoint = group.waypoints[0];
                   const itineraryTitle = group.index < 0 ? 'Retorno' : `Itinerário ${group.index + 1}`;
                   const itineraryDateTime = formatDateTime(firstWaypoint?.data || os.data, firstWaypoint?.hora || os.hora);
@@ -408,7 +431,7 @@ export default async function PassengerShortLinkPage({ params }: PageProps): Pro
                         {group.waypoints.some((waypoint) => passengerWaypointIds.has(waypoint.id)) && (
                           <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-emerald-700">
                             <MapPin size={11} />
-                            Seu endereço
+                            Itinerário completo
                           </span>
                         )}
                       </div>
@@ -435,7 +458,7 @@ export default async function PassengerShortLinkPage({ params }: PageProps): Pro
                 })}
               </div>
             ) : (
-              <p className="text-sm font-semibold text-slate-500">Nenhum itinerário encontrado para esta viagem.</p>
+              <p className="text-sm font-semibold text-slate-500">Nenhum itinerário vinculado a este passageiro foi encontrado para esta viagem.</p>
             )}
           </div>
         </div>

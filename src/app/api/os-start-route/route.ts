@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
+import { buildDriverStartRouteMessage } from '@/lib/os-messages';
 
 export const runtime = 'edge';
 
@@ -110,12 +111,7 @@ export async function POST(request: Request) {
 
         if (driverPhone?.phone) {
           const finishLink = `https://portalgeolog.com.br/finalizar-rota/${osId}`;
-          const message =
-            `🚗 *Rota iniciada!*\n\n` +
-            `KM inicial registrado: *${kmInitial.toLocaleString('pt-BR')}*\n\n` +
-            `Quando chegar ao destino, clique no link abaixo para finalizar a rota e informar apenas o KM final:\n` +
-            `${finishLink}\n\n` +
-            `_Após clicar, o status será atualizado automaticamente no painel._`;
+          const message = buildDriverStartRouteMessage({ kmInitial, finishLink });
           await sendWhatsAppMessage(driverPhone.phone, message);
         }
       }

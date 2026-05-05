@@ -26,6 +26,13 @@ export default function FinalizarRotaPage() {
   const [kmFinal, setKmFinal] = useState('');
   const [kmError, setKmError] = useState('');
 
+  const formatKmInput = (raw: string): string => {
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return '';
+    const num = Number(digits);
+    return num.toLocaleString('pt-BR');
+  };
+
   useEffect(() => {
     if (!osId) return;
 
@@ -60,7 +67,7 @@ export default function FinalizarRotaPage() {
     e.preventDefault();
     setKmError('');
 
-    const km = Number(kmFinal);
+    const km = Number(kmFinal.replace(/\./g, ''));
     if (!kmFinal.trim() || Number.isNaN(km) || km < 0) {
       setKmError('Informe uma quilometragem final válida.');
       return;
@@ -105,7 +112,7 @@ export default function FinalizarRotaPage() {
                 <Flag size={32} className="text-emerald-600" />
               </div>
               <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Finalizar Rota</h1>
-              <p className="text-sm font-semibold text-slate-500">OS {preview.os.os_number || preview.os.protocolo}</p>
+              <p className="text-sm font-semibold text-slate-500">Protocolo: {preview.os.protocolo || preview.os.os_number}</p>
             </div>
 
             <div className="space-y-2">
@@ -115,12 +122,11 @@ export default function FinalizarRotaPage() {
               </label>
               <input
                 id="km-final"
-                type="number"
+                type="text"
                 inputMode="numeric"
-                min={0}
                 value={kmFinal}
-                onChange={(e) => setKmFinal(e.target.value)}
-                placeholder="Ex: 45320"
+                onChange={(e) => setKmFinal(formatKmInput(e.target.value))}
+                placeholder="Ex: 45.320"
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition-all"
                 required
               />

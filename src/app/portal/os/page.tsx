@@ -60,6 +60,7 @@ import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
 import OSCalendar from '@/components/OS/OSCalendar';
 import { useConfirm } from '@/hooks/useConfirm';
 import { BASE_URL } from '@/lib/constants';
+import { buildDriverNotificationMessage, type ItineraryGroup, type PassengerInfo } from '@/lib/os-messages';
 
 type FormPassenger = { id: string; solicitanteId: string; nome: string; };
 type FormWaypoint = { label: string; lat: number | null; lng: number | null; comment: string; passengers: FormPassenger[]; itineraryIndex?: number; hora?: string; data?: string; };
@@ -104,6 +105,34 @@ const getItineraryTitle = (itineraryIndex: number): string => {
   }
   return 'Itinerário';
 };
+
+function numeroParaOrdinal(n: number): string {
+  const unidades = [
+    '', 'Primeiro', 'Segundo', 'Terceiro', 'Quarto', 'Quinto',
+    'Sexto', 'Sétimo', 'Oitavo', 'Nono',
+  ];
+  const especiais: Record<number, string> = {
+    10: 'Décimo', 11: 'Décimo Primeiro', 12: 'Décimo Segundo',
+    13: 'Décimo Terceiro', 14: 'Décimo Quarto', 15: 'Décimo Quinto',
+    16: 'Décimo Sexto', 17: 'Décimo Sétimo', 18: 'Décimo Oitavo', 19: 'Décimo Nono',
+  };
+  const dezenas: Record<number, string> = {
+    2: 'Vigésimo', 3: 'Trigésimo', 4: 'Quadragésimo', 5: 'Quinquagésimo',
+    6: 'Sexagésimo', 7: 'Septuagésimo', 8: 'Octogésimo', 9: 'Nonagésimo',
+  };
+  if (n >= 1 && n <= 9) return unidades[n];
+  if (n >= 10 && n <= 19) return especiais[n] || '';
+  if (n >= 20 && n <= 99) {
+    const d = Math.floor(n / 10);
+    const u = n % 10;
+    const dezenaText = dezenas[d] || '';
+    const unidadeText = u > 0 ? unidades[u] : '';
+    if (dezenaText && unidadeText) return `${dezenaText} ${unidadeText}`;
+    return dezenaText || unidadeText || String(n);
+  }
+  if (n === 100) return 'Centésimo';
+  return String(n);
+}
 
 type QuickAddDriverForm = {
   name: string;
@@ -802,6 +831,21 @@ export default function OSOperationalPage() {
     try {
       await updateOSStatus(osId, { operacional: 'Pendente' });
       await osTable.refresh();
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          await fetch('/api/whatsapp/group', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ osId, event: 'reaberta' }),
+          });
+        }
+      } catch (historyError) {
+        console.error('Erro ao registrar histórico de reabertura no grupo:', historyError);
+      }
     } catch (error) {
       console.error('Error reopening OS:', error);
       toast.error('Não foi possível reabrir a OS.');
@@ -832,6 +876,21 @@ export default function OSOperationalPage() {
       await deleteOS(osId);
       await osTable.refresh();
       setOpenActionMenuId(null);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          await fetch('/api/whatsapp/group', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ osId, event: 'arquivada' }),
+          });
+        }
+      } catch (historyError) {
+        console.error('Erro ao registrar histórico de arquivamento no grupo:', historyError);
+      }
       toast.success('OS arquivada com sucesso!');
     } catch (error) {
       console.error('Erro ao arquivar OS:', error);
@@ -844,6 +903,21 @@ export default function OSOperationalPage() {
     try {
       await updateOSStatus(cancelTargetId, { operacional: 'Cancelado' });
       await osTable.refresh();
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          await fetch('/api/whatsapp/group', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ osId: cancelTargetId, event: 'cancelada' }),
+          });
+        }
+      } catch (historyError) {
+        console.error('Erro ao registrar histórico de cancelamento no grupo:', historyError);
+      }
     } catch (error) {
       console.error('Error canceling OS:', error);
       toast.error('Não foi possível cancelar a OS.');
@@ -975,20 +1049,20 @@ export default function OSOperationalPage() {
     const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
 
     // Veículo da OS ou vinculado ao motorista
-    let vehicleInfo = { tipo: '', placa: '' };
+    let vehicleInfo = { tipo: '', placa: '', marca: '', modelo: '' };
     if (osData.veiculoId) {
       const v = vehicles.find(v => v.id === osData.veiculoId);
-      if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
+      if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '', marca: v.marca || '', modelo: v.modelo || '' };
     } else if (driverObj?.id) {
       const assoc = driverVehiclesAssoc.find(a => a.driver_id === driverObj.id);
       if (assoc) {
         const v = vehicles.find(v => v.id === assoc.vehicle_id);
-        if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
+        if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '', marca: v.marca || '', modelo: v.modelo || '' };
       }
     }
 
     // Passageiros do itinerário
-    const allPassengers: { nome: string; celular: string }[] = [];
+    const allPassengers: PassengerInfo[] = [];
     const waypoints = osData.rota?.waypoints || [];
     waypoints.forEach((wp) => {
       (wp.passengers || []).forEach((p) => {
@@ -998,37 +1072,32 @@ export default function OSOperationalPage() {
         if (!allPassengers.some(x => x.nome === nomeAtual)) {
           allPassengers.push({
             nome: nomeAtual,
-            celular: cel ? cel.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3') : 'Não informado',
+            celular: cel ? cel.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3') : null,
           });
         }
       });
     });
 
-    // Itinerário com observações
-    let itineraryText = '';
-    if (waypoints.length >= 1) {
-      itineraryText = waypoints.map((w, idx) => {
-        const label = w.label.trim();
-        const comment = w.comment?.trim();
-        let line = '';
-        if (idx === 0) line = `🟢 *Origem:* ${label}`;
-        else if (idx === waypoints.length - 1) line = `🔵 *Destino Final:* ${label}`;
-        else line = `🛑 *Parada ${idx}:* ${label}`;
-        if (comment) line += `\n   _Obs: ${comment}_`;
-        return line;
-      }).join('\n\n');
-    }
-
-    // Transporte: usar tipo do veículo
-    const tipoCapitalizado = vehicleInfo.tipo
-      ? vehicleInfo.tipo.charAt(0).toUpperCase() + vehicleInfo.tipo.slice(1)
-      : 'Não informado';
-    const placaDisplay = vehicleInfo.placa || 'Não informada';
-
-    // Passageiros
-    const paxText = allPassengers.length > 0
-      ? allPassengers.map(p => `• ${p.nome}${p.celular !== 'Não informado' ? ` – ${p.celular}` : ''}`).join('\n')
-      : 'Não informado';
+    // Itinerários
+    const itineraries = getItineraries(waypoints as FormWaypoint[]);
+    const itineraryGroups: ItineraryGroup[] = itineraries.map((it) => {
+      const firstWp = it.waypoints[0];
+      const itData = firstWp?.data || osData.data;
+      const itHora = firstWp?.hora || osData.hora;
+      const dateTime = itData
+        ? `${itData.split('-').reverse().join('/')}${itHora ? ` - ${itHora.slice(0, 5)}` : ''}`
+        : (itHora ? itHora.slice(0, 5) : null);
+      return {
+        index: it.index,
+        dateTime,
+        stops: it.waypoints.map((w, relIdx) => ({
+          label: w.label.trim(),
+          comment: w.comment?.trim() || null,
+          isOrigin: relIdx === 0,
+          isDestination: relIdx === it.waypoints.length - 1,
+        })),
+      };
+    });
 
     // Buscar ou criar slug curto para a OS
     let shortSlug = osData.id;
@@ -1056,28 +1125,22 @@ export default function OSOperationalPage() {
 
     const acceptLink = `${BASE_URL}/a/m/${shortSlug}`;
 
-    const osLine = osData.os ? `🆔 *OS:* ${osData.os.toUpperCase()}\n` : '';
-
-    const message =
-      `📋 *Protocolo:* ${osData.protocolo}\n` +
-      `${osLine}` +
-      `📦 *Fornecedor:* Geolog Transporte Executivo\n` +
-      `📅 *Data:* ${osData.data.split('-').reverse().join('/')}\n` +
-      `⏰ *Horário:* ${osData.hora || 'Não informado'}\n` +
-      `🏢 *Empresa:* ${cliente}\n` +
-      `👤 *Solicitante:* ${osData.solicitante || 'Não informado'}\n` +
-      `🚗 *Transporte:* ${tipoCapitalizado}\n\n` +
-      `────────────────\n` +
-      `👥 *Passageiro(s):*\n${paxText}\n\n` +
-      `────────────────\n` +
-      `📍 *Itinerário:*\n${itineraryText}\n\n` +
-      `────────────────\n` +
-      `👨‍✈️ *Motorista:* ${osData.motorista}\n` +
-      `📞 *Contato:* ${driverObj?.phone || 'Não informado'}\n` +
-      `🚘 *Veículo:* ${tipoCapitalizado}\n` +
-      `📝 *Placa:* ${placaDisplay}\n\n` +
-      `👇 *Aceitar o serviço:*\n` +
-      `${acceptLink}\n`;
+    const message = buildDriverNotificationMessage({
+      protocolo: osData.protocolo,
+      osNumber: osData.os || null,
+      fornecedor: 'Geolog Transporte Executivo',
+      empresa: cliente,
+      solicitante: osData.solicitante || null,
+      transporteTipo: vehicleInfo.tipo || null,
+      motorista: osData.motorista,
+      motoristaTelefone: driverObj?.phone || null,
+      veiculoTipo: vehicleInfo.tipo || null,
+      veiculoMarcaModelo: vehicleInfo.marca && vehicleInfo.modelo ? `${vehicleInfo.marca} ${vehicleInfo.modelo}` : null,
+      veiculoPlaca: vehicleInfo.placa || null,
+      passageiros: allPassengers,
+      itineraries: itineraryGroups,
+      acceptLink,
+    });
 
     setNotifyLoadingKey('driver-whatsapp');
     try {
@@ -1131,6 +1194,128 @@ export default function OSOperationalPage() {
       toast.error("Erro ao conectar com a API de WhatsApp.");
     } finally {
       setNotifyLoadingKey(null);
+    }
+  };
+
+  const sendAdminGroupMessage = async (osData: OrderService) => {
+    const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
+
+    // Motorista e contato
+    const driverObj = drivers.find(d =>
+      d.name.trim().toLowerCase() === osData.motorista.trim().toLowerCase()
+    );
+    const driverPhone = driverObj?.phone || 'Não informado';
+
+    // Veículo
+    let vehicleInfo = { tipo: '', placa: '' };
+    if (osData.veiculoId) {
+      const v = vehicles.find(v => v.id === osData.veiculoId);
+      if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
+    } else if (driverObj?.id) {
+      const assoc = driverVehiclesAssoc.find(a => a.driver_id === driverObj.id);
+      if (assoc) {
+        const v = vehicles.find(v => v.id === assoc.vehicle_id);
+        if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '' };
+      }
+    }
+    const tipoCapitalizado = vehicleInfo.tipo
+      ? vehicleInfo.tipo.charAt(0).toUpperCase() + vehicleInfo.tipo.slice(1)
+      : 'Não informado';
+
+    // Passageiros
+    const allPassengers: { nome: string; celular: string }[] = [];
+    const waypoints = osData.rota?.waypoints || [];
+    waypoints.forEach((wp) => {
+      (wp.passengers || []).forEach((p) => {
+        const passRecord = passageiros.find(x => x.id === p.solicitanteId);
+        const cel = passRecord?.celular || '';
+        const nomeAtual = passRecord?.nomeCompleto || 'Não identificado';
+        if (!allPassengers.some(x => x.nome === nomeAtual)) {
+          allPassengers.push({
+            nome: nomeAtual,
+            celular: cel ? cel.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3') : 'Não informado',
+          });
+        }
+      });
+    });
+    const paxText = allPassengers.length > 0
+      ? allPassengers.map(p => `• ${p.nome}${p.celular !== 'Não informado' ? ` – ${p.celular}` : ''}`).join('\n')
+      : 'Não informado';
+
+    // Itinerário com observações (separa ida/retorno)
+    let itineraryText = '';
+    const itineraries = getItineraries(waypoints as FormWaypoint[]);
+    if (itineraries.length > 0) {
+      itineraryText = itineraries.map((it) => {
+        const itTitle = it.index < 0
+          ? `🔄 *${numeroParaOrdinal(Math.abs(it.index))} Retorno*`
+          : `📍 *${numeroParaOrdinal(it.index + 1)} Itinerário*`;
+        const stops = it.waypoints.map((w, relIdx) => {
+          const label = w.label.trim();
+          const comment = w.comment?.trim();
+          let line = '';
+          if (relIdx === 0) line = `🟢 *Origem:* ${label}`;
+          else if (relIdx === it.waypoints.length - 1) line = `🔵 *Destino Final:* ${label}`;
+          else line = `🔘 *Parada ${relIdx}:* ${label}`;
+          if (comment) line += `\n   _Obs: ${comment}_`;
+          return line;
+        }).join('\n\n');
+        return itTitle ? `────────────────\n${itTitle}\n${stops}` : stops;
+      }).join('\n\n');
+    }
+
+    // Financeiro
+    const formatCurrency = (value: number) =>
+      new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+
+    const osLine = osData.os ? `🆔 *OS:* ${osData.os.toUpperCase()}\n` : '';
+
+    const message =
+      `📋 *NOVO ATENDIMENTO*\n` +
+      `📋 *Protocolo:* ${osData.protocolo}\n` +
+      `${osLine}` +
+      `📅 *Data:* ${osData.data.split('-').reverse().join('/')}\n` +
+      `⏰ *Horário:* ${osData.hora || 'Não informado'}\n` +
+      `🏢 *Empresa:* ${cliente}\n` +
+      `👤 *Solicitante:* ${osData.solicitante || 'Não informado'}\n\n` +
+      `────────────────\n` +
+      `👥 *Passageiro(s):*\n${paxText}\n\n` +
+      `────────────────\n` +
+      `📍 *Itinerário:*\n${itineraryText || 'Não informado'}\n\n` +
+      `────────────────\n` +
+      `👨‍✈️ *Motorista:* ${osData.motorista}\n` +
+      `📞 *Contato:* ${driverPhone}\n` +
+      `🚘 *Veículo:* ${tipoCapitalizado}\n` +
+      `📝 *Placa:* ${vehicleInfo.placa || 'Não informada'}\n\n` +
+      `────────────────\n` +
+      `💰 *Financeiro:*\n` +
+      `• Valor Bruto: ${formatCurrency(osData.valorBruto ?? 0)}\n` +
+      `• Custo Motorista: ${formatCurrency(osData.custo ?? 0)}\n` +
+      `• Lucro Líquido: ${formatCurrency(osData.lucro ?? 0)}`;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch('/api/whatsapp/group', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ message }),
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        console.error('[AdminGroup] Falha ao enviar relatório administrativo:', result);
+        toast.error(`Relatório administrativo não enviado: ${result.error || 'Erro desconhecido'}`);
+      } else {
+        toast.success('Relatório administrativo enviado ao grupo!');
+      }
+    } catch (err) {
+      console.error('[AdminGroup] Erro crítico:', err);
+      toast.error('Erro ao enviar relatório administrativo ao grupo.');
     }
   };
 
@@ -2141,6 +2326,8 @@ export default function OSOperationalPage() {
         if (notificationConfig.auto) {
           void processAutoNotifications(newOSId.id);
         }
+        // Enviar relatório administrativo obrigatoriamente ao grupo de Programações
+        void sendAdminGroupMessage(newOSId);
       }
     } catch (error) {
       console.error('Error saving OS:', error);
@@ -3787,13 +3974,13 @@ export default function OSOperationalPage() {
                     },
                     {
                       id: 'accepted',
-                      icon: <CheckCircle2 size={20} />,
+                      icon: <Handshake size={20} />,
                       label: 'Aceite',
                       sublabel: driverFlow.accepted ? 'Confirmado' : 'Aguardando',
                       active: driverFlow.accepted,
                       color: 'emerald-light',
                       timestamp: viewingOS?.driverAcceptedAt,
-                      km: viewingOS?.driverKmInitial,
+                      km: undefined as number | undefined,
                     },
                     {
                       id: 'started',
@@ -3803,7 +3990,7 @@ export default function OSOperationalPage() {
                       active: driverFlow.started,
                       color: 'blue',
                       timestamp: viewingOS?.routeStartedAt,
-                      km: viewingOS?.routeStartedKm ?? viewingOS?.driverKmInitial,
+                      km: viewingOS?.routeStartedKm,
                     },
                     {
                       id: 'finished',

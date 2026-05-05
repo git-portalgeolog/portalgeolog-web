@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { sendAdminOSHistoryToGroup } from '@/lib/whatsapp';
 
 export const runtime = 'edge';
 
@@ -118,6 +119,12 @@ export async function POST(request: Request) {
         { success: false, error: 'Erro ao finalizar a rota.' },
         { status: 500 }
       );
+    }
+
+    try {
+      await sendAdminOSHistoryToGroup(osId, 'concluida', process.env.WAHA_SESSION || 'default');
+    } catch (historyError) {
+      console.error('Erro ao enviar histórico de conclusão para o grupo:', historyError);
     }
 
     return NextResponse.json({

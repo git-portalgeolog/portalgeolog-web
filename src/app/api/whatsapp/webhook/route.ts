@@ -363,7 +363,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'start prompt update failed' }, { status: 500 });
           }
 
-          await sendBotReply(replyChatId, `🚦 *Iniciar Rota*${vehicleText}\n\nDigite a *quilometragem inicial* do veículo:`);
+          await sendBotReply(replyChatId, `🚦 *Iniciar Rota*${vehicleText}\n\n📋 *Protocolo:* ${os.protocolo || os.os_number || 'Não informado'}\n\nDigite a *quilometragem inicial* do veículo:`);
           return NextResponse.json({ success: true, action: 'start_prompt', osId: os.id });
         }
 
@@ -407,7 +407,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'finish prompt update failed' }, { status: 500 });
           }
 
-          await sendBotReply(replyChatId, '🏁 *Finalizar Viagem*\n\nDigite a *quilometragem final* do veículo:');
+          await sendBotReply(replyChatId, `🏁 *Finalizar Viagem*\n\n📋 *Protocolo:* ${os.protocolo || os.os_number || 'Não informado'}\n\nDigite a *quilometragem final* do veículo:`);
           return NextResponse.json({ success: true, action: 'finish_prompt', osId: os.id });
         }
 
@@ -441,7 +441,10 @@ export async function POST(request: Request) {
           }
 
           const diffText = diff > 0 ? `\n📏 *KM percorrido:* ${fmtKm(diff)}` : '';
-          await sendBotReply(replyChatId, `✅ *OS finalizada com sucesso!*${diffText}\n\nKM final: *${fmtKm(km)}*\n\nObrigado! 🙏`);
+          await sendBotReply(
+            replyChatId,
+            `✅ *Serviço finalizado com sucesso!*${diffText}\n\nKM final: *${fmtKm(km)}*\n\n🌟 *Portal Geolog agradece seus serviços!*\nSua dedicação faz toda a diferença. 🤝🚗\n\nAté a próxima! �`
+          );
           return NextResponse.json({ success: true, action: 'route_finished', osId: os.id, km });
         }
 

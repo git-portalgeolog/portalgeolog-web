@@ -246,6 +246,306 @@ export async function sendWhatsAppMessage(
   return data;
 }
 
+function normalizeString(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function normalizeWahaChatId(value: unknown): string | null {
+  if (typeof value === 'string') {
+    return value.trim() || null;
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as {
+      _serialized?: unknown;
+      id?: unknown;
+      chatId?: unknown;
+      serialized?: unknown;
+    };
+
+    const candidates = [record._serialized, record.id, record.chatId, record.serialized];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  }
+
+  return null;
+}
+
+export type AdminOSHistoryEvent = 'cancelada' | 'reaberta' | 'arquivada' | 'concluida';
+
+function formatHistoryDate(value: string | null | undefined): string {
+  if (!value) return 'Não informado';
+  if (value.includes('/')) return value;
+
+  const parts = value.split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    if (year && month && day) {
+      return `${day}/${month}/${year}`;
+    }
+  }
+
+  return value;
+}
+
+function formatHistoryTime(value: string | null | undefined): string {
+  if (!value) return 'Não informado';
+  return value.slice(0, 5);
+}
+
+function formatAdminEventLabel(event: AdminOSHistoryEvent): string {
+  switch (event) {
+    case 'cancelada':
+      return 'Cancelada';
+    case 'reaberta':
+      return 'Reaberta';
+    case 'arquivada':
+      return 'Arquivada';
+    case 'concluida':
+      return 'Concluída';
+    default:
+      return event;
+  }
+}
+
+function getAdminSupabaseClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceRole) {
+    throw new Error('Supabase service role não configurado para envio de histórico administrativo.');
+  }
+
+  return createClient(url, serviceRole, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+}
+
+export async function sendAdminOSHistoryToGroup(
+  osId: string,
+  event: AdminOSHistoryEvent,
+  sessionName?: string
+): Promise<unknown> {
+  const adminSupabase = getAdminSupabaseClient();
+  const resolvedSession = sessionName ?? getWahaConfig().session;
+
+  const { data: osData, error: osError } = await adminSupabase
+    .from('ordens_servico')
+    .select('id, protocolo, os_number, data, hora, motorista, solicitante, cliente_id, veiculo_id, status_operacional, arquivado')
+    .eq('id', osId)
+    .maybeSingle();
+
+  if (osError) throw osError;
+  if (!osData) {
+    throw new Error('Ordem de serviço não encontrada para histórico administrativo.');
+  }
+
+  const os = osData as {
+    id: string;
+    protocolo: string | null;
+    os_number: string | null;
+    data: string | null;
+    hora: string | null;
+    motorista: string | null;
+    solicitante: string | null;
+    cliente_id: string | null;
+    veiculo_id: string | null;
+    status_operacional: string | null;
+    arquivado: boolean | null;
+  };
+
+  const clienteId = os.cliente_id;
+  let clienteNome = 'Não informado';
+  if (clienteId) {
+    const { data: clienteData } = await adminSupabase.from('clientes').select('nome').eq('id', clienteId).maybeSingle();
+    clienteNome = (clienteData as { nome?: string } | null)?.nome || clienteNome;
+  }
+
+  let vehicleLabel = 'Não informado';
+  let vehiclePlate = 'Não informado';
+  if (os.veiculo_id) {
+    const { data: vehicleData } = await adminSupabase
+      .from('veiculos')
+      .select('marca, modelo, placa')
+      .eq('id', os.veiculo_id)
+      .maybeSingle();
+
+    const vehicle = vehicleData as { marca?: string | null; modelo?: string | null; placa?: string | null } | null;
+    const parts = [vehicle?.marca, vehicle?.modelo].filter(Boolean).map(String);
+    vehicleLabel = parts.length > 0 ? parts.join(' ') : 'Não informado';
+    vehiclePlate = vehicle?.placa || 'Não informado';
+  }
+
+  const { data: waypointsData, error: waypointsError } = await adminSupabase
+    .from('os_waypoints')
+    .select('label, comment, position')
+    .eq('ordem_servico_id', osId)
+    .order('position');
+
+  if (waypointsError) throw waypointsError;
+
+  const waypoints = ((waypointsData || []) as Array<{ label?: string | null; comment?: string | null; position?: number | null }>).sort(
+    (a, b) => (a.position ?? 0) - (b.position ?? 0)
+  );
+  const itinerarySummary =
+    waypoints.length > 0
+      ? `${waypoints[0]?.label || 'Não informado'} → ${waypoints[waypoints.length - 1]?.label || 'Não informado'}`
+      : 'Não informado';
+
+  const message = [
+    '📚 *HISTÓRICO ADMINISTRATIVO DA OS*',
+    '',
+    `🧾 *Evento:* ${formatAdminEventLabel(event)}`,
+    `📋 *Protocolo:* ${os.protocolo || 'Não informado'}`,
+    os.os_number ? `🆔 *OS:* ${os.os_number}` : undefined,
+    `🏢 *Cliente:* ${clienteNome}`,
+    `👤 *Solicitante:* ${os.solicitante || 'Não informado'}`,
+    `👨‍✈️ *Motorista:* ${os.motorista || 'Não informado'}`,
+    `🚘 *Veículo:* ${vehicleLabel}`,
+    `📝 *Placa:* ${vehiclePlate}`,
+    `📍 *Itinerário:* ${itinerarySummary}`,
+    `📅 *Data:* ${formatHistoryDate(os.data)}`,
+    `⏰ *Horário:* ${formatHistoryTime(os.hora)}`,
+    `📌 *Status atual:* ${os.arquivado ? 'Arquivada' : (os.status_operacional || 'Não informado')}`,
+    `🕒 *Registrado em:* ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const groupId = await findWahaGroupByName('Programações Solicitadas', resolvedSession);
+  if (!groupId) {
+    throw new Error('Grupo "Programações Solicitadas" não encontrado na sessão WAHA.');
+  }
+
+  return sendWhatsAppGroupMessage(groupId, message, resolvedSession);
+}
+
+export async function findWahaGroupByName(
+  groupName: string,
+  sessionName?: string
+): Promise<string | null> {
+  const { url: WAHA_API_URL, key: WAHA_API_KEY, session: WAHA_SESSION } = getWahaConfig();
+  const resolvedSession = sessionName ?? WAHA_SESSION;
+  if (!WAHA_API_URL || !WAHA_API_KEY) {
+    throw new Error('WAHA não configurada (faltam variáveis de ambiente)');
+  }
+
+  const currentState = await fetchWahaSessionState(resolvedSession);
+  if (currentState.state !== 'open') {
+    throw new Error(
+      `Sessão WAHA indisponível no momento (${currentState.state}). Refaça a conexão antes de enviar.`
+    );
+  }
+
+  const url = `${WAHA_API_URL}/api/${encodeURIComponent(resolvedSession)}/groups?limit=1000`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'X-Api-Key': WAHA_API_KEY,
+      Accept: 'application/json',
+    },
+    signal: AbortSignal.timeout(WAHA_STATUS_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(`WAHA error ${response.status}: não foi possível listar grupos.`);
+  }
+
+  const payload = await response.json().catch(() => null);
+  const groups = Array.isArray(payload)
+    ? payload
+    : Array.isArray((payload as { groups?: unknown[] } | null)?.groups)
+      ? (payload as { groups: unknown[] }).groups
+      : [];
+
+  const targetNormalized = normalizeString(groupName);
+
+  for (const item of groups as Array<{ id?: unknown; subject?: string; name?: string }>) {
+    const itemName = item.subject || item.name || '';
+    if (normalizeString(itemName) === targetNormalized) {
+      return normalizeWahaChatId(item.id);
+    }
+  }
+
+  return null;
+}
+
+export async function sendWhatsAppGroupMessage(
+  groupId: string,
+  message: string,
+  sessionName?: string
+): Promise<unknown> {
+  const { url: WAHA_API_URL, key: WAHA_API_KEY, session: WAHA_SESSION } = getWahaConfig();
+  const resolvedSession = sessionName ?? WAHA_SESSION;
+  if (!WAHA_API_URL || !WAHA_API_KEY) {
+    throw new Error('WAHA não configurada (faltam variáveis de ambiente)');
+  }
+
+  validateMessage(message);
+  const normalizedGroupId = normalizeWahaChatId(groupId);
+
+  if (!normalizedGroupId) {
+    throw new Error('ID do grupo WAHA inválido');
+  }
+
+  const currentState = await fetchWahaSessionState(resolvedSession);
+  if (currentState.state !== 'open') {
+    throw new Error(
+      `Sessão WAHA indisponível no momento (${currentState.state}). Refaça a conexão antes de enviar.`
+    );
+  }
+
+  const url = `${WAHA_API_URL}/api/sendText`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Api-Key': WAHA_API_KEY,
+    },
+    body: JSON.stringify({
+      session: resolvedSession,
+      chatId: normalizedGroupId,
+      text: message,
+    }),
+    signal: AbortSignal.timeout(WAHA_SEND_TIMEOUT_MS),
+  });
+
+  const responseText = await response.text().catch(() => '');
+  let data: Record<string, unknown> | string = {};
+
+  if (responseText) {
+    try {
+      data = JSON.parse(responseText) as Record<string, unknown>;
+    } catch {
+      data = responseText;
+    }
+  }
+
+  if (!response.ok) {
+    const payload = typeof data === 'string' ? data : JSON.stringify(data);
+    throw new Error(
+      response.status === 524
+        ? 'WAHA demorou demais para responder (524). Verifique se a sessão está conectada.'
+        : `WAHA error ${response.status}: ${payload}`
+    );
+  }
+
+  return data;
+}
+
 export async function sendWhatsAppList(
   phone: string,
   title: string,

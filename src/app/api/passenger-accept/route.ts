@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { sendWhatsAppMessage } from '@/lib/whatsapp';
 
 export const runtime = 'edge';
 
@@ -53,9 +54,43 @@ export async function GET(request: Request) {
       );
     }
 
+    let messageSent = false;
+    try {
+      const { data: passengerData } = await getAdmin()
+        .from('passageiros')
+        .select('nome_completo, celular')
+        .eq('id', confirmation.passageiro_id)
+        .maybeSingle();
+
+      const { data: osData } = await getAdmin()
+        .from('ordens_servico')
+        .select('motorista')
+        .eq('id', confirmation.os_id)
+        .maybeSingle();
+
+      if (passengerData?.celular) {
+        const passengerName = passengerData.nome_completo?.split(' ')[0] || 'Passageiro';
+        const driverName = osData?.motorista?.split(' ')[0] || 'Motorista';
+        const thanksMessage =
+          `✅ *Confirmação recebida!*\n\n` +
+          `Obrigado, *${passengerName}*! Sua viagem foi confirmada com sucesso.\n\n` +
+          `🚗 *Motorista:* ${driverName}\n` +
+          `⏰ *Horário:* ${now.slice(11, 16)}\n\n` +
+          `Aguarde a chegada do veículo no local combinado. Qualquer alteração, entraremos em contato.\n\n` +
+          `_Portal Geolog - Sua viagem, nossa prioridade._`;
+
+        await sendWhatsAppMessage(passengerData.celular, thanksMessage);
+        messageSent = true;
+      }
+    } catch (notifyErr) {
+      console.error('[passenger-accept] Erro ao enviar agradecimento WhatsApp:', notifyErr);
+    }
+
     return NextResponse.json({
       success: true,
-      message: 'Viagem confirmada com sucesso! O motorista será notificado.',
+      message: messageSent
+        ? 'Viagem confirmada com sucesso! O motorista será notificado.'
+        : 'Viagem confirmada com sucesso!',
     });
   } catch (error: unknown) {
     console.error('🔥 Erro passenger-accept:', error);

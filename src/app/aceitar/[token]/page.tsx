@@ -134,9 +134,9 @@ export default function AceitarViagemPage() {
             <div className="text-center space-y-2">
               <Car size={40} className="text-blue-600 mx-auto" />
               <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Confirmar Aceite</h1>
-              <p className="text-sm font-semibold text-slate-500">OS {preview.os.os_number || preview.os.protocolo}</p>
+              <p className="text-sm font-semibold text-slate-500">Protocolo: {preview.os.protocolo || preview.os.os_number}</p>
               <p className="text-xs text-slate-400">
-                {preview.os.data} {preview.os.hora || ''}
+                {preview.os.data ? preview.os.data.split('-').reverse().join('/') : ''} {preview.os.hora || ''}
               </p>
             </div>
 
@@ -159,12 +159,19 @@ export default function AceitarViagemPage() {
 
         {status === 'success' && (
           <>
-            <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto">
-              <CheckCircle2 size={32} className="text-green-600" />
+            <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
+              <CheckCircle2 size={32} className="text-emerald-600" />
             </div>
             <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Viagem Confirmada</h1>
-            <p className="text-sm font-semibold text-slate-500">{message}</p>
-            <p className="text-xs font-medium text-slate-400 pt-2">Aguarde a próxima instrução no WhatsApp.</p>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-slate-500">{message}</p>
+              <p className="text-xs font-medium text-slate-400">
+                Obrigado por confirmar! O motorista foi notificado e já está se preparando para o trajeto.
+              </p>
+              <p className="text-xs font-medium text-slate-400 pt-2">
+                Aguarde a chegada do veículo no local combinado. Qualquer alteração, entraremos em contato pelo WhatsApp.
+              </p>
+            </div>
           </>
         )}
 
