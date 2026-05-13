@@ -1,16 +1,27 @@
-'use client';
+"use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { User, Session } from '@supabase/supabase-js';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+} from "react";
+import { createClient } from "@/lib/supabase/client";
+import { User, Session } from "@supabase/supabase-js";
 
-import { toast } from 'sonner';
+import { toast } from "sonner";
 
 export interface UserProfile {
   id: string;
   nome: string;
-  tipo_usuario: 'interno' | 'gestor';
-  categoria: 'administrador' | 'gestor' | 'financeiro' | 'operador' | 'jovem aprendiz';
+  tipo_usuario: "interno" | "gestor";
+  categoria:
+    | "administrador"
+    | "gestor"
+    | "financeiro"
+    | "operador"
+    | "jovem aprendiz";
   empresa_id?: string;
   avatar_url?: string | null;
 }
@@ -38,31 +49,46 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const supabase = createClient();
 
   // Buscar perfil inicial
-  const fetchProfile = useCallback(async (userId: string) => {
-    try {
-      // Usar a rota de API ou garantir que a tabela existe via check silencioso
-      const { data, error } = await supabase.from('user_roles').select('*').eq('id', userId).single();
-      
-      if (error) {
-        if (error.code === 'PGRST204' || error.message.includes('not found')) {
-           console.warn('user_roles table not found or user has no role yet.');
-           setLoading(false);
-           return;
-        }
-        throw error;
-      }
+  const fetchProfile = useCallback(
+    async (userId: string) => {
+      try {
+        // Usar a rota de API ou garantir que a tabela existe via check silencioso
+        const { data, error } = await supabase
+          .from("user_roles")
+          .select("*")
+          .eq("id", userId)
+          .single();
 
-      if (data) setProfile(data as UserProfile);
-    } catch (err) {
-      console.error('Erro ao buscar perfil:', err instanceof Error ? err.message : JSON.stringify(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [supabase]);
+        if (error) {
+          if (
+            error.code === "PGRST204" ||
+            error.message.includes("not found")
+          ) {
+            console.warn("user_roles table not found or user has no role yet.");
+            setLoading(false);
+            return;
+          }
+          throw error;
+        }
+
+        if (data) setProfile(data as UserProfile);
+      } catch (err) {
+        console.error(
+          "Erro ao buscar perfil:",
+          err instanceof Error ? err.message : JSON.stringify(err),
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [supabase],
+  );
 
   useEffect(() => {
     const initializeAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (session?.user) {
         setUser(session.user);
@@ -76,7 +102,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     initializeAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
       (event: string, session: Session | null) => {
         if (session) {
           setUser(session.user);
@@ -86,7 +114,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setProfile(null);
           setLoading(false);
         }
-      }
+      },
     );
 
     return () => {
@@ -100,35 +128,45 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const channel = supabase
       .channel(`profile_changes_${user.id}`)
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'user_roles',
-        filter: `id=eq.${user.id}`
-      }, (payload: unknown) => {
-         const newProfile = (payload as { new: UserProfile }).new;
-         
-         if (profile && profile.categoria !== newProfile.categoria) {
-            toast.warning(`Seu nível de acesso foi alterado pelo administrador para: ${newProfile.categoria.toUpperCase()}`);
-         }
-         
-         setProfile(newProfile);
-      })
-      .on('postgres_changes', { 
-        event: 'DELETE', 
-        schema: 'public', 
-        table: 'user_roles',
-        filter: `id=eq.${user.id}`
-      }, () => {
-         toast.error('O seu acesso corporativo foi revogado. Saindo...');
-         logout();
-      })
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "user_roles",
+          filter: `id=eq.${user.id}`,
+        },
+        (payload: unknown) => {
+          const newProfile = (payload as { new: UserProfile }).new;
+
+          if (profile && profile.categoria !== newProfile.categoria) {
+            toast.warning(
+              `Seu nível de acesso foi alterado pelo administrador para: ${newProfile.categoria.toUpperCase()}`,
+            );
+          }
+
+          setProfile(newProfile);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "user_roles",
+          filter: `id=eq.${user.id}`,
+        },
+        () => {
+          toast.error("O seu acesso corporativo foi revogado. Saindo...");
+          logout();
+        },
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, profile, supabase]);
 
   const login = async (email: string, password: string) => {
@@ -139,13 +177,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
 
       if (error) {
-        console.error('Login error:', error.message);
+        console.error("Login error:", error.message);
         return false;
       }
-      
+
       return !!data.user;
     } catch (err) {
-      console.error('Login unexpected error:', err);
+      console.error("Login unexpected error:", err);
       return false;
     }
   };
@@ -162,4 +200,3 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 };
 
 export const useAuth = () => useContext(AuthContext);
-

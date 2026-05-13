@@ -23,11 +23,11 @@ export default {
       },
       has(target, prop) {
         return prop in target || prop in env;
-      }
+      },
     });
 
     const { default: handler } = await import("../dist/server/index.js");
 
     return handler(request, ctx);
-  }
+  },
 };

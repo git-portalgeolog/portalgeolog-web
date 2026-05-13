@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import React from 'react';
-import { Plus } from 'lucide-react';
+import React from "react";
+import { Plus } from "lucide-react";
 
 export interface PageHeaderProps {
   title: string;
@@ -16,7 +16,7 @@ export function PageHeader({
   icon,
   buttonText,
   onButtonClick,
-  buttonIcon = <Plus size={18} />
+  buttonIcon = <Plus size={18} />,
 }: PageHeaderProps) {
   return (
     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -25,7 +25,9 @@ export function PageHeader({
           <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shadow-sm">
             {icon}
           </div>
-          <h1 className="text-2xl font-black text-[var(--color-geolog-blue)]">{title}</h1>
+          <h1 className="text-2xl font-black text-[var(--color-geolog-blue)]">
+            {title}
+          </h1>
         </div>
       </div>
       {buttonText && (

@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import React from 'react';
-import { createPortal } from 'react-dom';
-import { AlertTriangle, X } from 'lucide-react';
+import React from "react";
+import { createPortal } from "react-dom";
+import { AlertTriangle, X } from "lucide-react";
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -12,7 +12,7 @@ interface ConfirmDialogProps {
   message: string;
   confirmText?: string;
   cancelText?: string;
-  type?: 'danger' | 'warning' | 'info';
+  type?: "danger" | "warning" | "info";
 }
 
 export default function ConfirmDialog({
@@ -21,9 +21,9 @@ export default function ConfirmDialog({
   onConfirm,
   title,
   message,
-  confirmText = 'Confirmar',
-  cancelText = 'Cancelar',
-  type = 'danger'
+  confirmText = "Confirmar",
+  cancelText = "Cancelar",
+  type = "danger",
 }: ConfirmDialogProps) {
   if (!isOpen) return null;
 
@@ -34,19 +34,27 @@ export default function ConfirmDialog({
 
   const getIconColor = () => {
     switch (type) {
-      case 'danger': return 'text-red-600';
-      case 'warning': return 'text-yellow-600';
-      case 'info': return 'text-blue-600';
-      default: return 'text-red-600';
+      case "danger":
+        return "text-red-600";
+      case "warning":
+        return "text-yellow-600";
+      case "info":
+        return "text-blue-600";
+      default:
+        return "text-red-600";
     }
   };
 
   const getConfirmButtonStyle = () => {
     switch (type) {
-      case 'danger': return 'bg-red-600 hover:bg-red-700 text-white';
-      case 'warning': return 'bg-yellow-600 hover:bg-yellow-700 text-white';
-      case 'info': return 'bg-blue-600 hover:bg-blue-700 text-white';
-      default: return 'bg-red-600 hover:bg-red-700 text-white';
+      case "danger":
+        return "bg-red-600 hover:bg-red-700 text-white";
+      case "warning":
+        return "bg-yellow-600 hover:bg-yellow-700 text-white";
+      case "info":
+        return "bg-blue-600 hover:bg-blue-700 text-white";
+      default:
+        return "bg-red-600 hover:bg-red-700 text-white";
     }
   };
 
@@ -89,6 +97,6 @@ export default function ConfirmDialog({
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 }

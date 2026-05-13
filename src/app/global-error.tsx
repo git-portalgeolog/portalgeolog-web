@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { useEffect } from "react";
+import { AlertCircle } from "lucide-react";
 
 export default function GlobalError({
   error,

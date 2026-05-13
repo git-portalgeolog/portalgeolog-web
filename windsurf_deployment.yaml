@@ -1,0 +1,29 @@
+description: Procedimento atual de deploy manual com Wrangler para portalgeolog-web
+steps:
+  - title: Validar o build local
+    command: npm run build
+    notes:
+      - O build deve concluir sem erros antes de qualquer deploy.
+      - O artefato de deploy é gerado em dist/client e dist/server.
+  - title: Conferir os secrets já cadastrados no Cloudflare
+    command: npx wrangler secret list --config wrangler.workers.toml
+    notes:
+      - Os segredos esperados incluem SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY, WHATSAPP_HOOK_HMAC_KEY, WAHA_API_KEY, WAHA_SSH_PASSWORD e quaisquer outros usados pelo runtime.
+      - Se algum secret estiver ausente, ele deve ser enviado antes do deploy.
+  - title: Publicar os secrets a partir do ambiente local
+    command: npx wrangler secret put <SECRET_NAME> --config wrangler.workers.toml
+    notes:
+      - Ler os valores a partir das variáveis de ambiente já carregadas no terminal ou do arquivo .env.local.
+      - Repetir o comando para cada secret ausente ou desatualizado.
+      - Não registrar os valores em log.
+  - title: Executar o deploy manual do Worker
+    command: npx wrangler deploy --config wrangler.workers.toml
+    notes:
+      - Este é o procedimento oficial atual para produção.
+      - O arquivo wrangler.workers.toml aponta para worker/index.js e serve os assets de dist/client.
+      - O deploy deve usar os compatibility_flags nodejs_compat e nodejs_compat_populate_process_env.
+  - title: Verificar o resultado pós-deploy
+    command: npx wrangler deployments list --config wrangler.workers.toml
+    notes:
+      - Confirmar que o Worker foi publicado com sucesso.
+      - Caso o site esteja atrás de rota customizada, validar portalgeolog.com.br.

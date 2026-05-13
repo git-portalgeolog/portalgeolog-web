@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, UserProfile } from "@/context/AuthContext";
 
 interface UserWithAuth extends UserProfile {
@@ -30,15 +30,16 @@ import {
   DollarSign,
   Percent,
   Smartphone,
+  RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import GeologSearchableSelect from "@/components/ui/GeologSearchableSelect";
 import StandardModal from "@/components/StandardModal";
 import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { useData } from "@/context/DataContext";
-import WahaConnectionsPanel from "@/components/WahaConnectionsPanel";
+// Removido: WahaConnectionsPanel (substituído por Meta API oficial)
 
-type TabType = "acesso" | "perfil" | "historico" | "financeiro" | "conexoes";
+type TabType = "acesso" | "perfil" | "historico" | "financeiro";
 
 export default function ConfigPage() {
   const { user, profile, logout } = useAuth();
@@ -46,10 +47,14 @@ export default function ConfigPage() {
   const { impostoPercentual, setImpostoPercentual } = useData();
   const [activeTab, setActiveTab] = useState<TabType>("acesso");
   const [users, setUsers] = useState<UserWithAuth[]>([]);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [isUsersLoading, setIsUsersLoading] = useState(false);
   const [jurosInput, setJurosInput] = useState(String(impostoPercentual));
   const [isSavingJuros, setIsSavingJuros] = useState(false);
   const [isDateModalOpen, setIsDateModalOpen] = useState(false);
-  const [effectiveDate, setEffectiveDate] = useState(new Date().toISOString().split('T')[0]);
+  const [effectiveDate, setEffectiveDate] = useState(
+    new Date().toISOString().split("T")[0],
+  );
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -65,22 +70,59 @@ export default function ConfigPage() {
     categoria: "operador",
   });
 
-  useEffect(() => {
-    if (activeTab === "acesso") {
-      fetchUsers();
+  const formatErrorMessage = (err: unknown): string => {
+    if (err instanceof Error) return err.message;
+    if (typeof err === "string") return err;
+    if (err && typeof err === "object" && "message" in err) {
+      const message = (err as { message?: unknown }).message;
+      if (typeof message === "string" && message.trim()) return message;
     }
-  }, [activeTab]);
+    return "Falha inesperada ao salvar a configuração.";
+  };
 
-  const fetchUsers = async () => {
+  const formatUsersErrorMessage = (err: unknown): string => {
+    const rawMessage =
+      err instanceof Error ? err.message : typeof err === "string" ? err : "";
+
+    if (rawMessage.includes("SUPABASE_SERVICE_ROLE_KEY is required")) {
+      return "A gestão de acesso está indisponível neste ambiente. Configure o secret SUPABASE_SERVICE_ROLE_KEY no servidor para listar os usuários.";
+    }
+
+    if (rawMessage.trim()) {
+      return rawMessage;
+    }
+
+    return "Erro inesperado ao carregar usuários.";
+  };
+
+  const fetchUsers = useCallback(async () => {
     try {
+      setIsUsersLoading(true);
+      setUsersError(null);
+
       const res = await fetch("/api/users");
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha ao buscar usuários");
+
+      if (!res.ok) {
+        throw new Error(
+          data.error ||
+            "Não foi possível carregar a gestão de acesso neste momento.",
+        );
+      }
+
       setUsers(data);
     } catch (err: unknown) {
-      toast.error("Erro ao carregar usuários: " + (err instanceof Error ? err.message : String(err)));
+      setUsersError(formatUsersErrorMessage(err));
+    } finally {
+      setIsUsersLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "acesso" && profile?.categoria === "administrador") {
+      void fetchUsers();
+    }
+  }, [activeTab, profile?.categoria, fetchUsers]);
 
   const updateUserRole = async (
     userId: string,
@@ -105,10 +147,14 @@ export default function ConfigPage() {
 
       toast.success("Permissão atualizada com sucesso!");
     } catch (err: unknown) {
-      toast.error("Erro ao atualizar permissão: " + (err instanceof Error ? err.message : String(err)));
+      toast.error(
+        "Erro ao atualizar permissão: " + formatUsersErrorMessage(err),
+      );
       fetchUsers();
     }
   };
+
+  const isAccessAdmin = profile?.categoria === "administrador";
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,7 +186,10 @@ export default function ConfigPage() {
       });
       fetchUsers();
     } catch (err: unknown) {
-      toast.error("Erro ao criar login: " + (err instanceof Error ? err.message : String(err)));
+      toast.error(
+        "Erro ao criar login: " +
+          (err instanceof Error ? err.message : String(err)),
+      );
     } finally {
       setIsCreatingUser(false);
     }
@@ -154,11 +203,12 @@ export default function ConfigPage() {
 
     if (
       !(await confirm({
-        title: 'Excluir Acesso',
-        message: 'Tem certeza que deseja excluir permanentemente este acesso? Esta ação não pode ser desfeita.',
-        confirmText: 'Sim, excluir',
-        cancelText: 'Cancelar',
-        type: 'danger'
+        title: "Excluir Acesso",
+        message:
+          "Tem certeza que deseja excluir permanentemente este acesso? Esta ação não pode ser desfeita.",
+        confirmText: "Sim, excluir",
+        cancelText: "Cancelar",
+        type: "danger",
       }))
     )
       return;
@@ -172,7 +222,10 @@ export default function ConfigPage() {
       toast.success("Acesso removido com sucesso.");
       fetchUsers();
     } catch (err: unknown) {
-      toast.error("Erro ao excluir: " + (err instanceof Error ? err.message : String(err)));
+      toast.error(
+        "Erro ao excluir: " +
+          (err instanceof Error ? err.message : String(err)),
+      );
     }
   };
 
@@ -209,7 +262,10 @@ export default function ConfigPage() {
       setIsEditingName(false);
       setEditingName("");
     } catch (err: unknown) {
-      toast.error("Erro ao atualizar nome: " + (err instanceof Error ? err.message : String(err)));
+      toast.error(
+        "Erro ao atualizar nome: " +
+          (err instanceof Error ? err.message : String(err)),
+      );
     } finally {
       setIsUpdatingName(false);
     }
@@ -251,7 +307,6 @@ export default function ConfigPage() {
     { id: "perfil", label: "Meu Perfil", icon: User },
     { id: "historico", label: "Histórico de Logs", icon: History },
     { id: "financeiro", label: "Financeiro", icon: DollarSign },
-    { id: "conexoes", label: "Conexões", icon: Smartphone },
   ];
 
   return (
@@ -321,7 +376,7 @@ export default function ConfigPage() {
                           </p>
                         </div>
                       </div>
-                      {profile?.categoria === "administrador" && (
+                      {isAccessAdmin && (
                         <button
                           onClick={() => setIsCreateModalOpen(true)}
                           className="flex items-center gap-2 bg-[var(--color-geolog-blue)] text-white px-6 py-3 rounded-xl font-black shadow-lg shadow-blue-900/10 hover:scale-[1.02] active:scale-95 transition-all text-xs md:text-sm uppercase tracking-widest cursor-pointer"
@@ -335,148 +390,204 @@ export default function ConfigPage() {
 
                   {/* Table Area - Scrollable */}
                   <div className="flex-1 overflow-hidden p-4 md:p-6 bg-slate-50/30">
-                    <div className="h-full bg-white rounded-2xl border-2 border-slate-100 shadow-sm overflow-hidden flex flex-col">
-                      <div className="overflow-y-auto flex-1 custom-scrollbar">
-                        <table className="w-full text-left border-separate border-spacing-0">
-                          <thead className="sticky top-0 bg-slate-50 z-20">
-                            <tr className="border-b-2 border-slate-100">
-                              <th className="px-4 py-4 text-xs md:text-sm font-black uppercase tracking-[0.35em] text-slate-500 border-b-2 border-slate-100">
-                                Usuário
-                              </th>
-                              <th className="px-4 py-4 text-xs md:text-sm font-black uppercase tracking-[0.35em] text-slate-500 border-b-2 border-slate-100">
-                                E-mail
-                              </th>
-                              <th className="px-4 py-4 text-xs md:text-sm font-black uppercase tracking-[0.35em] text-slate-500 border-b-2 border-slate-100">
-                                Tipo
-                              </th>
-                              <th className="px-4 py-4 text-xs md:text-sm font-black uppercase tracking-[0.35em] text-slate-500 border-b-2 border-slate-100">
-                                Permissão
-                              </th>
-                              <th className="px-8 py-6 text-xs md:text-sm font-black uppercase tracking-[0.35em] text-slate-500 border-b-2 border-slate-100 text-center">
-                                Ações
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {users.map((u) => (
-                              <tr
-                                key={u.id}
-                                className="hover:bg-slate-50/50 transition-colors align-top"
-                              >
-                                <td className="px-4 py-4">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center font-black text-lg shadow-sm flex-shrink-0">
-                                      {u.nome.charAt(0).toUpperCase()}
+                    {!isAccessAdmin ? (
+                      <div className="h-full bg-white rounded-2xl border-2 border-slate-100 shadow-sm overflow-hidden flex items-center justify-center p-10 text-center">
+                        <div className="max-w-lg space-y-4">
+                          <div className="mx-auto w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500">
+                            <ShieldCheck size={28} />
+                          </div>
+                          <h3 className="text-xl font-black text-slate-800">
+                            Gestão de acesso restrita
+                          </h3>
+                          <p className="text-slate-500 font-semibold leading-relaxed">
+                            Apenas administradores podem visualizar e alterar os
+                            usuários do sistema.
+                          </p>
+                        </div>
+                      </div>
+                    ) : usersError ? (
+                      <div className="h-full bg-white rounded-2xl border-2 border-slate-100 shadow-sm overflow-hidden flex items-center justify-center p-10 text-center">
+                        <div className="max-w-lg space-y-4">
+                          <div className="mx-auto w-14 h-14 bg-red-50 rounded-2xl flex items-center justify-center text-red-500">
+                            <Shield size={28} />
+                          </div>
+                          <h3 className="text-xl font-black text-slate-800">
+                            Não foi possível carregar a gestão de acesso
+                          </h3>
+                          <p className="text-slate-500 font-semibold leading-relaxed">
+                            {usersError}
+                          </p>
+                          <button
+                            onClick={fetchUsers}
+                            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-[var(--color-geolog-blue)] text-white font-black uppercase tracking-widest text-xs"
+                          >
+                            <RefreshCw size={16} />
+                            Tentar novamente
+                          </button>
+                        </div>
+                      </div>
+                    ) : isUsersLoading ? (
+                      <div className="h-full bg-white rounded-2xl border-2 border-slate-100 shadow-sm overflow-hidden flex items-center justify-center p-10 text-center">
+                        <div className="max-w-lg space-y-4">
+                          <div className="mx-auto w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500 animate-pulse">
+                            <Clock size={28} />
+                          </div>
+                          <h3 className="text-xl font-black text-slate-800">
+                            Carregando usuários
+                          </h3>
+                          <p className="text-slate-500 font-semibold leading-relaxed">
+                            Aguarde enquanto sincronizamos os acessos da equipe.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="h-full bg-white rounded-2xl border-2 border-slate-100 shadow-sm overflow-hidden flex flex-col">
+                        <div className="overflow-y-auto flex-1 custom-scrollbar">
+                          <table className="w-full text-left border-separate border-spacing-0">
+                            <thead className="sticky top-0 bg-slate-50 z-20">
+                              <tr className="border-b-2 border-slate-100">
+                                <th className="px-4 py-4 text-xs md:text-sm font-black uppercase tracking-[0.35em] text-slate-500 border-b-2 border-slate-100">
+                                  Usuário
+                                </th>
+                                <th className="px-4 py-4 text-xs md:text-sm font-black uppercase tracking-[0.35em] text-slate-500 border-b-2 border-slate-100">
+                                  E-mail
+                                </th>
+                                <th className="px-4 py-4 text-xs md:text-sm font-black uppercase tracking-[0.35em] text-slate-500 border-b-2 border-slate-100">
+                                  Tipo
+                                </th>
+                                <th className="px-4 py-4 text-xs md:text-sm font-black uppercase tracking-[0.35em] text-slate-500 border-b-2 border-slate-100">
+                                  Permissão
+                                </th>
+                                <th className="px-8 py-6 text-xs md:text-sm font-black uppercase tracking-[0.35em] text-slate-500 border-b-2 border-slate-100 text-center">
+                                  Ações
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {users.map((u) => (
+                                <tr
+                                  key={u.id}
+                                  className="hover:bg-slate-50/50 transition-colors align-top"
+                                >
+                                  <td className="px-4 py-4">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center font-black text-lg shadow-sm flex-shrink-0">
+                                        {u.nome.charAt(0).toUpperCase()}
+                                      </div>
+                                      <div className="space-y-1">
+                                        <p className="font-black text-base md:text-lg text-slate-800 tracking-tight uppercase">
+                                          {u.nome}
+                                        </p>
+                                        <p className="text-xs md:text-sm font-semibold text-slate-400 italic">
+                                          UUID: {u.id.slice(0, 8)}...
+                                        </p>
+                                      </div>
                                     </div>
-                                    <div className="space-y-1">
-                                      <p className="font-black text-base md:text-lg text-slate-800 tracking-tight uppercase">
-                                        {u.nome}
-                                      </p>
-                                      <p className="text-xs md:text-sm font-semibold text-slate-400 italic">
-                                        UUID: {u.id.slice(0, 8)}...
-                                      </p>
+                                  </td>
+                                  <td className="px-4 py-4">
+                                    <div className="flex items-center gap-2 text-slate-700">
+                                      <Mail
+                                        size={16}
+                                        className="text-blue-500 flex-shrink-0"
+                                      />
+                                      <span className="text-sm md:text-base font-bold truncate max-w-[200px]">
+                                        {u.email}
+                                      </span>
                                     </div>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-4">
-                                  <div className="flex items-center gap-2 text-slate-700">
-                                    <Mail
-                                      size={16}
-                                      className="text-blue-500 flex-shrink-0"
-                                    />
-                                    <span className="text-sm md:text-base font-bold truncate max-w-[200px]">
-                                      {u.email}
-                                    </span>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-4">
-                                  <GeologSearchableSelect
-                                    label="Tipo de Acesso"
-                                    compact
-                                    options={[
-                                      {
-                                        id: "interno",
-                                        nome: "Geolog",
-                                        sublabel: "Equipe Própria",
-                                      },
-                                      {
-                                        id: "gestor",
-                                        nome: "Gestor",
-                                        sublabel: "Externo/Terceiro",
-                                      },
-                                    ]}
-                                    value={u.tipo_usuario}
-                                    onChange={(val) =>
-                                      updateUserRole(u.id, "tipo_usuario", val)
-                                    }
-                                  />
-                                </td>
-                                <td className="px-4 py-4">
-                                  <GeologSearchableSelect
-                                    label="Nível de Permissão"
-                                    compact
-                                    disabled={u.tipo_usuario === "gestor"}
-                                    options={[
-                                      {
-                                        id: "administrador",
-                                        nome: "Administrador",
-                                        sublabel: "Total / Config",
-                                      },
-                                      {
-                                        id: "gestor",
-                                        nome: "Gestor",
-                                        sublabel: "Controle de Fluxo",
-                                      },
-                                      {
-                                        id: "operador",
-                                        nome: "Operador",
-                                        sublabel: "Lançamentos",
-                                      },
-                                      {
-                                        id: "financeiro",
-                                        nome: "Financeiro",
-                                        sublabel: "Faturamento",
-                                      },
-                                      {
-                                        id: "jovem aprendiz",
-                                        nome: "Jovem Aprendiz",
-                                        sublabel: "Visualização",
-                                      },
-                                    ]}
-                                    value={u.categoria}
-                                    onChange={(val) =>
-                                      updateUserRole(u.id, "categoria", val)
-                                    }
-                                  />
-                                </td>
-                                <td className="px-8 py-7 text-center">
-                                  <div className="flex items-center justify-center gap-4">
-                                    <button
-                                      onClick={() =>
-                                        toast.info(
-                                          "Menu de logs do usuário em breve",
+                                  </td>
+                                  <td className="px-4 py-4">
+                                    <GeologSearchableSelect
+                                      label="Tipo de Acesso"
+                                      compact
+                                      options={[
+                                        {
+                                          id: "interno",
+                                          nome: "Geolog",
+                                          sublabel: "Equipe Própria",
+                                        },
+                                        {
+                                          id: "gestor",
+                                          nome: "Gestor",
+                                          sublabel: "Externo/Terceiro",
+                                        },
+                                      ]}
+                                      value={u.tipo_usuario}
+                                      onChange={(val) =>
+                                        updateUserRole(
+                                          u.id,
+                                          "tipo_usuario",
+                                          val,
                                         )
                                       }
-                                      className="w-12 h-12 rounded-2xl border-2 border-slate-100 text-slate-400 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm flex items-center justify-center bg-white"
-                                    >
-                                      <History size={24} />
-                                    </button>
-                                    {profile?.categoria === "administrador" && (
+                                    />
+                                  </td>
+                                  <td className="px-4 py-4">
+                                    <GeologSearchableSelect
+                                      label="Nível de Permissão"
+                                      compact
+                                      disabled={u.tipo_usuario === "gestor"}
+                                      options={[
+                                        {
+                                          id: "administrador",
+                                          nome: "Administrador",
+                                          sublabel: "Total / Config",
+                                        },
+                                        {
+                                          id: "gestor",
+                                          nome: "Gestor",
+                                          sublabel: "Controle de Fluxo",
+                                        },
+                                        {
+                                          id: "operador",
+                                          nome: "Operador",
+                                          sublabel: "Lançamentos",
+                                        },
+                                        {
+                                          id: "financeiro",
+                                          nome: "Financeiro",
+                                          sublabel: "Faturamento",
+                                        },
+                                        {
+                                          id: "jovem aprendiz",
+                                          nome: "Jovem Aprendiz",
+                                          sublabel: "Visualização",
+                                        },
+                                      ]}
+                                      value={u.categoria}
+                                      onChange={(val) =>
+                                        updateUserRole(u.id, "categoria", val)
+                                      }
+                                    />
+                                  </td>
+                                  <td className="px-8 py-7 text-center">
+                                    <div className="flex items-center justify-center gap-4">
                                       <button
-                                        onClick={() => handleDeleteUser(u.id)}
-                                        className="w-12 h-12 rounded-2xl border-2 border-slate-100 text-slate-400 hover:text-red-600 hover:border-red-200 transition-all shadow-sm flex items-center justify-center bg-white"
+                                        onClick={() =>
+                                          toast.info(
+                                            "Menu de logs do usuário em breve",
+                                          )
+                                        }
+                                        className="w-12 h-12 rounded-2xl border-2 border-slate-100 text-slate-400 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm flex items-center justify-center bg-white"
                                       >
-                                        <Trash2 size={24} />
+                                        <History size={24} />
                                       </button>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                                      {isAccessAdmin && (
+                                        <button
+                                          onClick={() => handleDeleteUser(u.id)}
+                                          className="w-12 h-12 rounded-2xl border-2 border-slate-100 text-slate-400 hover:text-red-600 hover:border-red-200 transition-all shadow-sm flex items-center justify-center bg-white"
+                                        >
+                                          <Trash2 size={24} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -717,12 +828,6 @@ export default function ConfigPage() {
               </div>
             )}
 
-            {activeTab === "conexoes" && (
-              <div>
-                <WahaConnectionsPanel />
-              </div>
-            )}
-
             {activeTab === "financeiro" && (
               <div className="max-w-2xl mx-auto">
                 <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 p-10 space-y-10">
@@ -735,7 +840,8 @@ export default function ConfigPage() {
                         Configurações Financeiras
                       </h2>
                       <p className="text-slate-500 font-bold">
-                        Controle global de taxas e deduções das ordens de serviço.
+                        Controle global de taxas e deduções das ordens de
+                        serviço.
                       </p>
                     </div>
                   </div>
@@ -750,26 +856,30 @@ export default function ConfigPage() {
                           className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors"
                           size={18}
                         />
+                        <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase tracking-[0.2em] text-slate-500">
+                          %
+                        </div>
                         <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={0.01}
-                          className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-xl font-bold text-base outline-none focus:border-blue-600 transition-colors"
+                          type="text"
+                          inputMode="decimal"
+                          className="w-full pl-12 pr-16 py-4 bg-slate-50 border-2 border-slate-100 rounded-xl font-bold text-base outline-none focus:border-blue-600 transition-colors"
                           value={jurosInput}
                           onChange={(e) => setJurosInput(e.target.value)}
-                          placeholder="Ex: 12"
+                          placeholder="Ex: 12,5%"
                         />
                       </div>
                       <p className="text-sm font-semibold text-slate-400 ml-1">
-                        Este valor será aplicado automaticamente no cálculo de impostos/deduções da Nova OS.
+                        Digite apenas o valor numérico, com vírgula ou ponto se
+                        necessário. Exemplo: 15, 15,5 ou 15%.
                       </p>
                     </div>
 
                     <button
                       onClick={() => {
                         setIsDateModalOpen(true);
-                        setEffectiveDate(new Date().toISOString().split('T')[0]);
+                        setEffectiveDate(
+                          new Date().toISOString().split("T")[0],
+                        );
                       }}
                       className="w-full py-4 bg-blue-600 text-white font-black rounded-xl shadow-lg hover:bg-blue-700 hover:scale-[1.01] active:scale-[0.98] transition-all text-sm uppercase tracking-widest cursor-pointer disabled:opacity-70 flex justify-center items-center gap-3"
                     >
@@ -984,7 +1094,8 @@ export default function ConfigPage() {
                 />
               </div>
               <p className="text-sm font-semibold text-slate-400 ml-1">
-                Alterações retroativas afetam o cálculo de impostos de OS criadas a partir desta data.
+                Alterações retroativas afetam o cálculo de impostos de OS
+                criadas a partir desta data.
               </p>
             </div>
 
@@ -1000,10 +1111,24 @@ export default function ConfigPage() {
                   try {
                     setIsSavingJuros(true);
                     setIsDateModalOpen(false);
-                    await setImpostoPercentual(Number(jurosInput), effectiveDate);
-                    toast.success(`Porcentagem de juros atualizada com sucesso! Vigente a partir de ${new Date(effectiveDate + 'T00:00:00').toLocaleDateString('pt-BR')}.`);
+                    const normalizedJuros = Number(
+                      String(jurosInput)
+                        .replace("%", "")
+                        .replace(",", ".")
+                        .trim(),
+                    );
+
+                    if (!Number.isFinite(normalizedJuros)) {
+                      toast.error("Informe uma porcentagem válida.");
+                      return;
+                    }
+
+                    await setImpostoPercentual(normalizedJuros, effectiveDate);
+                    toast.success(
+                      `Porcentagem de juros atualizada com sucesso! Vigente a partir de ${new Date(effectiveDate + "T00:00:00").toLocaleDateString("pt-BR")}.`,
+                    );
                   } catch (err: unknown) {
-                    toast.error("Erro ao salvar: " + (err instanceof Error ? err.message : String(err)));
+                    toast.error(`Erro ao salvar: ${formatErrorMessage(err)}`);
                   } finally {
                     setIsSavingJuros(false);
                   }

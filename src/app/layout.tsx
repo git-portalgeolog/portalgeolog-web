@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { Sora, Space_Grotesk, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
+import { FormValidationLocale } from "../components/FormValidationLocale";
 import { AuthProvider } from "@/context/AuthContext";
 import { DataProvider } from "@/context/DataContext";
-import { Toaster } from 'sonner';
+import { Toaster } from "sonner";
 
 const sora = Sora({
   variable: "--font-sora",
@@ -27,7 +28,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Portal Geolog | Gestão Logística Inteligente",
-  description: "Software on-demand para a Transportadora Geolog - Controle de Frota, CRM e OS.",
+  description:
+    "Software on-demand para a Transportadora Geolog - Controle de Frota, CRM e OS.",
 };
 
 export default function RootLayout({
@@ -42,6 +44,7 @@ export default function RootLayout({
       >
         <AuthProvider>
           <DataProvider>
+            <FormValidationLocale />
             {children}
             <Toaster position="top-right" richColors />
           </DataProvider>

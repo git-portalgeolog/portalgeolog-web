@@ -4,7 +4,7 @@
 name = "portalgeolog-web"
 workers_dev = true
 compatibility_date = "2025-03-31"
-compatibility_flags = ["nodejs_compat"]
+compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
 
 routes = [
 	{ pattern = "portalgeolog.com.br/*", zone_name = "portalgeolog.com.br" }
@@ -13,19 +13,12 @@ routes = [
 [vars]
 NEXT_PUBLIC_SUPABASE_URL = "https://hzpgfapvjwqtjclriisz.supabase.co"
 NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh6cGdmYXB2andxdGpjbHJpaXN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0NjkzMzksImV4cCI6MjA5MDA0NTMzOX0.bBxEZTNuPuIcXE-eCTewsULdlHyLaoMU3HtqA3qSriA"
-NEXT_PUBLIC_WAHA_SESSION = "default"
-WAHA_API_URL = "https://conexoes.portalgeolog.com.br"
-WAHA_SESSION = "default"
-WAHA_SSH_HOST = "178.238.231.138"
-WAHA_SSH_PORT = "22"
-WAHA_SSH_USERNAME = "root"
-WAHA_REMOTE_DIR = "/opt/waha"
 # Variáveis necessárias para o funcionamento do sistema
 # Estas serão injetadas via variáveis de ambiente durante o build/deploy
-# WAHA_API_KEY = "{{WAHA_API_KEY}}"
 # SUPABASE_SERVICE_ROLE_KEY = "{{SUPABASE_SERVICE_ROLE_KEY}}"
-# WHATSAPP_HOOK_HMAC_KEY = "{{WHATSAPP_HOOK_HMAC_KEY}}"
 # RESEND_API_KEY = "{{RESEND_API_KEY}}"
-# WAHA_SSH_PASSWORD = "{{WAHA_SSH_PASSWORD}}"
+# META_WHATSAPP_ACCESS_TOKEN = "{{META_WHATSAPP_ACCESS_TOKEN}}"
+# META_PHONE_NUMBER_ID = "{{META_PHONE_NUMBER_ID}}"
+# META_BUSINESS_ACCOUNT_ID = "{{META_BUSINESS_ACCOUNT_ID}}"
 # Nota: Para produção, use wrangler secret put para definir estas variáveis
 # ou configure-as no ambiente de CI/CD

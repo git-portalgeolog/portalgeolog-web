@@ -9,16 +9,19 @@ Este documento é a "Fonte da Verdade" para agentes de IA operando neste reposit
 Sempre verifique o `package.json` antes de executar, mas prefira estes padrões:
 
 ### Build & Instalação
+
 - **Instalar:** `npm install` (mantenha o `package-lock.json` atualizado).
 - **Build:** `npm run build` - Verifique a pasta `dist/` ou `.next/` após a execução.
 - **Dev Mode:** `npm run dev` - Use para validar mudanças em tempo real.
 
 ### Linting & Formatação
+
 - **Check:** `npm run lint`
 - **Fix:** `npm run lint -- --fix`
 - **Prettier:** `npx prettier --write .` (execute obrigatoriamente antes de cada commit).
 
 ### 🧪 Testes (Protocolo de Validação)
+
 - **Fluxo de Trabalho:** Modificar código -> Rodar Lint no arquivo -> Rodar Teste Unitário específico.
 - **Rodar teste único:** `npx jest path/to/file.test.ts` ou `npm test -- path/to/file.test.ts`
 - **Economia de Recursos:** Não execute a suite completa de testes (`npm test`) para mudanças triviais em arquivos isolados.
@@ -28,6 +31,7 @@ Sempre verifique o `package.json` antes de executar, mas prefira estes padrões:
 ## 🎨 2. Diretrizes de Estilo e Arquitetura
 
 ### Importações & Organização
+
 - **Caminhos:** Use Aliases (`@/components/...`). Caminhos relativos (`../../`) são permitidos apenas para arquivos na mesma pasta.
 - **Ordem de Importação:**
   1. React/Next.js Core
@@ -37,6 +41,7 @@ Sempre verifique o `package.json` antes de executar, mas prefira estes padrões:
 - **Exports:** Use `Named Exports` (`export const ...`). `Default exports` são exclusivos para componentes de Página (Next.js Pages/App Router).
 
 ### Naming Conventions
+
 - **Componentes:** `PascalCase.tsx` (ex: `LoginCard.tsx`).
 - **Lógica/Utils:** `kebab-case.ts` (ex: `auth-validator.ts`).
 - **Variáveis/Funções:** `camelCase`.
@@ -44,11 +49,13 @@ Sempre verifique o `package.json` antes de executar, mas prefira estes padrões:
 - **Types/Interfaces:** `PascalCase`. Proibido prefixo `I` (use `User`, não `IUser`).
 
 ### TypeScript & Tipagem Estrita
+
 - **No Any:** O uso de `any` é proibido. Use `unknown` com Type Guards ou defina a interface correta.
 - **Async:** Nunca use `.then()`. Use sempre `async/await` com blocos `try/catch`.
 - **Explicicidade:** Funções exportadas devem ter tipos de retorno definidos.
 
 ### Campos Obrigatórios com Asteriscos (PRIORIDADE ABSOLUTA)
+
 - **Componente:** `@/components/ui/RequiredAsterisk.tsx`
 - **Classe CSS:** `.required-asterisk` (definida em `globals.css`)
 - **OBRIGATÓRIO:** Sempre que asterisco for solicitado, usar `<RequiredAsterisk />`
@@ -61,10 +68,12 @@ Sempre verifique o `package.json` antes de executar, mas prefira estes padrões:
 ## 📊 10. Estilo Global de Tabelas (PRIORIDADE ABSOLUTA)
 
 ### Componente Padrão: DataTable
+
 - **Localização:** `@/components/ui/DataTable.tsx`
 - **OBRIGATÓRIO:** Todas as novas páginas com listagens devem usar `DataTable`
 
 ### Padrão Visual Consistente
+
 ```tsx
 // Estrutura obrigatória para todas as tabelas
 <DataTable
@@ -88,6 +97,7 @@ Sempre verifique o `package.json` antes de executar, mas prefira estes padrões:
 ```
 
 ### Estilo Visual Obrigatório
+
 - **Container:** `bg-white rounded-[2rem] border border-slate-200 shadow-xl shadow-slate-200/40`
 - **Header:** `bg-slate-50/80 border-b border-slate-200`
 - **Títulos:** `text-[12px] font-black uppercase tracking-widest text-slate-600`
@@ -96,25 +106,29 @@ Sempre verifique o `package.json` antes de executar, mas prefira estes padrões:
 - **Divisores:** `divide-y divide-slate-100`
 
 ### Padrões de Conteúdo
+
 - **Texto principal:** `font-bold text-slate-800 text-base`
 - **Texto secundário:** `text-sm text-slate-500 font-medium`
 - **Ícones:** Tamanho 18px para ações, 14px para informações
 - **Botões de ação:** `p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg`
 
 ### Search Integrado
+
 - **Input:** `pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl`
 - **Ícone:** `<Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />`
 - **Contador:** `text-xs font-black uppercase tracking-[0.3em] text-slate-400`
 
 ### Páginas que Seguem Este Padrão
+
 - ✅ `/portal/servicos` - Implementado
-- ✅ `/portal/fornecedores` - Implementado  
+- ✅ `/portal/fornecedores` - Implementado
 - ✅ `/portal/passageiros` - Implementado
 - ✅ `/portal/motoristas` - Implementado
 - ✅ `/portal/financeiro` - Implementado
 - ✅ `/portal/os` - Implementado
 
 ### Regra de Ouro
+
 **NUNCA** criar tabelas HTML manualmente em novas páginas. **SEMPRE** usar `DataTable` para garantir consistência visual e comportamental em todo o sistema.
 
 ---
@@ -122,10 +136,11 @@ Sempre verifique o `package.json` antes de executar, mas prefira estes padrões:
 ## 🌐 3. Internacionalização (i18n) - PRIORIDADE 2026
 
 Ao refatorar para i18n no `certify-web`:
+
 - **Zero Hardcoding:** Nenhuma string visível ao usuário deve permanecer no JSX.
 - **Hook de Tradução:** Use o padrão estabelecido (ex: `useTranslation` do `next-intl`).
-- **Padrão de Chaves:** Use nomes semânticos e hierárquicos: `contexto.subcontexto.elemento_propriedade`. 
-  - *Exemplo:* `auth.login.button_label` em vez de `btn_entrar`.
+- **Padrão de Chaves:** Use nomes semânticos e hierárquicos: `contexto.subcontexto.elemento_propriedade`.
+  - _Exemplo:_ `auth.login.button_label` em vez de `btn_entrar`.
 - **Sincronização:** Toda chave adicionada em `pt-BR.json` deve ter sua contraparte (mesmo que vazia ou em inglês) em `en.json`.
 
 ---
@@ -133,6 +148,7 @@ Ao refatorar para i18n no `certify-web`:
 ## 📂 4. Mapeamento de Lógica (Contexto Específico)
 
 Ao buscar por funcionalidades centrais, priorize:
+
 1. **Auth/Login:** `src/pages/login/`, `src/components/auth/`, `src/hooks/useAuth.ts`.
 2. **Traduções:** `public/locales/` ou `src/messages/`.
 3. **Serviços de API:** `src/services/` ou `src/api/`.
@@ -161,12 +177,14 @@ Ao buscar por funcionalidades centrais, priorize:
 O sistema utiliza uma arquitetura baseada em banco de dados para notificações, garantindo segurança e separação entre usuários **Internos** e **Gestores**.
 
 ### Arquitetura de Notificações
+
 - **Tabela Mestre:** `public.app_notifications`. Nunca dispare `toast()` no frontend baseado em listeners de tabelas de negócio (ex: `clientes`, `os`).
-- **Geração de Mensagens:** Exclusivamente via **PostgreSQL Triggers**. Toda lógica de *o que* e *para quem* notificar deve residir no banco de dados.
+- **Geração de Mensagens:** Exclusivamente via **PostgreSQL Triggers**. Toda lógica de _o que_ e _para quem_ notificar deve residir no banco de dados.
 - **Segurança (RLS):** A filtragem de público (`target_audience`) é feita via **Row-Level Security**. Internos nunca recebem pacotes de Gestores e vice-versa.
 - **Frontend (Listener):** O `DataContext.tsx` possui um único listener dedicado a `app_notifications`. Ele apenas renderiza o que o banco envia.
 
 ### Controle de Acesso (RBAC)
+
 - **Tabela de Perfis:** `public.user_roles`.
 - **Sincronização:** O `AuthContext.tsx` monitora mudanças na categoria do usuário logado em tempo real. Se um acesso for revogado, o sistema deve deslogar o usuário imediatamente.
 - **Caminho da Gestão:** `/portal/config` é a página central para administração desses perfis.
@@ -176,27 +194,32 @@ O sistema utiliza uma arquitetura baseada em banco de dados para notificações,
 ## 🛡 8. Segurança e Operações de Admin (Supabase & Resend)
 
 ### Supabase Admin
+
 - **Escalação de Privilégios:** Operações de criação/modificação de usuários `auth` devem ser feitas exclusivamente via Server Actions ou API Routes usando a `SUPABASE_SERVICE_ROLE_KEY`.
 - **Bypass de RLS:** A Service Role ignora todas as políticas de RLS. Use com extrema cautela e valide permissões de admin no código antes de executar.
 
 ### Comunicação (Resend)
+
 - **Key Management:** A `RESEND_API_KEY` deve residir apenas no `.env.local`. Nunca exponha essa chave no cliente.
 - **E-mails Transacionais:** Use templates HTML profissionais para boas-vindas, redefinição de senha e alertas críticos.
 - **Atomicidade:** Sempre que criar um usuário no Auth, registre-o simultaneamente na tabela `user_roles` e dispare o e-mail de boas-vindas com as credenciais.
 
 ---
 
-# Estrutura de Autenticação e Git 
+# Estrutura de Autenticação e Git
 
 ## 1. Perfis e Diretórios de Configuração
+
 Existem dois perfis de autenticação isolados via variáveis de ambiente. NUNCA utilize `gh auth login` ou `git push` sem os prefixos de diretório abaixo:
 
 ### Perfil: Principal (git-portalgeolog)
+
 - **GitHub CLI Config:** `~/.gh-config1`
 - **GitHub Desktop Data:** `~/.gh-app1`
 - **Alias recomendado:** `gh1` (env GH_CONFIG_DIR=~/.gh-config1 gh)
 
 ## 2. Comandos Obrigatórios para o Agente
+
 Ao executar comandos no terminal para o usuário, você deve injetar a variável de ambiente correspondente ao perfil desejado:
 
 - **Para checar status:** `GH_CONFIG_DIR=~/.gh-config1 gh auth status`.
@@ -204,20 +227,23 @@ Ao executar comandos no terminal para o usuário, você deve injetar a variável
 - **Para clonar ou gerenciar repositórios:** Sempre use `GH_CONFIG_DIR=~/.gh-config[X]` antes de qualquer comando `gh`.
 
 - **Operações de Git (Push/Pull):**
-Certifique-se de que o `user.name` e `user.email` no repositório local (`git config`) correspondem ao perfil autenticado no diretório de configuração fornecido.
+  Certifique-se de que o `user.name` e `user.email` no repositório local (`git config`) correspondem ao perfil autenticado no diretório de configuração fornecido.
 
 ## 3. Prevenção de Erros Conhecidos
+
 - **ERRO KIO CLIENT:** Se o sistema solicitar login via navegador, pare. A autenticação deve ser feita via CLI com as pastas acima para evitar o erro de protocolo `x-github-desktop-dev-auth`.
 - **SANDBOX:** Ao sugerir a abertura do GitHub Desktop (AppImage), sempre inclua a flag `--no-sandbox` e a variável `XDG_CONFIG_HOME` correta.
 
 ## 4. Solução de Problemas (Troubleshooting)
-- **Usuário Incorreto no GitHub:** Se `gh` reportar um usuário diferente do esperado (ex: `nshsystem` em vez de `git-portalgeolog`), o token no diretório de configuração está incorreto. 
+
+- **Usuário Incorreto no GitHub:** Se `gh` reportar um usuário diferente do esperado (ex: `nshsystem` em vez de `git-portalgeolog`), o token no diretório de configuração está incorreto.
 - **Como corrigir:** Execute `echo "SEU_TOKEN" | GH_CONFIG_DIR=~/.gh-config1 gh auth login --with-token` para re-vincular o perfil ao token correto.
 - **Verificação:** Sempre valide com `GH_CONFIG_DIR=~/.gh-config1 gh api user --jq .login` antes de realizar operações de escrita (push/create repo).
 
 ## 🚀 5. Deploy & Infraestrutura (Cloudflare Pages)
 
 ### Cloudflare CLI (Wrangler)
+
 - **Autenticação:** Configure via `wrangler login` ou use `CLOUDFLARE_API_TOKEN`.
 - **Controle de Deploy:** Agentes NUNCA devem realizar deploys (seja para `test` ou `main`) sem a solicitação explícita do usuário no chat.
 - **REGRA DE OURO:** Só faça deploy quando o usuário pedir explicitamente no chat. Nunca inicie um deploy por conta própria.
@@ -228,17 +254,19 @@ Certifique-se de que o `user.name` e `user.email` no repositório local (`git co
   - `wrangler secret put <KEY>` (configura secrets).
 
 ### Build para Cloudflare
+
 - **Comando:** `npx @cloudflare/next-on-pages@1`
 - **Output:** `cloudflare-output`
 - **Runtime:** Edge Runtime (Cloudflare Workers)
 
 ### Links de Referência
+
 - **GitHub:** [https://github.com/git-portalgeolog/portalgeolog-web](https://github.com/git-portalgeolog/portalgeolog-web)
 - **Produção:** [https://portalgeolog.com.br](https://portalgeolog.com.br)
 
 ---
 
-*Assinado: Certify Web Core Team (2026)*
+_Assinado: Certify Web Core Team (2026)_
 
 ---
 
@@ -247,6 +275,7 @@ Certifique-se de que o `user.name` e `user.email` no repositório local (`git co
 O agente possui acesso aos seguintes MCP servers para operações diretas:
 
 ### Supabase MCP
+
 - **Usar para:** Operações de banco de dados, deploy de Edge Functions, gerenciamento de projetos/branches.
 - **Ferramentas principais:**
   - `mcp1_execute_sql` - Executar queries SQL
@@ -257,6 +286,7 @@ O agente possui acesso aos seguintes MCP servers para operações diretas:
 - **Quando usar:** SEMPRE que for necessário verificar schema, executar migrations ou debugar problemas de dados.
 
 ### Cloudflare Docs MCP
+
 - **Usar para:** Buscar documentação oficial do Cloudflare.
 - **Ferramentas principais:**
   - `mcp0_search_cloudflare_documentation` - Buscar na documentação
@@ -264,6 +294,7 @@ O agente possui acesso aos seguintes MCP servers para operações diretas:
 - **Quando usar:** SEMPRE que houver dúvidas sobre deploy, configuração ou features do Cloudflare.
 
 ### Regra Obrigatória
+
 **Antes de sugerir qualquer solução envolvendo Supabase ou Cloudflare, o agente DEVE primeiro consultar os MCPs disponíveis.** Não faça suposições sobre schema ou configuração.
 
 ---
@@ -271,6 +302,7 @@ O agente possui acesso aos seguintes MCP servers para operações diretas:
 ## 📱 10. WPPConnect VPS (WhatsApp API)
 
 ### Infraestrutura
+
 - **VPS Contabo:** `178.238.231.138` (root)
 - **Container Docker:** `wpp-server` (imagem `wppconnect-wppconnect`)
 - **Porta interna:** `21465` (exposta pelo Docker)
@@ -279,6 +311,7 @@ O agente possui acesso aos seguintes MCP servers para operações diretas:
 - **URL final do projeto:** `https://wppconnect.portalgeolog.com.br/api/bot_cnh/send-message`
 
 ### Segurança implementada
+
 - Firewall UFW na VPS: **SÓ portas 22 (SSH) e 80 (Caddy) abertas**, resto DROP.
 - Caddy escuta na porta 80 e encaminha para `localhost:21465`.
 - Cloudflare faz SSL termination (HTTPS externo → HTTP interno).
@@ -286,6 +319,7 @@ O agente possui acesso aos seguintes MCP servers para operações diretas:
 - JWT Supabase no header `Authorization` das chamadas internas do projeto.
 
 ### Como funciona o token do WPPConnect
+
 - O WPPConnect usa um `secretKey` definido em `/opt/wppconnect/config.ts`.
 - O container Docker **NÃO** lê o `config.ts` do host via volume — ele usa o arquivo embutido na imagem durante o build.
 - Para mudar o `secretKey`, é preciso **rebuildar a imagem Docker** (`docker compose build --no-cache`).
@@ -294,6 +328,7 @@ O agente possui acesso aos seguintes MCP servers para operações diretas:
 - Se o container reiniciar e o `secretKey` mudar, todos os tokens anteriores viram inválidos.
 
 ### Estado atual (checkpoint)
+
 - O `config.ts` do host foi modificado para usar `secretKey` estável, mas a rebuild falhou em incorporar na imagem.
 - O container ainda usa o `secretKey` padrão da imagem original: **`THISISMYSECURETOKEN`**.
 - O token funcional atual foi gerado com `THISISMYSECURETOKEN`.
@@ -301,21 +336,25 @@ O agente possui acesso aos seguintes MCP servers para operações diretas:
 - A sessão `bot_cnh` precisa estar **CONNECTED** no WhatsApp para enviar mensagens. Se cair, é necessário escanear QR code ou link de pareamento novamente.
 
 ### Scripts criados no projeto
+
 - `scripts/vps-setup-all-in-one.sh` — instala Caddy na VPS
 - `scripts/fix-wppconnect-vps.sh` — tenta fixar config.ts (problema conhecido: volume não funciona)
 - `scripts/regenerate-wpp-token.sh` — regenera token usando secretKey atual
 - `scripts/vps-fix-permanente.sh` — script completo de rebuild (não foi totalmente validado)
 
 ### Variáveis de ambiente do projeto
+
 ```
 WPP_CONNECT_URL=https://wppconnect.portalgeolog.com.br/api/bot_cnh/send-message
 WPP_CONNECT_TOKEN=<token_full_do_wppconnect>
 ```
+
 - `.env` → para desenvolvimento local
 - `wrangler.toml` → documentação
 - `.github/workflows/deploy-cloudflare.yml` → secrets do CI/CD
 
 ### Comandos úteis no VPS
+
 ```bash
 # Verificar se Caddy está rodando
 systemctl is-active caddy
@@ -340,11 +379,13 @@ curl -X POST 'http://localhost:21465/api/bot_cnh/send-message' \
 ```
 
 ### ⚠️ Problema pendente (CRÍTICO)
+
 O `config.ts` do host (`/opt/wppconnect/config.ts`) não está sendo incorporado na imagem Docker durante o build. O volume `./config.ts:/usr/src/wpp-server/config.ts` no `docker-compose.yml` não funciona porque o WPPConnect compila o `config.ts` durante o build da imagem e usa o arquivo compilado (`dist/config.js`).
 
 **Solução pendente:** Modificar o `Dockerfile` do WPPConnect para copiar o `config.ts` do host durante o build, ou usar `docker cp` após o build para sobrescrever o arquivo compilado dentro do container.
 
 ### Próxima sessão — o que falta
+
 1. Fixar definitivamente o `config.ts` na imagem Docker (rebuild com Dockerfile modificado ou `docker cp`).
 2. Usar um `secretKey` estável (sem `$`) para evitar problemas de escape no shell.
 3. Gerar token permanente e atualizar no Cloudflare (`wrangler secret put WPP_CONNECT_TOKEN`).

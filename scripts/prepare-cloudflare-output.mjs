@@ -1,10 +1,10 @@
-import { cp, readdir, rm } from 'node:fs/promises';
-import path from 'node:path';
+import { cp, readdir, rm } from "node:fs/promises";
+import path from "node:path";
 
 const projectRoot = process.cwd();
-const cloudflareOutputDir = path.join(projectRoot, 'cloudflare-output');
+const cloudflareOutputDir = path.join(projectRoot, "cloudflare-output");
 
-const ignoredDirectories = new Set(['node_modules', '.git', '.next']);
+const ignoredDirectories = new Set(["node_modules", ".git", ".next"]);
 
 async function findStaticOutput(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -20,7 +20,7 @@ async function findStaticOutput(directory) {
 
     const entryPath = path.join(directory, entry.name);
 
-    if (entry.name === 'static' && path.basename(directory) === 'output') {
+    if (entry.name === "static" && path.basename(directory) === "output") {
       return entryPath;
     }
 
@@ -37,7 +37,7 @@ async function main() {
   const staticOutputDir = await findStaticOutput(projectRoot);
 
   if (!staticOutputDir) {
-    throw new Error('Could not find the generated static output directory.');
+    throw new Error("Could not find the generated static output directory.");
   }
 
   await rm(cloudflareOutputDir, { recursive: true, force: true });

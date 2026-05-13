@@ -1,0 +1,7 @@
+[models]
+# Aqui você define o ID real do modelo que sua API (NVIDIA/OpenRouter) exige
+glm_real_id = "z-ai/glm-5.1" 
+
+[models.aliases]
+# Aqui você cria o "apelido" que o comando /model vai reconhecer
+"glm5.1" = "z-ai/glm-5.1"

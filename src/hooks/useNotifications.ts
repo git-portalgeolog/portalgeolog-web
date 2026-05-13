@@ -1,15 +1,17 @@
-import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { useAuth } from '@/context/AuthContext';
+import { useState, useEffect } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/context/AuthContext";
 
 export interface AppNotification {
   id: string;
-  type: 'success' | 'info' | 'warning' | 'error';
+  type: "success" | "info" | "warning" | "error";
   title: string;
   message: string;
-  target_audience: 'interno' | 'gestor' | 'all';
+  target_audience: "interno" | "gestor" | "all";
   target_user_id: string | null;
   empresa_id: string | null;
+  created_by: string | null;
+  created_by_name: string | null;
   created_at: string;
 }
 
@@ -24,30 +26,31 @@ export function useNotifications() {
 
     const fetchNotifications = async () => {
       try {
-        const res = await fetch('/api/app-notifications');
+        const res = await fetch("/api/app-notifications");
         if (res.ok) {
-          const data = await res.json() as AppNotification[];
-          setNotifications(data);
+          const data = (await res.json()) as AppNotification[];
+          setNotifications(data.filter((n) => !!n.created_by_name));
         }
       } catch (error) {
-        console.error('Erro ao buscar notificações:', error);
+        console.error("Erro ao buscar notificações:", error);
       }
     };
 
     fetchNotifications();
 
     const channel = supabase
-      .channel('app_notifications_feed')
+      .channel("app_notifications_feed")
       .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'app_notifications' },
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "app_notifications" },
         (payload: { new: Record<string, unknown> }) => {
           const notif = payload.new as unknown as AppNotification;
-          setNotifications(prev => [notif, ...prev]);
-        }
+          if (!notif.created_by_name) return;
+          setNotifications((prev) => [notif, ...prev]);
+        },
       )
       .subscribe((status: string) => {
-        setRealtimeConnected(status === 'SUBSCRIBED');
+        setRealtimeConnected(status === "SUBSCRIBED");
       });
 
     return () => {
@@ -56,7 +59,7 @@ export function useNotifications() {
   }, [user, supabase]);
 
   const dismiss = (id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
   };
 
   const dismissAll = () => setNotifications([]);

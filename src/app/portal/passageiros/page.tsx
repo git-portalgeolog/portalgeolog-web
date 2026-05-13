@@ -1,18 +1,34 @@
-'use client';
+"use client";
 
-import React, { useState } from 'react';
-import { UserSquare2, Plus, Edit, Eye, Trash2, Mail, Phone, MapPin, Layers, IdCard, PlusCircle } from 'lucide-react';
-import { useData } from '@/context/DataContext';
-import StandardModal from '@/components/StandardModal';
-import { DataTable } from '@/components/ui/DataTable';
-import { PageHeader } from '@/components/ui/PageHeader';
-import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
-import { toast } from 'sonner';
-import { useConfirm } from '@/hooks/useConfirm';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
-import { fetchPassageirosPage } from '@/lib/supabase/queries';
-import { useServerPaginatedTable } from '@/hooks/useServerPaginatedTable';
+import React, { useState } from "react";
+import {
+  UserSquare2,
+  Plus,
+  Edit,
+  Eye,
+  Trash2,
+  Mail,
+  Phone,
+  MapPin,
+  Layers,
+  IdCard,
+  PlusCircle,
+} from "lucide-react";
+import {
+  useData,
+  type Passageiro,
+  type PassageiroEndereco,
+} from "@/context/DataContext";
+import StandardModal from "@/components/StandardModal";
+import { DataTable } from "@/components/ui/DataTable";
+import { PageHeader } from "@/components/ui/PageHeader";
+import GeologSearchableSelect from "@/components/ui/GeologSearchableSelect";
+import { toast } from "sonner";
+import { useConfirm } from "@/hooks/useConfirm";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import RequiredAsterisk from "@/components/ui/RequiredAsterisk";
+import { fetchPassageirosPage } from "@/lib/supabase/queries";
+import { useServerPaginatedTable } from "@/hooks/useServerPaginatedTable";
 
 interface NewPassengerForm {
   nomeCompleto: string;
@@ -21,19 +37,23 @@ interface NewPassengerForm {
   cpf?: string;
   notificar: string;
   genero: string;
-  enderecos: Array<Omit<PassageiroEndereco, 'id'>>;
+  enderecos: Array<Omit<PassageiroEndereco, "id">>;
 }
 
-const initialEndereco = { rotulo: 'RESIDENCIAL', enderecoCompleto: '', referencia: '' };
+const initialEndereco = {
+  rotulo: "RESIDENCIAL",
+  enderecoCompleto: "",
+  referencia: "",
+};
 
 const initialForm: NewPassengerForm = {
-  nomeCompleto: '',
-  email: '',
-  celular: '',
-  cpf: '',
+  nomeCompleto: "",
+  email: "",
+  celular: "",
+  cpf: "",
   enderecos: [{ ...initialEndereco }],
-  notificar: 'Sim',
-  genero: 'Sem resposta'
+  notificar: "Sim",
+  genero: "Sem resposta",
 };
 
 export default function PassageirosPage() {
@@ -42,7 +62,9 @@ export default function PassageirosPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [selectedPassenger, setSelectedPassenger] = useState<Passageiro | null>(null);
+  const [selectedPassenger, setSelectedPassenger] = useState<Passageiro | null>(
+    null,
+  );
   const [formData, setFormData] = useState<NewPassengerForm>(initialForm);
   const [isEstrangeiro, setIsEstrangeiro] = useState(false);
   const passengerTable = useServerPaginatedTable(fetchPassageirosPage, 10);
@@ -50,49 +72,56 @@ export default function PassageirosPage() {
   const handleAddEndereco = () => {
     setFormData((prev) => ({
       ...prev,
-      enderecos: [...prev.enderecos, { ...initialEndereco, rotulo: `Endereço ${prev.enderecos.length + 1}` }]
+      enderecos: [
+        ...prev.enderecos,
+        { ...initialEndereco, rotulo: `Endereço ${prev.enderecos.length + 1}` },
+      ],
     }));
   };
 
   const handleRemoveEndereco = (index: number) => {
     setFormData((prev) => ({
       ...prev,
-      enderecos: prev.enderecos.filter((_, idx) => idx !== index)
+      enderecos: prev.enderecos.filter((_, idx) => idx !== index),
     }));
   };
 
-  const handleEnderecoChange = (index: number, field: keyof Omit<PassageiroEndereco, 'id'>, value: string) => {
+  const handleEnderecoChange = (
+    index: number,
+    field: keyof Omit<PassageiroEndereco, "id">,
+    value: string,
+  ) => {
     let formattedValue = value;
 
-    if (field === 'rotulo') {
+    if (field === "rotulo") {
       formattedValue = formatUppercase(value);
     }
 
     setFormData((prev) => ({
       ...prev,
       enderecos: prev.enderecos.map((endereco, idx) =>
-        idx === index ? { ...endereco, [field]: formattedValue } : endereco
-      )
+        idx === index ? { ...endereco, [field]: formattedValue } : endereco,
+      ),
     }));
   };
 
   const formatCPF = (value: string) => {
-    const digits = value.replace(/\D/g, '').slice(0, 11);
+    const digits = value.replace(/\D/g, "").slice(0, 11);
     return digits
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
   };
 
   const formatPhone = (value: string) => {
     if (isEstrangeiro) {
-      return value.replace(/\D/g, '').slice(0, 15);
+      return value.replace(/\D/g, "").slice(0, 15);
     }
-    const digits = value.replace(/\D/g, '').slice(0, 11);
+    const digits = value.replace(/\D/g, "").slice(0, 11);
     if (digits.length <= 10) {
-      return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3').trim();
+      return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, "($1) $2-$3").trim();
     }
-    return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').trim();
+    return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, "($1) $2-$3").trim();
   };
 
   const formatUppercase = (value: string) => {
@@ -106,28 +135,18 @@ export default function PassageirosPage() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    // Validar que ao menos 1 endereço tenha Rótulo, Endereço completo e Referência preenchidos
-    const validEnderecos = formData.enderecos.filter((endereco) => 
-      endereco.rotulo.trim() && 
-      endereco.enderecoCompleto.trim() && 
-      endereco.referencia?.trim()
-    );
-
-    if (!validEnderecos.length) {
-      toast.error('Preencha ao menos um endereço com Rótulo, Endereço completo e Referência.');
-      return;
-    }
-
-    const celularDigits = formData.celular.replace(/\D/g, '');
+    const celularDigits = formData.celular.replace(/\D/g, "");
     if (isEstrangeiro && celularDigits.length !== 11) {
-      toast.error('Celular brasileiro deve conter 11 dígitos (DDD + 9 + número).');
+      toast.error(
+        "Celular brasileiro deve conter 11 dígitos (DDD + 9 + número).",
+      );
       return;
     }
 
     // Validar CPF (opcional, mas se preenchido precisa ter 11 dígitos)
-    const cpfDigits = formData.cpf?.replace(/\D/g, '') || '';
+    const cpfDigits = formData.cpf?.replace(/\D/g, "") || "";
     if (cpfDigits.length > 0 && cpfDigits.length !== 11) {
-      toast.error('CPF deve conter exatamente 11 dígitos.');
+      toast.error("CPF deve conter exatamente 11 dígitos.");
       return;
     }
 
@@ -137,18 +156,29 @@ export default function PassageirosPage() {
         email: formData.email?.trim(),
         celular: formData.celular.trim(),
         cpf: formData.cpf?.trim(),
-        enderecos: validEnderecos.map((endereco) => ({
-          rotulo: endereco.rotulo.trim(),
-          enderecoCompleto: endereco.enderecoCompleto.trim(),
-          referencia: endereco.referencia?.trim() || ''
-        }))
+        enderecos: formData.enderecos
+          .filter(
+            (endereco) =>
+              endereco.rotulo.trim() ||
+              endereco.enderecoCompleto.trim() ||
+              endereco.referencia?.trim(),
+          )
+          .map((endereco) => ({
+            rotulo: endereco.rotulo.trim() || "Principal",
+            enderecoCompleto: endereco.enderecoCompleto.trim(),
+            referencia: endereco.referencia?.trim() || "",
+          })),
       });
 
       await passengerTable.refresh();
       setFormData(initialForm);
       setIsModalOpen(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o passageiro.');
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar o passageiro.",
+      );
     }
   };
 
@@ -157,26 +187,17 @@ export default function PassageirosPage() {
 
     if (!selectedPassenger) return;
 
-    const cleanedEnderecos = formData.enderecos.filter((endereco) => 
-      endereco.rotulo.trim() && 
-      endereco.enderecoCompleto.trim() && 
-      endereco.referencia?.trim()
-    );
-
-    if (!cleanedEnderecos.length) {
-      toast.error('Preencha ao menos um endereço com Rótulo, Endereço completo e Referência.');
-      return;
-    }
-
-    const celularDigits = formData.celular.replace(/\D/g, '');
+    const celularDigits = formData.celular.replace(/\D/g, "");
     if (isEstrangeiro && celularDigits.length !== 11) {
-      toast.error('Celular brasileiro deve conter 11 dígitos (DDD + 9 + número).');
+      toast.error(
+        "Celular brasileiro deve conter 11 dígitos (DDD + 9 + número).",
+      );
       return;
     }
 
-    const cpfDigits = formData.cpf?.replace(/\D/g, '') || '';
+    const cpfDigits = formData.cpf?.replace(/\D/g, "") || "";
     if (cpfDigits.length > 0 && cpfDigits.length !== 11) {
-      toast.error('CPF deve conter exatamente 11 dígitos.');
+      toast.error("CPF deve conter exatamente 11 dígitos.");
       return;
     }
 
@@ -186,22 +207,33 @@ export default function PassageirosPage() {
         email: formData.email?.trim(),
         celular: formData.celular.trim(),
         cpf: formData.cpf?.trim(),
-        enderecos: cleanedEnderecos.map((endereco) => ({
-          rotulo: endereco.rotulo.trim(),
-          enderecoCompleto: endereco.enderecoCompleto.trim(),
-          referencia: endereco.referencia?.trim() || ''
-        })),
-        notificar: formData.notificar === 'Sim',
-        genero: formData.genero
+        enderecos: formData.enderecos
+          .filter(
+            (endereco) =>
+              endereco.rotulo.trim() ||
+              endereco.enderecoCompleto.trim() ||
+              endereco.referencia?.trim(),
+          )
+          .map((endereco) => ({
+            rotulo: endereco.rotulo.trim() || "Principal",
+            enderecoCompleto: endereco.enderecoCompleto.trim(),
+            referencia: endereco.referencia?.trim() || "",
+          })),
+        notificar: formData.notificar === "Sim",
+        genero: formData.genero,
       });
 
       await passengerTable.refresh();
       setFormData(initialForm);
       setSelectedPassenger(null);
       setIsEditModalOpen(false);
-      toast.success('Passageiro atualizado com sucesso.');
+      toast.success("Passageiro atualizado com sucesso.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível atualizar o passageiro.');
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível atualizar o passageiro.",
+      );
     }
   };
 
@@ -210,28 +242,31 @@ export default function PassageirosPage() {
     setSelectedPassenger(null);
   };
 
-  const handleInputChange = (field: keyof Omit<NewPassengerForm, 'enderecos'>, value: string) => {
+  const handleInputChange = (
+    field: keyof Omit<NewPassengerForm, "enderecos">,
+    value: string,
+  ) => {
     let formattedValue = value;
 
-    if (field === 'cpf') {
+    if (field === "cpf") {
       formattedValue = formatCPF(value);
     }
 
-    if (field === 'celular') {
+    if (field === "celular") {
       formattedValue = formatPhone(value);
     }
 
-    if (field === 'nomeCompleto') {
+    if (field === "nomeCompleto") {
       formattedValue = formatUppercase(value);
     }
 
-    if (field === 'email') {
+    if (field === "email") {
       formattedValue = formatLowercase(value);
     }
 
     setFormData((prev) => ({
       ...prev,
-      [field]: formattedValue
+      [field]: formattedValue,
     }));
   };
 
@@ -265,47 +300,47 @@ export default function PassageirosPage() {
         }
         columns={[
           {
-            key: 'nomeCompleto',
-            title: 'Passageiro',
+            key: "nomeCompleto",
+            title: "Passageiro",
             render: (value: unknown) => (
               <div className="flex items-center gap-3">
                 <div>
                   <p className="font-bold text-slate-800">{String(value)}</p>
                 </div>
               </div>
-            )
+            ),
           },
           {
-            key: 'contato',
-            title: 'Contato e ID',
+            key: "contato",
+            title: "Contato e ID",
             render: (value: unknown, item: Passageiro) => {
               void value;
 
               return (
-              <div className="space-y-2 text-sm">
-                {item.email && (
+                <div className="space-y-2 text-sm">
+                  {item.email && (
+                    <div className="flex items-center gap-2 text-slate-600">
+                      <Mail size={14} className="text-blue-500" />
+                      <span className="font-medium">{item.email}</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 text-slate-600">
-                    <Mail size={14} className="text-blue-500" />
-                    <span className="font-medium">{item.email}</span>
+                    <Phone size={14} className="text-blue-500" />
+                    <span className="font-medium">{item.celular}</span>
                   </div>
-                )}
-                <div className="flex items-center gap-2 text-slate-600">
-                  <Phone size={14} className="text-blue-500" />
-                  <span className="font-medium">{item.celular}</span>
+                  {item.cpf && (
+                    <div className="flex items-center gap-2 text-slate-600">
+                      <IdCard size={14} className="text-blue-500" />
+                      <span className="font-medium">{item.cpf}</span>
+                    </div>
+                  )}
                 </div>
-                {item.cpf && (
-                  <div className="flex items-center gap-2 text-slate-600">
-                    <IdCard size={14} className="text-blue-500" />
-                    <span className="font-medium">{item.cpf}</span>
-                  </div>
-                )}
-              </div>
               );
-            }
+            },
           },
           {
-            key: 'notificacao',
-            title: 'Notificação',
+            key: "notificacao",
+            title: "Notificação",
             render: (value: unknown, item: Passageiro) => {
               void value;
 
@@ -322,55 +357,59 @@ export default function PassageirosPage() {
                   Não enviar
                 </div>
               );
-            }
+            },
           },
           {
-            key: 'enderecos',
-            title: 'Endereços',
+            key: "enderecos",
+            title: "Endereços",
             render: (value: unknown, item: Passageiro) => {
               void value;
 
               return (
-              <div className="space-y-2">
-                {item.enderecos.slice(0, 2).map((endereco) => (
-                  <div key={endereco.id} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
-                      <MapPin size={12} className="text-blue-500" />
-                      {endereco.rotulo}
+                <div className="space-y-2">
+                  {item.enderecos.slice(0, 2).map((endereco) => (
+                    <div
+                      key={endereco.id}
+                      className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3"
+                    >
+                      <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+                        <MapPin size={12} className="text-blue-500" />
+                        {endereco.rotulo}
+                      </div>
+                      <p className="mt-1 text-sm font-bold text-slate-700 leading-snug">
+                        {endereco.enderecoCompleto}
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm font-bold text-slate-700 leading-snug">{endereco.enderecoCompleto}</p>
-                  </div>
-                ))}
-                {item.enderecos.length > 2 && (
-                  <div className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] text-blue-600">
-                    <Layers size={12} />
-                    +{item.enderecos.length - 2} endereços
-                  </div>
-                )}
-              </div>
+                  ))}
+                  {item.enderecos.length > 2 && (
+                    <div className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] text-blue-600">
+                      <Layers size={12} />+{item.enderecos.length - 2} endereços
+                    </div>
+                  )}
+                </div>
               );
-            }
+            },
           },
           {
-            key: 'acoes',
-            title: 'Ações',
-            align: 'center' as const,
+            key: "acoes",
+            title: "Ações",
+            align: "center" as const,
             render: (value: unknown, item: Passageiro) => {
               void value;
 
               const handleDelete = async () => {
                 const confirmed = await confirm({
-                  title: 'Excluir Passageiro',
-                  message: `Tem certeza que deseja excluir o passageiro "${item.nomeCompleto}"? Esta ação não pode ser desfeita.`,
-                  confirmText: 'Sim, excluir',
-                  cancelText: 'Cancelar',
-                  type: 'danger'
+                  title: "Arquivar Passageiro",
+                  message: `Tem certeza que deseja arquivar o passageiro "${item.nomeCompleto}"? Ele não aparecerá mais na lista, mas poderá ser recuperado posteriormente.`,
+                  confirmText: "Sim, arquivar",
+                  cancelText: "Cancelar",
+                  type: "danger",
                 });
 
                 if (confirmed) {
                   await deletePassageiro(item.id);
                   await passengerTable.refresh();
-                  toast.success('Passageiro excluído com sucesso!');
+                  toast.success("Passageiro arquivado com sucesso!");
                 }
               };
 
@@ -378,16 +417,16 @@ export default function PassageirosPage() {
                 setSelectedPassenger(item);
                 setFormData({
                   nomeCompleto: item.nomeCompleto,
-                  email: item.email || '',
+                  email: item.email || "",
                   celular: item.celular,
-                  cpf: item.cpf || '',
-                  enderecos: item.enderecos.map(e => ({
+                  cpf: item.cpf || "",
+                  enderecos: item.enderecos.map((e) => ({
                     rotulo: e.rotulo,
                     enderecoCompleto: e.enderecoCompleto,
-                    referencia: e.referencia || ''
+                    referencia: e.referencia || "",
                   })),
-                  notificar: item.notificar === true ? 'Sim' : 'Não',
-                  genero: item.genero || 'Sem resposta'
+                  notificar: item.notificar === true ? "Sim" : "Não",
+                  genero: item.genero || "Sem resposta",
                 });
                 setIsEditModalOpen(true);
               };
@@ -416,14 +455,14 @@ export default function PassageirosPage() {
                   <button
                     onClick={handleDelete}
                     className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                    title="Excluir"
+                    title="Arquivar"
                   >
                     <Trash2 size={18} />
                   </button>
                 </div>
               );
-            }
-          }
+            },
+          },
         ]}
         searchPlaceholder="Buscar por nome, CPF ou e-mail"
         emptyMessage="Nenhum passageiro encontrado."
@@ -441,27 +480,43 @@ export default function PassageirosPage() {
         >
           <form onSubmit={handleSubmit} className="space-y-12">
             <section className="space-y-6">
-              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                  <UserSquare2 size={20} className="text-slate-500" /> Detalhes do Passageiro
+              <div
+                className="flex items-center border-b-2 border-slate-100 pb-4"
+                style={{ paddingBottom: "1.25rem" }}
+              >
+                <h3
+                  className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3"
+                  style={{ lineHeight: "1.3" }}
+                >
+                  <UserSquare2 size={20} className="text-slate-500" /> Detalhes
+                  do Passageiro
                 </h3>
               </div>
               <div className="grid grid-cols-1 gap-6">
                 <div className="flex flex-col md:flex-row gap-6 items-start">
                   <div className="space-y-2 flex-[2]">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome completo <RequiredAsterisk /></label>
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                      Nome completo <RequiredAsterisk />
+                    </label>
                     <input
                       required
                       placeholder="Ex: Marina Costa"
                       value={formData.nomeCompleto}
-                      onChange={(event) => handleInputChange('nomeCompleto', event.target.value)}
+                      onChange={(event) =>
+                        handleInputChange("nomeCompleto", event.target.value)
+                      }
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
                   <div className="space-y-2 flex-1">
                     <div className="flex justify-between items-center mb-1">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <RequiredAsterisk /></label>
-                      <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1" style={{ marginTop: '-4px' }}>
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        Celular <RequiredAsterisk />
+                      </label>
+                      <div
+                        className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1"
+                        style={{ marginTop: "-4px" }}
+                      >
                         <input
                           type="checkbox"
                           id="isEstrangeiroNew"
@@ -469,30 +524,44 @@ export default function PassageirosPage() {
                           onChange={(e) => {
                             setIsEstrangeiro(e.target.checked);
                             // Limpa o campo do celular ao mudar o modo para evitar erros de máscara
-                            setFormData(prev => ({ ...prev, celular: '' }));
+                            setFormData((prev) => ({ ...prev, celular: "" }));
                           }}
                           className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                         />
-                        <label htmlFor="isEstrangeiroNew" className="text-xs font-bold text-slate-700 cursor-pointer">Estrangeiro</label>
+                        <label
+                          htmlFor="isEstrangeiroNew"
+                          className="text-xs font-bold text-slate-700 cursor-pointer"
+                        >
+                          Estrangeiro
+                        </label>
                       </div>
                     </div>
                     <input
                       required={isEstrangeiro}
-                      placeholder={isEstrangeiro ? "+00 123456789" : "(22) 99999-0000"}
+                      placeholder={
+                        isEstrangeiro ? "+00 123456789" : "(22) 99999-0000"
+                      }
                       value={formData.celular}
-                      onChange={(event) => handleInputChange('celular', event.target.value)}
+                      onChange={(event) =>
+                        handleInputChange("celular", event.target.value)
+                      }
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
-                  <div className="space-y-2 flex-[0.8]" style={{ marginTop: '-4px' }}>
+                  <div
+                    className="space-y-2 flex-[0.8]"
+                    style={{ marginTop: "-4px" }}
+                  >
                     <GeologSearchableSelect
                       label="Notificar"
                       options={[
-                        { id: 'Sim', nome: 'Sim' },
-                        { id: 'Não', nome: 'Não' }
+                        { id: "Sim", nome: "Sim" },
+                        { id: "Não", nome: "Não" },
                       ]}
                       value={formData.notificar}
-                      onChange={(value) => setFormData({...formData, notificar: value})}
+                      onChange={(value) =>
+                        setFormData({ ...formData, notificar: value })
+                      }
                       triggerClassName="mt-1 h-[56px] py-3"
                       required
                       disableSearch
@@ -501,21 +570,29 @@ export default function PassageirosPage() {
                 </div>
                 <div className="flex flex-col md:flex-row gap-6 items-start">
                   <div className="space-y-2 flex-[1.5]">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail</label>
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                      E-mail
+                    </label>
                     <input
                       type="email"
                       placeholder="contato@exemplo.com"
                       value={formData.email}
-                      onChange={(event) => handleInputChange('email', event.target.value)}
+                      onChange={(event) =>
+                        handleInputChange("email", event.target.value)
+                      }
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
                   <div className="space-y-2 flex-[0.7]">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">CPF</label>
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                      CPF
+                    </label>
                     <input
                       placeholder="000.000.000-00"
                       value={formData.cpf}
-                      onChange={(event) => handleInputChange('cpf', event.target.value)}
+                      onChange={(event) =>
+                        handleInputChange("cpf", event.target.value)
+                      }
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
@@ -523,12 +600,14 @@ export default function PassageirosPage() {
                     <GeologSearchableSelect
                       label="Gênero"
                       options={[
-                        { id: 'Masculino', nome: 'Masculino' },
-                        { id: 'Feminino', nome: 'Feminino' },
-                        { id: 'Sem resposta', nome: 'Sem resposta' }
+                        { id: "Masculino", nome: "Masculino" },
+                        { id: "Feminino", nome: "Feminino" },
+                        { id: "Sem resposta", nome: "Sem resposta" },
                       ]}
                       value={formData.genero}
-                      onChange={(value) => setFormData({...formData, genero: value})}
+                      onChange={(value) =>
+                        setFormData({ ...formData, genero: value })
+                      }
                       triggerClassName="mt-1 h-[56px] py-3"
                       disableSearch
                     />
@@ -538,12 +617,22 @@ export default function PassageirosPage() {
             </section>
 
             <section className="space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
+              <div
+                className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-slate-100 pb-4"
+                style={{ paddingBottom: "1.25rem" }}
+              >
                 <div>
-                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                    <MapPin size={20} className="text-blue-600" /> Endereços monitorados
+                  <h3
+                    className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3"
+                    style={{ lineHeight: "1.3" }}
+                  >
+                    <MapPin size={20} className="text-blue-600" /> Endereços
+                    monitorados
                   </h3>
-                  <p className="text-sm text-slate-500 mt-2">Registre bases fixas, hotéis, residências e referências operacionais.</p>
+                  <p className="text-sm text-slate-500 mt-2">
+                    Registre bases fixas, hotéis, residências e referências
+                    operacionais (opcional).
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -556,41 +645,65 @@ export default function PassageirosPage() {
 
               <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div className="hidden md:grid grid-cols-[1.2fr_2fr_1fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
-                  <span>Rótulo <RequiredAsterisk /></span>
-                  <span>Endereço completo <RequiredAsterisk /></span>
-                  <span>Referência <RequiredAsterisk /></span>
+                  <span>Rótulo</span>
+                  <span>Endereço completo</span>
+                  <span>Referência</span>
                   <span className="text-right">Ações</span>
                 </div>
                 <div className="divide-y divide-slate-100 max-h-[40vh] overflow-y-auto custom-scrollbar">
                   {formData.enderecos.map((endereco, index) => (
-                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1.2fr_2fr_1fr_auto] gap-4 items-start px-6 py-5">
+                    <div
+                      key={index}
+                      className="grid grid-cols-1 md:grid-cols-[1.2fr_2fr_1fr_auto] gap-4 items-start px-6 py-5"
+                    >
                       <div className="space-y-2 md:space-y-1">
-                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Rótulo <RequiredAsterisk /></label>
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          Rótulo
+                        </label>
                         <input
-                          required
                           placeholder="Residencial, Base, Hotel..."
                           value={endereco.rotulo}
-                          onChange={(event) => handleEnderecoChange(index, 'rotulo', event.target.value)}
+                          onChange={(event) =>
+                            handleEnderecoChange(
+                              index,
+                              "rotulo",
+                              event.target.value,
+                            )
+                          }
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
                       <div className="space-y-2 md:space-y-1">
-                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Endereço completo <RequiredAsterisk /></label>
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          Endereço completo
+                        </label>
                         <input
-                          required
                           placeholder="Rua, número, bairro, cidade - UF"
                           value={endereco.enderecoCompleto}
-                          onChange={(event) => handleEnderecoChange(index, 'enderecoCompleto', event.target.value)}
+                          onChange={(event) =>
+                            handleEnderecoChange(
+                              index,
+                              "enderecoCompleto",
+                              event.target.value,
+                            )
+                          }
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
                       <div className="space-y-2 md:space-y-1">
-                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Referência <RequiredAsterisk /></label>
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          Referência
+                        </label>
                         <input
-                          required
                           placeholder="Portão azul, bloco B..."
-                          value={endereco.referencia || ''}
-                          onChange={(event) => handleEnderecoChange(index, 'referencia', event.target.value)}
+                          value={endereco.referencia || ""}
+                          onChange={(event) =>
+                            handleEnderecoChange(
+                              index,
+                              "referencia",
+                              event.target.value,
+                            )
+                          }
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
@@ -605,7 +718,9 @@ export default function PassageirosPage() {
                             <Trash2 size={16} />
                           </button>
                         ) : (
-                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 pt-3">Principal</span>
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 pt-3">
+                            Principal
+                          </span>
                         )}
                       </div>
                     </div>
@@ -640,24 +755,42 @@ export default function PassageirosPage() {
             <div className="space-y-4">
               <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
                 <UserSquare2 size={24} className="text-blue-600" />
-                <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.1em]">Informações Pessoais</h3>
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.1em]">
+                  Informações Pessoais
+                </h3>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">Nome Completo</label>
-                  <p className="text-base font-bold text-slate-800 mt-1">{selectedPassenger.nomeCompleto}</p>
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">
+                    Nome Completo
+                  </label>
+                  <p className="text-base font-bold text-slate-800 mt-1">
+                    {selectedPassenger.nomeCompleto}
+                  </p>
                 </div>
                 <div>
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">Celular</label>
-                  <p className="text-base font-bold text-slate-800 mt-1">{selectedPassenger.celular}</p>
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">
+                    Celular
+                  </label>
+                  <p className="text-base font-bold text-slate-800 mt-1">
+                    {selectedPassenger.celular}
+                  </p>
                 </div>
                 <div>
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">E-mail</label>
-                  <p className="text-base font-bold text-slate-800 mt-1">{selectedPassenger.email || 'Não informado'}</p>
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">
+                    E-mail
+                  </label>
+                  <p className="text-base font-bold text-slate-800 mt-1">
+                    {selectedPassenger.email || "Não informado"}
+                  </p>
                 </div>
                 <div>
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">CPF</label>
-                  <p className="text-base font-bold text-slate-800 mt-1">{selectedPassenger.cpf || 'Não informado'}</p>
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">
+                    CPF
+                  </label>
+                  <p className="text-base font-bold text-slate-800 mt-1">
+                    {selectedPassenger.cpf || "Não informado"}
+                  </p>
                 </div>
               </div>
             </div>
@@ -665,18 +798,27 @@ export default function PassageirosPage() {
             <div className="space-y-4">
               <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
                 <MapPin size={24} className="text-blue-600" />
-                <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.1em]">Endereços</h3>
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.1em]">
+                  Endereços
+                </h3>
               </div>
               <div className="space-y-3">
                 {selectedPassenger.enderecos.map((endereco) => (
-                  <div key={endereco.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div
+                    key={endereco.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50 p-4"
+                  >
                     <div className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-500 mb-2">
                       <MapPin size={14} className="text-blue-500" />
                       {endereco.rotulo}
                     </div>
-                    <p className="text-base font-bold text-slate-700">{endereco.enderecoCompleto}</p>
+                    <p className="text-base font-bold text-slate-700">
+                      {endereco.enderecoCompleto}
+                    </p>
                     {endereco.referencia && (
-                      <p className="text-sm font-medium text-slate-500 mt-1">Referência: {endereco.referencia}</p>
+                      <p className="text-sm font-medium text-slate-500 mt-1">
+                        Referência: {endereco.referencia}
+                      </p>
                     )}
                   </div>
                 ))}
@@ -700,57 +842,87 @@ export default function PassageirosPage() {
         >
           <form onSubmit={handleEditSubmit} className="space-y-12">
             <section className="space-y-6">
-              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                  <UserSquare2 size={20} className="text-slate-500" /> Detalhes do Passageiro
+              <div
+                className="flex items-center border-b-2 border-slate-100 pb-4"
+                style={{ paddingBottom: "1.25rem" }}
+              >
+                <h3
+                  className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3"
+                  style={{ lineHeight: "1.3" }}
+                >
+                  <UserSquare2 size={20} className="text-slate-500" /> Detalhes
+                  do Passageiro
                 </h3>
               </div>
               <div className="grid grid-cols-1 gap-6">
                 <div className="flex flex-col md:flex-row gap-6 items-start">
                   <div className="space-y-2 flex-[2]">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome completo <RequiredAsterisk /></label>
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                      Nome completo <RequiredAsterisk />
+                    </label>
                     <input
                       required
                       placeholder="Ex: Marina Costa"
                       value={formData.nomeCompleto}
-                      onChange={(event) => handleInputChange('nomeCompleto', event.target.value)}
+                      onChange={(event) =>
+                        handleInputChange("nomeCompleto", event.target.value)
+                      }
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
                   <div className="space-y-2 flex-1">
                     <div className="flex justify-between items-center mb-1">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <RequiredAsterisk /></label>
-                      <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1" style={{ marginTop: '-4px' }}>
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        Celular <RequiredAsterisk />
+                      </label>
+                      <div
+                        className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1"
+                        style={{ marginTop: "-4px" }}
+                      >
                         <input
                           type="checkbox"
                           id="isEstrangeiroEdit"
                           checked={isEstrangeiro}
                           onChange={(e) => {
                             setIsEstrangeiro(e.target.checked);
-                            setFormData(prev => ({ ...prev, celular: '' }));
+                            setFormData((prev) => ({ ...prev, celular: "" }));
                           }}
                           className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                         />
-                        <label htmlFor="isEstrangeiroEdit" className="text-xs font-bold text-slate-700 cursor-pointer">Estrangeiro</label>
+                        <label
+                          htmlFor="isEstrangeiroEdit"
+                          className="text-xs font-bold text-slate-700 cursor-pointer"
+                        >
+                          Estrangeiro
+                        </label>
                       </div>
                     </div>
                     <input
                       required={isEstrangeiro}
-                      placeholder={isEstrangeiro ? "+00 123456789" : "(22) 99999-0000"}
+                      placeholder={
+                        isEstrangeiro ? "+00 123456789" : "(22) 99999-0000"
+                      }
                       value={formData.celular}
-                      onChange={(event) => handleInputChange('celular', event.target.value)}
+                      onChange={(event) =>
+                        handleInputChange("celular", event.target.value)
+                      }
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
-                  <div className="space-y-2 flex-[0.8]" style={{ marginTop: '-4px' }}>
+                  <div
+                    className="space-y-2 flex-[0.8]"
+                    style={{ marginTop: "-4px" }}
+                  >
                     <GeologSearchableSelect
                       label="Notificar"
                       options={[
-                        { id: 'Sim', nome: 'Sim' },
-                        { id: 'Não', nome: 'Não' }
+                        { id: "Sim", nome: "Sim" },
+                        { id: "Não", nome: "Não" },
                       ]}
                       value={formData.notificar}
-                      onChange={(value) => setFormData({...formData, notificar: value})}
+                      onChange={(value) =>
+                        setFormData({ ...formData, notificar: value })
+                      }
                       triggerClassName="mt-1 h-[56px] py-3"
                       required
                       disableSearch
@@ -759,21 +931,29 @@ export default function PassageirosPage() {
                 </div>
                 <div className="flex flex-col md:flex-row gap-6 items-start">
                   <div className="space-y-2 flex-[1.5]">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">E-mail</label>
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                      E-mail
+                    </label>
                     <input
                       type="email"
                       placeholder="contato@exemplo.com"
                       value={formData.email}
-                      onChange={(event) => handleInputChange('email', event.target.value)}
+                      onChange={(event) =>
+                        handleInputChange("email", event.target.value)
+                      }
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
                   <div className="space-y-2 flex-[0.7]">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">CPF</label>
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                      CPF
+                    </label>
                     <input
                       placeholder="000.000.000-00"
                       value={formData.cpf}
-                      onChange={(event) => handleInputChange('cpf', event.target.value)}
+                      onChange={(event) =>
+                        handleInputChange("cpf", event.target.value)
+                      }
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                     />
                   </div>
@@ -781,12 +961,14 @@ export default function PassageirosPage() {
                     <GeologSearchableSelect
                       label="Gênero"
                       options={[
-                        { id: 'Masculino', nome: 'Masculino' },
-                        { id: 'Feminino', nome: 'Feminino' },
-                        { id: 'Sem resposta', nome: 'Sem resposta' }
+                        { id: "Masculino", nome: "Masculino" },
+                        { id: "Feminino", nome: "Feminino" },
+                        { id: "Sem resposta", nome: "Sem resposta" },
                       ]}
                       value={formData.genero}
-                      onChange={(value) => setFormData({...formData, genero: value})}
+                      onChange={(value) =>
+                        setFormData({ ...formData, genero: value })
+                      }
                       triggerClassName="mt-1 h-[56px] py-3"
                       disableSearch
                     />
@@ -796,12 +978,21 @@ export default function PassageirosPage() {
             </section>
 
             <section className="space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
+              <div
+                className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-slate-100 pb-4"
+                style={{ paddingBottom: "1.25rem" }}
+              >
                 <div>
-                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                    <MapPin size={20} className="text-blue-600" /> Endereços monitorados
+                  <h3
+                    className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3"
+                    style={{ lineHeight: "1.3" }}
+                  >
+                    <MapPin size={20} className="text-blue-600" /> Endereços
+                    monitorados
                   </h3>
-                  <p className="text-xs text-slate-500 font-medium mt-1">Preencha ao menos um endereço completo</p>
+                  <p className="text-xs text-slate-500 font-medium mt-1">
+                    Adicione endereços quando necessário (opcional)
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -814,41 +1005,65 @@ export default function PassageirosPage() {
 
               <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div className="hidden md:grid grid-cols-[1.2fr_2fr_1fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
-                  <span>Rótulo <RequiredAsterisk /></span>
-                  <span>Endereço completo <RequiredAsterisk /></span>
-                  <span>Referência <RequiredAsterisk /></span>
+                  <span>Rótulo</span>
+                  <span>Endereço completo</span>
+                  <span>Referência</span>
                   <span className="text-right">Ações</span>
                 </div>
                 <div className="divide-y divide-slate-100 max-h-[40vh] overflow-y-auto custom-scrollbar">
                   {formData.enderecos.map((endereco, index) => (
-                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1.2fr_2fr_1fr_auto] gap-4 items-start px-6 py-5">
+                    <div
+                      key={index}
+                      className="grid grid-cols-1 md:grid-cols-[1.2fr_2fr_1fr_auto] gap-4 items-start px-6 py-5"
+                    >
                       <div className="space-y-2 md:space-y-1">
-                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Rótulo <RequiredAsterisk /></label>
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          Rótulo
+                        </label>
                         <input
-                          required
                           placeholder="Residencial, Base, Hotel..."
                           value={endereco.rotulo}
-                          onChange={(event) => handleEnderecoChange(index, 'rotulo', event.target.value)}
+                          onChange={(event) =>
+                            handleEnderecoChange(
+                              index,
+                              "rotulo",
+                              event.target.value,
+                            )
+                          }
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
                       <div className="space-y-2 md:space-y-1">
-                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Endereço completo <RequiredAsterisk /></label>
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          Endereço completo
+                        </label>
                         <input
-                          required
                           placeholder="Rua, número, bairro, cidade - UF"
                           value={endereco.enderecoCompleto}
-                          onChange={(event) => handleEnderecoChange(index, 'enderecoCompleto', event.target.value)}
+                          onChange={(event) =>
+                            handleEnderecoChange(
+                              index,
+                              "enderecoCompleto",
+                              event.target.value,
+                            )
+                          }
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
                       <div className="space-y-2 md:space-y-1">
-                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Referência <RequiredAsterisk /></label>
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          Referência
+                        </label>
                         <input
-                          required
                           placeholder="Portão azul, bloco B..."
-                          value={endereco.referencia || ''}
-                          onChange={(event) => handleEnderecoChange(index, 'referencia', event.target.value)}
+                          value={endereco.referencia || ""}
+                          onChange={(event) =>
+                            handleEnderecoChange(
+                              index,
+                              "referencia",
+                              event.target.value,
+                            )
+                          }
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>

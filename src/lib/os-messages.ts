@@ -1,6 +1,9 @@
 /**
- * Templates centralizados de mensagens WhatsApp para OS.
- * Usado tanto pelo frontend (manual) quanto pelas API routes (automático).
+ * Templates centralizados de mensagens para OS.
+ * Usado para formatação de mensagens (WhatsApp, email, SMS, etc.).
+ *
+ * Nota: As mensagens são enviadas via Meta API oficial (WhatsApp Business).
+ * WAHA/WPPConnect foram removidos em 2026.
  */
 
 export interface ItineraryStop {
@@ -26,10 +29,13 @@ export interface PassengerInfo {
 
 export interface DriverNotificationData {
   protocolo: string;
+  data?: string | null;
+  hora?: string | null;
   osNumber?: string | null;
   fornecedor?: string;
   empresa: string;
   solicitante?: string | null;
+  centroCusto?: string | null;
   transporteTipo?: string | null;
   motorista: string;
   motoristaTelefone?: string | null;
@@ -38,7 +44,8 @@ export interface DriverNotificationData {
   veiculoPlaca?: string | null;
   passageiros: PassengerInfo[];
   itineraries: ItineraryGroup[];
-  acceptLink: string;
+  acceptLink?: string | null;
+  startRouteLink?: string | null;
 }
 
 export interface PassengerNotificationData {
@@ -53,45 +60,320 @@ export interface PassengerNotificationData {
   confirmationLink: string;
 }
 
+export type OperationalCycleKind = "itinerary" | "return";
+
+export type OperationalCycleState =
+  | "pending"
+  | "awaiting_accept"
+  | "awaiting_start"
+  | "awaiting_km_start"
+  | "awaiting_finish"
+  | "awaiting_km_finish"
+  | "completed"
+  | "cancelled";
+
+export interface WaypointLike {
+  itineraryIndex?: number | null;
+  position?: number | null;
+}
+
+export interface OperationalCycle {
+  itineraryIndex: number;
+  sequenceOrder: number;
+  kind: OperationalCycleKind;
+  ordinal: number;
+  title: string;
+  state: OperationalCycleState;
+  messageSentAt?: string | null;
+  acceptedAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  kmInitial?: number | null;
+  kmFinal?: number | null;
+}
+
 export interface DriverAcceptData {
   startRouteLink: string;
+  cycleTitle?: string;
 }
 
 export interface DriverStartRouteData {
   kmInitial: number;
   finishLink: string;
+  cycleTitle?: string;
 }
 
 function numeroParaOrdinal(n: number): string {
   const unidades = [
-    '', 'Primeiro', 'Segundo', 'Terceiro', 'Quarto', 'Quinto',
-    'Sexto', 'Sétimo', 'Oitavo', 'Nono',
+    "",
+    "Primeiro",
+    "Segundo",
+    "Terceiro",
+    "Quarto",
+    "Quinto",
+    "Sexto",
+    "Sétimo",
+    "Oitavo",
+    "Nono",
   ];
   const especiais: Record<number, string> = {
-    10: 'Décimo', 11: 'Décimo Primeiro', 12: 'Décimo Segundo',
-    13: 'Décimo Terceiro', 14: 'Décimo Quarto', 15: 'Décimo Quinto',
-    16: 'Décimo Sexto', 17: 'Décimo Sétimo', 18: 'Décimo Oitavo', 19: 'Décimo Nono',
+    10: "Décimo",
+    11: "Décimo Primeiro",
+    12: "Décimo Segundo",
+    13: "Décimo Terceiro",
+    14: "Décimo Quarto",
+    15: "Décimo Quinto",
+    16: "Décimo Sexto",
+    17: "Décimo Sétimo",
+    18: "Décimo Oitavo",
+    19: "Décimo Nono",
   };
   const dezenas: Record<number, string> = {
-    2: 'Vigésimo', 3: 'Trigésimo', 4: 'Quadragésimo', 5: 'Quinquagésimo',
-    6: 'Sexagésimo', 7: 'Septuagésimo', 8: 'Octogésimo', 9: 'Nonagésimo',
+    2: "Vigésimo",
+    3: "Trigésimo",
+    4: "Quadragésimo",
+    5: "Quinquagésimo",
+    6: "Sexagésimo",
+    7: "Septuagésimo",
+    8: "Octogésimo",
+    9: "Nonagésimo",
   };
   if (n >= 1 && n <= 9) return unidades[n];
-  if (n >= 10 && n <= 19) return especiais[n] || '';
+  if (n >= 10 && n <= 19) return especiais[n] || "";
   if (n >= 20 && n <= 99) {
     const d = Math.floor(n / 10);
     const u = n % 10;
-    const dezenaText = dezenas[d] || '';
-    const unidadeText = u > 0 ? unidades[u] : '';
+    const dezenaText = dezenas[d] || "";
+    const unidadeText = u > 0 ? unidades[u] : "";
     if (dezenaText && unidadeText) return `${dezenaText} ${unidadeText}`;
     return dezenaText || unidadeText || String(n);
   }
-  if (n === 100) return 'Centésimo';
+  if (n === 100) return "Centésimo";
   return String(n);
 }
 
+function normalizeItineraryIndex(value: number | null | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+export function getOperationalCycleTitle(
+  cycle: Pick<OperationalCycle, "kind" | "ordinal">,
+): string {
+  const prefix = cycle.kind === "return" ? "Retorno" : "Itinerário";
+  return `${numeroParaOrdinal(cycle.ordinal)} ${prefix}`;
+}
+
+export function getOperationalCycleBannerTitle(
+  cycle: Pick<OperationalCycle, "kind" | "ordinal">,
+): string {
+  return `NOVO ATENDIMENTO - ${getOperationalCycleTitle(cycle).toUpperCase()}`;
+}
+
+export function buildOperationalCyclesFromWaypoints(
+  waypoints: WaypointLike[],
+): OperationalCycle[] {
+  const groups: Record<
+    number,
+    { itineraryIndex: number; firstPosition: number }
+  > = {};
+
+  waypoints.forEach((wp, position) => {
+    const itineraryIndex = normalizeItineraryIndex(wp.itineraryIndex);
+    if (!groups[itineraryIndex]) {
+      groups[itineraryIndex] = { itineraryIndex, firstPosition: position };
+      return;
+    }
+
+    groups[itineraryIndex].firstPosition = Math.min(
+      groups[itineraryIndex].firstPosition,
+      position,
+    );
+  });
+
+  const orderedGroups = Object.values(groups).sort(
+    (a, b) => a.firstPosition - b.firstPosition,
+  );
+  let itineraryOrdinal = 0;
+  let returnOrdinal = 0;
+
+  return orderedGroups.map((group, sequenceOrder) => {
+    const kind: OperationalCycleKind =
+      group.itineraryIndex < 0 ? "return" : "itinerary";
+    const ordinal = kind === "return" ? ++returnOrdinal : ++itineraryOrdinal;
+
+    return {
+      itineraryIndex: group.itineraryIndex,
+      sequenceOrder,
+      kind,
+      ordinal,
+      title: getOperationalCycleTitle({ kind, ordinal }),
+      state: "pending",
+      messageSentAt: null,
+      acceptedAt: null,
+      startedAt: null,
+      finishedAt: null,
+      kmInitial: null,
+      kmFinal: null,
+    };
+  });
+}
+
+export function normalizeOperationalCycles(value: unknown): OperationalCycle[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const mapped: OperationalCycle[] = [];
+
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) continue;
+
+    const record = item as Record<string, unknown>;
+    const itineraryIndex = Number(record.itineraryIndex);
+    const sequenceOrder = Number(record.sequenceOrder);
+    const ordinal = Number(record.ordinal);
+    const kind: OperationalCycleKind =
+      record.kind === "return" ? "return" : "itinerary";
+
+    if (
+      !Number.isFinite(itineraryIndex) ||
+      !Number.isFinite(sequenceOrder) ||
+      !Number.isFinite(ordinal)
+    ) {
+      continue;
+    }
+
+    mapped.push({
+      itineraryIndex,
+      sequenceOrder,
+      kind,
+      ordinal,
+      title:
+        typeof record.title === "string" && record.title.trim()
+          ? record.title
+          : getOperationalCycleTitle({ kind, ordinal }),
+      state: (record.state as OperationalCycleState) || "pending",
+      messageSentAt:
+        typeof record.messageSentAt === "string" ? record.messageSentAt : null,
+      acceptedAt:
+        typeof record.acceptedAt === "string" ? record.acceptedAt : null,
+      startedAt: typeof record.startedAt === "string" ? record.startedAt : null,
+      finishedAt:
+        typeof record.finishedAt === "string" ? record.finishedAt : null,
+      kmInitial:
+        typeof record.kmInitial === "number"
+          ? record.kmInitial
+          : Number.isFinite(Number(record.kmInitial))
+            ? Number(record.kmInitial)
+            : null,
+      kmFinal:
+        typeof record.kmFinal === "number"
+          ? record.kmFinal
+          : Number.isFinite(Number(record.kmFinal))
+            ? Number(record.kmFinal)
+            : null,
+    });
+  }
+
+  return mapped.sort((a, b) => a.sequenceOrder - b.sequenceOrder);
+}
+
+export function findOperationalCycleByIndex(
+  cycles: OperationalCycle[],
+  itineraryIndex: number,
+): OperationalCycle | undefined {
+  return cycles.find((cycle) => cycle.itineraryIndex === itineraryIndex);
+}
+
+export function getNextOperationalCycle(
+  cycles: OperationalCycle[],
+  itineraryIndex: number,
+): OperationalCycle | undefined {
+  const currentCycle = findOperationalCycleByIndex(cycles, itineraryIndex);
+  if (!currentCycle) return undefined;
+
+  return cycles.find(
+    (cycle) => cycle.sequenceOrder === currentCycle.sequenceOrder + 1,
+  );
+}
+
+export function getFirstPendingOperationalCycle(
+  cycles: OperationalCycle[],
+): OperationalCycle | undefined {
+  return cycles.find(
+    (cycle) => cycle.state !== "completed" && cycle.state !== "cancelled",
+  );
+}
+
+export type CycleOperationalStatus =
+  | "Pendente"
+  | "Aguardando"
+  | "Em Rota"
+  | "Finalizado"
+  | "Cancelado";
+
+/** Mapeia o state de um único ciclo para um status operacional exibível. */
+export function getCycleDisplayStatus(
+  state: OperationalCycleState,
+): CycleOperationalStatus {
+  switch (state) {
+    case "awaiting_accept":
+    case "awaiting_start":
+    case "awaiting_km_start":
+      return "Aguardando";
+    case "awaiting_finish":
+    case "awaiting_km_finish":
+      return "Em Rota";
+    case "completed":
+      return "Finalizado";
+    case "cancelled":
+      return "Cancelado";
+    default:
+      return "Pendente";
+  }
+}
+
+/**
+ * Deriva o status operacional geral a partir de todos os ciclos da OS.
+ * Regras (prioridade decrescente):
+ *  1. Qualquer ciclo "Em Rota" → "Em Rota"
+ *  2. Qualquer ciclo "Aguardando" → "Aguardando"
+ *  3. Todos ativos (não cancelados) "Finalizado" → "Finalizado"
+ *  4. Todos "Cancelado" → "Cancelado"
+ *  5. → "Pendente"
+ */
+export function deriveCyclesOperationalStatus(
+  cycles: OperationalCycle[],
+): CycleOperationalStatus {
+  if (cycles.length === 0) return "Pendente";
+
+  const states = cycles.map((c) => c.state);
+
+  if (states.some((s) => s === "awaiting_finish" || s === "awaiting_km_finish"))
+    return "Em Rota";
+  if (
+    states.some(
+      (s) =>
+        s === "awaiting_accept" ||
+        s === "awaiting_start" ||
+        s === "awaiting_km_start",
+    )
+  )
+    return "Aguardando";
+
+  const activeCycles = cycles.filter((c) => c.state !== "cancelled");
+  if (
+    activeCycles.length > 0 &&
+    activeCycles.every((c) => c.state === "completed")
+  )
+    return "Finalizado";
+  if (activeCycles.length === 0) return "Cancelado";
+
+  return "Pendente";
+}
+
 export function formatItineraryGroups(groups: ItineraryGroup[]): string {
-  if (groups.length === 0) return '';
+  if (groups.length === 0) return "";
 
   return groups
     .map((it) => {
@@ -101,103 +383,199 @@ export function formatItineraryGroups(groups: ItineraryGroup[]): string {
           ? `🔄 *${numeroParaOrdinal(Math.abs(it.index))} Retorno*`
           : `📍 *${numeroParaOrdinal(it.index + 1)} Itinerário*`);
 
-      const dateTimeLine = it.dateTime ? ` — ${it.dateTime}` : '';
+      const dateTimeLine = it.dateTime ? ` — ${it.dateTime}` : "";
       const stops = it.stops
         .map((stop, idx) => {
-          let line = '';
-          if (stop.isOrigin) line = `🟢 *Origem:* ${stop.label}`;
-          else if (stop.isDestination) line = `🔵 *Destino Final:* ${stop.label}`;
-          else line = `🔘 *Parada ${idx}:* ${stop.label}`;
+          let line = "";
+          if (stop.isOrigin) line = `   🟢 *Origem:* ${stop.label}`;
+          else if (stop.isDestination)
+            line = `   🔵 *Destino Final:* ${stop.label}`;
+          else {
+            // Parada numerada (começando em 1, não 0)
+            const paradaNum =
+              it.stops.filter(
+                (s, i) => i < idx && !s.isOrigin && !s.isDestination,
+              ).length + 1;
+            line = `   🔘 *Parada ${paradaNum}:* ${stop.label}`;
+          }
 
           if (stop.dateTime) line += ` (${stop.dateTime})`;
-          if (stop.isPassengerAddress) line += ' 📍 (seu endereço)';
-          return `   ${line}`;
+          if (stop.isPassengerAddress) line += " 📍 (seu endereço)";
+          return line;
         })
-        .join('\n');
+        .join("\n");
 
       return `────────────────\n${title}${dateTimeLine}\n\n${stops}\n`;
     })
-    .join('\n');
+    .join("\n");
 }
 
-/** Mensagem inicial enviada ao motorista com os dados da OS e link de aceite. */
-export function buildDriverNotificationMessage(data: DriverNotificationData): string {
-  const osLine = data.osNumber ? `🆔 *OS:* ${data.osNumber.toUpperCase()}\n` : '';
-  const fornecedorLine = data.fornecedor ? `📦 *Fornecedor:* ${data.fornecedor}\n` : '';
-  const vehicleBrandModel = data.veiculoMarcaModelo
-    ? `🏭 *Marca/Modelo:* ${data.veiculoMarcaModelo}\n`
-    : '';
+/**
+ * Mensagem inicial enviada ao motorista com os dados da OS.
+ * Formato do template do Facebook (Meta WhatsApp).
+ * O link de aceite é enviado como botão CTA no template, não no corpo da mensagem.
+ */
+export function buildDriverNotificationMessage(
+  data: DriverNotificationData,
+): string {
+  const osLine = data.osNumber ? `*OS:* ${data.osNumber.toUpperCase()}\n` : "";
+  const dataDisplay = data.data || "Não informado";
+  const horaDisplay = data.hora || "Não informado";
   const tipoCapitalizado = data.veiculoTipo
     ? data.veiculoTipo.charAt(0).toUpperCase() + data.veiculoTipo.slice(1)
-    : 'Não informado';
-  const placaDisplay = data.veiculoPlaca || 'Não informada';
+    : "Não informado";
+  const placaDisplay = data.veiculoPlaca || "Não informada";
 
   const paxText =
     data.passageiros.length > 0
-      ? data.passageiros.map((p) => `• ${p.nome}${p.celular ? ` – ${p.celular}` : ''}`).join('\n')
-      : 'Não informado';
+      ? data.passageiros
+          .map((p) => `* ${p.nome}${p.celular ? ` – ${p.celular}` : ""}`)
+          .join("\n")
+      : "Não informado";
 
   const itineraryText = formatItineraryGroups(data.itineraries);
 
+  const acceptSection = data.acceptLink
+    ? `\n──────────────────────────────\n👇 *Aceitar Serviço:*\n${data.acceptLink}`
+    : "";
+
+  const startRouteSection = data.startRouteLink
+    ? `\n──────────────────────────────\n👇 *Quando estiver pronto, clique para iniciar a rota:*\n${data.startRouteLink}`
+    : "";
+
   return (
-    `📋 *Protocolo:* ${data.protocolo}\n` +
-    `${osLine}` +
-    `${fornecedorLine}` +
-    `🏢 *Empresa:* ${data.empresa}\n` +
-    `👤 *Solicitante:* ${data.solicitante || 'Não informado'}\n` +
-    `🚗 *Transporte:* ${data.transporteTipo || tipoCapitalizado}\n\n` +
-    `────────────────\n` +
-    `👨‍✈️ *Motorista:* ${data.motorista}\n` +
-    `📞 *Contato:* ${data.motoristaTelefone || 'Não informado'}\n` +
-    `🚘 *Veículo:* ${tipoCapitalizado}\n` +
-    `${vehicleBrandModel}` +
-    `📝 *Placa:* ${placaDisplay}\n\n` +
-    `────────────────\n` +
-    `👥 *Passageiro(s):*\n${paxText}\n\n` +
-    `────────────────\n` +
-    `👇 *Aceitar o serviço:*\n` +
-    `${data.acceptLink}\n\n` +
-    `${itineraryText}\n`
+    `📃 *Protocolo:* ${data.protocolo}\n\n` +
+    `*Data:* ${dataDisplay}\n` +
+    `*Horário:* ${horaDisplay}\n\n` +
+    `*Empresa:* ${data.empresa}\n` +
+    `*Solicitante:* ${data.solicitante || "Não informado"}\n` +
+    `*C. Custo:* ${data.centroCusto || "Não informado"}\n` +
+    `${osLine}\n` +
+    `*Fornecedor:* Geolog Transporte Executivo\n\n` +
+    `──────────────────────────────\n` +
+    `👥 *Passageiros:*\n` +
+    `_Por ordem de origem_\n\n` +
+    `${paxText}\n\n` +
+    `──────────────────────────────\n` +
+    `📍 *Itinerário(s):*\n\n` +
+    `${itineraryText}\n` +
+    `──────────────────────────────\n` +
+    `👨‍✈️ *Motorista:*\n\n` +
+    `*${data.motorista}*\n` +
+    `*Contato:* ${data.motoristaTelefone || "Não informado"}\n` +
+    `*Veículo:* ${tipoCapitalizado}\n` +
+    `*Placa:* ${placaDisplay}\n\n` +
+    `_Portal Geolog_` +
+    acceptSection +
+    startRouteSection
   );
 }
 
 /** Mensagem de confirmação de aceite enviada ao motorista. */
-export function buildDriverAcceptConfirmationMessage(data: DriverAcceptData): string {
+export function buildDriverAcceptConfirmationMessage(
+  data: DriverAcceptData,
+): string {
+  const startSection = data.startRouteLink
+    ? `\n\n──────────────────────────────\n👇 *Quando estiver pronto, clique para iniciar a rota:*\n${data.startRouteLink}`
+    : "";
+
   return (
-    `✅ *Obrigado pelo aceite!*\n\n` +
-    `Sua viagem foi confirmada com sucesso.\n\n` +
-    `Quando estiver pronto para começar, clique no link abaixo para seguir para o próximo passo:\n` +
-    `${data.startRouteLink}`
+    `✅ *Serviço aceito com sucesso!*\n\n` +
+    `*${data.cycleTitle || "NOVO ATENDIMENTO"}*\n\n` +
+    `Obrigado por confirmar. Quando estiver a caminho, clique no link abaixo para registrar o KM inicial e dar início ao atendimento.` +
+    startSection +
+    `\n\n` +
+    `_Portal Geolog_`
   );
 }
 
 /** Mensagem de início de rota enviada ao motorista. */
-export function buildDriverStartRouteMessage(data: DriverStartRouteData): string {
+export function buildDriverStartRouteMessage(
+  data: DriverStartRouteData,
+): string {
   return (
     `🚗 *Rota iniciada!*\n\n` +
-    `KM inicial registrado: *${data.kmInitial.toLocaleString('pt-BR')}*\n\n` +
+    `${data.cycleTitle ? `🚦 *${data.cycleTitle.toUpperCase()}*\n\n` : ""}` +
+    `KM inicial registrado: *${data.kmInitial.toLocaleString("pt-BR")}*\n\n` +
     `Quando chegar ao destino, clique no link abaixo para finalizar a rota e informar apenas o KM final:\n` +
     `${data.finishLink}\n\n` +
     `_Após clicar, o status será atualizado automaticamente no painel._`
   );
 }
 
-/** Mensagem de notificação enviada ao passageiro. */
-export function buildPassengerNotificationMessage(data: PassengerNotificationData): string {
+export interface PassengerDetailsMessageData {
+  protocolo: string;
+  osNumber?: string | null;
+  fornecedor?: string;
+  empresa: string;
+  solicitante?: string | null;
+  motorista: string;
+  motoristaTelefone?: string | null;
+  veiculoTipo?: string | null;
+  veiculoMarcaModelo?: string | null;
+  veiculoPlaca?: string | null;
+  passageiros: PassengerInfo[];
+  itineraries: ItineraryGroup[];
+}
+
+/** Mensagem detalhada da OS enviada ao passageiro após clicar em 'Detalhes do Serviço'. */
+export function buildPassengerDetailsMessage(
+  data: PassengerDetailsMessageData,
+): string {
+  const osLine = data.osNumber
+    ? `🆔 *OS:* ${data.osNumber.toUpperCase()}\n`
+    : "";
+  const tipoCapitalizado = data.veiculoTipo
+    ? data.veiculoTipo.charAt(0).toUpperCase() + data.veiculoTipo.slice(1)
+    : "Não informado";
+  const placaDisplay = data.veiculoPlaca || "Não informada";
+  const paxText =
+    data.passageiros.length > 0
+      ? data.passageiros
+          .map((p) => `* ${p.nome}${p.celular ? ` – ${p.celular}` : ""}`)
+          .join("\n")
+      : "Não informado";
+  const itineraryText = formatItineraryGroups(data.itineraries);
+
   return (
-    `👋 Olá, *${data.passengerName || 'Passageiro'}*!\n\n` +
+    `📋 *Protocolo:* ${data.protocolo}\n` +
+    `${osLine}` +
+    `*Fornecedor:* ${data.fornecedor || "Geolog Transporte Executivo"}\n` +
+    `*Empresa:* ${data.empresa}\n` +
+    `*Solicitante:* ${data.solicitante || "Não informado"}\n\n` +
+    `────────────────\n` +
+    `👨‍✈️ *Motorista:* ${data.motorista}\n` +
+    `*Contato:* ${data.motoristaTelefone || "Não informado"}\n` +
+    `*Veículo:* ${tipoCapitalizado}\n` +
+    `*Marca/Modelo:* ${data.veiculoMarcaModelo || "Não informado"}\n` +
+    `*Placa:* ${placaDisplay}\n\n` +
+    `────────────────\n` +
+    `👥 *Passageiro(s):*\n\n` +
+    `${paxText}\n\n` +
+    `────────────────\n` +
+    `${itineraryText}\n` +
+    `_Portal Geolog_`
+  );
+}
+
+/** Mensagem de notificação enviada ao passageiro. */
+export function buildPassengerNotificationMessage(
+  data: PassengerNotificationData,
+): string {
+  const itineraryPart = data.itinerarySummary
+    ? `${data.itinerarySummary}\n────────────────\n`
+    : "";
+
+  return (
+    `👋 Olá, *${data.passengerName || "Passageiro"}*!\n\n` +
     `Sua viagem foi agendada. Por favor, *revise os dados abaixo* e confirme pelo link.\n\n` +
-    `📋 *Protocolo:* ${data.osProtocol || 'N/A'}\n\n` +
+    `📋 *Protocolo:* ${data.osProtocol || "N/A"}\n\n` +
     `────────────────\n` +
     `🚗 *Motorista:* ${data.driverName}\n` +
     `📞 *Contato:* ${data.driverPhone}\n` +
     `🪪 *Veículo:* ${data.vehicleLabel}\n` +
     `📝 *Placa:* ${data.vehiclePlate}\n\n` +
-    `────────────────\n` +
-    `📍 *Seu endereço:* ${data.passengerAddress}\n\n` +
-    `────────────────\n` +
-    `${data.itinerarySummary}\n` +
-    `────────────────\n` +
+    itineraryPart +
     `👇 *Revisar e confirmar viagem:*\n${data.confirmationLink}`
   );
 }

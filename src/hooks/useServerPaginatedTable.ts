@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { PaginatedResult } from '@/lib/supabase/queries';
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { PaginatedResult } from "@/lib/supabase/queries";
 
 export type ServerPaginatedFetch<T> = (params: {
   page: number;
@@ -7,9 +7,13 @@ export type ServerPaginatedFetch<T> = (params: {
   searchTerm: string;
 }) => Promise<PaginatedResult<T>>;
 
-export function useServerPaginatedTable<T>(fetchPage: ServerPaginatedFetch<T>, pageSize = 10, enabled = true) {
+export function useServerPaginatedTable<T>(
+  fetchPage: ServerPaginatedFetch<T>,
+  pageSize = 10,
+  enabled = true,
+) {
   const [page, setPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [items, setItems] = useState<T[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -31,10 +35,14 @@ export function useServerPaginatedTable<T>(fetchPage: ServerPaginatedFetch<T>, p
       setTotalCount(result.totalCount);
       setError(null);
     } catch (err) {
-      console.error('Erro ao carregar tabela paginada:', err);
+      console.error("Erro ao carregar tabela paginada:", err);
       setItems([]);
       setTotalCount(0);
-      setError(err instanceof Error ? err.message : 'Não foi possível carregar os dados.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Não foi possível carregar os dados.",
+      );
     } finally {
       setLoading(false);
     }
@@ -55,23 +63,41 @@ export function useServerPaginatedTable<T>(fetchPage: ServerPaginatedFetch<T>, p
     setPage(1);
   }, []);
 
-  const handlePageChange = useCallback((nextPage: number) => {
-    setPage(Math.max(1, Math.min(nextPage, totalPages)));
-  }, [totalPages]);
+  const handlePageChange = useCallback(
+    (nextPage: number) => {
+      setPage(Math.max(1, Math.min(nextPage, totalPages)));
+    },
+    [totalPages],
+  );
 
-  const result = useMemo(() => ({
-    items,
-    loading,
-    page,
-    pageSize,
-    totalCount,
-    totalPages,
-    searchTerm,
-    setSearchTerm: handleSearchChange,
-    setPage: handlePageChange,
-    refresh: loadPage,
-    error,
-  }), [items, loading, page, pageSize, totalCount, totalPages, searchTerm, handleSearchChange, handlePageChange, loadPage, error]);
+  const result = useMemo(
+    () => ({
+      items,
+      loading,
+      page,
+      pageSize,
+      totalCount,
+      totalPages,
+      searchTerm,
+      setSearchTerm: handleSearchChange,
+      setPage: handlePageChange,
+      refresh: loadPage,
+      error,
+    }),
+    [
+      items,
+      loading,
+      page,
+      pageSize,
+      totalCount,
+      totalPages,
+      searchTerm,
+      handleSearchChange,
+      handlePageChange,
+      loadPage,
+      error,
+    ],
+  );
 
   return result;
 }

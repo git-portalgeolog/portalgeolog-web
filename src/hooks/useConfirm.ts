@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback } from "react";
 
 interface ConfirmOptions {
   title: string;
   message: string;
   confirmText?: string;
   cancelText?: string;
-  type?: 'danger' | 'warning' | 'info';
+  type?: "danger" | "warning" | "info";
 }
 
 interface ConfirmState extends ConfirmOptions {
@@ -18,11 +18,11 @@ interface ConfirmState extends ConfirmOptions {
 export function useConfirm() {
   const [confirmState, setConfirmState] = useState<ConfirmState>({
     isOpen: false,
-    title: '',
-    message: '',
-    confirmText: 'Confirmar',
-    cancelText: 'Cancelar',
-    type: 'danger'
+    title: "",
+    message: "",
+    confirmText: "Confirmar",
+    cancelText: "Cancelar",
+    type: "danger",
   });
 
   const confirm = useCallback((options: ConfirmOptions): Promise<boolean> => {
@@ -30,13 +30,17 @@ export function useConfirm() {
       setConfirmState({
         ...options,
         isOpen: true,
-        onConfirm: () => resolve(true)
+        onConfirm: () => resolve(true),
       });
     });
   }, []);
 
   const closeConfirm = useCallback(() => {
-    setConfirmState(prev => ({ ...prev, isOpen: false, onConfirm: undefined }));
+    setConfirmState((prev) => ({
+      ...prev,
+      isOpen: false,
+      onConfirm: undefined,
+    }));
   }, []);
 
   const handleConfirm = useCallback(() => {
@@ -48,6 +52,6 @@ export function useConfirm() {
     confirm,
     confirmState,
     closeConfirm,
-    handleConfirm
+    handleConfirm,
   };
 }

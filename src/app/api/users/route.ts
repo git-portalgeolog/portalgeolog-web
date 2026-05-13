@@ -1,10 +1,10 @@
-import { createClient } from '@supabase/supabase-js';
-import type { User as SupabaseUser } from '@supabase/supabase-js';
-import { NextResponse } from 'next/server';
-import { Resend } from 'resend';
+import { createClient } from "@supabase/supabase-js";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
+import { NextResponse } from "next/server";
+import { Resend } from "resend";
 
 // Configurar Edge Runtime para Cloudflare Workers
-export const runtime = 'edge';
+export const runtime = "edge";
 
 type UserRoleRow = {
   id: string;
@@ -25,10 +25,16 @@ function getRequiredEnv(name: string): string {
 }
 
 function createSupabaseAdminClient() {
-  return createClient(
-    getRequiredEnv('NEXT_PUBLIC_SUPABASE_URL'),
-    getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY')
-  );
+  const supabaseUrl = getRequiredEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!serviceRoleKey) {
+    throw new Error(
+      "SUPABASE_SERVICE_ROLE_KEY is required for gestão de acesso",
+    );
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey);
 }
 
 function createResendClient() {
@@ -43,19 +49,20 @@ export async function GET() {
 
     // 1. Busca os perfis (roles)
     const { data: profiles, error: profileError } = await supabaseAdmin
-      .from('user_roles')
-      .select('*');
+      .from("user_roles")
+      .select("*");
 
     if (profileError) {
-      console.error('Error fetching user_roles:', profileError);
+      console.error("Error fetching user_roles:", profileError);
       throw profileError;
     }
 
     // 2. Busca os usuários do Authentication
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.listUsers();
-    
+    const { data: authData, error: authError } =
+      await supabaseAdmin.auth.admin.listUsers();
+
     if (authError) {
-      console.error('Error fetching auth users:', authError);
+      console.error("Error fetching auth users:", authError);
       throw authError;
     }
 
@@ -65,17 +72,20 @@ export async function GET() {
       return {
         id: user.id,
         email: user.email,
-        nome: profile?.nome || user.user_metadata?.full_name || 'Desconhecido',
-        tipo_usuario: profile?.tipo_usuario || 'interno',
-        categoria: profile?.categoria || 'operador',
+        nome: profile?.nome || user.user_metadata?.full_name || "Desconhecido",
+        tipo_usuario: profile?.tipo_usuario || "interno",
+        categoria: profile?.categoria || "operador",
         empresa_id: profile?.empresa_id,
-        created_at: user.created_at
+        created_at: user.created_at,
       };
     });
 
     return NextResponse.json(users);
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
   }
 }
 
@@ -84,22 +94,25 @@ export async function PATCH(request: Request) {
     const supabaseAdmin = createSupabaseAdminClient();
 
     const { id, updates } = await request.json();
-    
+
     const { data, error } = await supabaseAdmin
-      .from('user_roles')
+      .from("user_roles")
       .update(updates)
-      .eq('id', id)
+      .eq("id", id)
       .select()
       .single();
 
     if (error) {
-       console.error('Error updating user_roles:', error);
-       throw error;
+      console.error("Error updating user_roles:", error);
+      throw error;
     }
 
     return NextResponse.json(data);
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
   }
 }
 
@@ -111,33 +124,32 @@ export async function POST(request: Request) {
     const { email, nome, tipo_usuario, categoria } = await request.json();
 
     // 1. Criar o usuário no Auth (Admin)
-    const passwordDefault = '12345678';
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password: passwordDefault,
-      email_confirm: true,
-      user_metadata: { full_name: nome }
-    });
+    const passwordDefault = "12345678";
+    const { data: authData, error: authError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: passwordDefault,
+        email_confirm: true,
+        user_metadata: { full_name: nome },
+      });
 
     if (authError) {
-      console.error('Error creating auth user:', authError);
+      console.error("Error creating auth user:", authError);
       throw authError;
     }
 
     const userId = authData.user.id;
 
     // 2. Atualizar ou Inserir na tabela user_roles
-    const { error: roleError } = await supabaseAdmin
-      .from('user_roles')
-      .upsert({
-        id: userId,
-        nome: nome,
-        tipo_usuario: tipo_usuario || 'interno',
-        categoria: categoria || 'operador'
-      });
+    const { error: roleError } = await supabaseAdmin.from("user_roles").upsert({
+      id: userId,
+      nome: nome,
+      tipo_usuario: tipo_usuario || "interno",
+      categoria: categoria || "operador",
+    });
 
     if (roleError) {
-      console.error('Error inserting user_role:', roleError);
+      console.error("Error inserting user_role:", roleError);
       throw roleError;
     }
 
@@ -145,9 +157,9 @@ export async function POST(request: Request) {
     try {
       if (resend) {
         await resend.emails.send({
-          from: 'Portal Geolog <suporte@portalgeolog.com.br>',
+          from: "Portal Geolog <suporte@portalgeolog.com.br>",
           to: email,
-          subject: 'Bem-vindo ao Portal Geolog - Suas Credenciais de Acesso',
+          subject: "Bem-vindo ao Portal Geolog - Suas Credenciais de Acesso",
           html: `
           <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 12px; overflow: hidden;">
             <div style="background-color: #001C3A; padding: 40px; text-align: center;">
@@ -180,16 +192,19 @@ export async function POST(request: Request) {
               </p>
             </div>
           </div>
-        `
+        `,
         });
       }
     } catch (emailErr) {
-      console.error('Failed to send welcome email:', emailErr);
+      console.error("Failed to send welcome email:", emailErr);
     }
 
     return NextResponse.json({ success: true, user: authData.user });
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
   }
 }
 
@@ -198,29 +213,32 @@ export async function DELETE(request: Request) {
     const supabaseAdmin = createSupabaseAdminClient();
 
     const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
+    const id = searchParams.get("id");
 
-    if (!id) throw new Error('ID do usuário é obrigatório');
+    if (!id) throw new Error("ID do usuário é obrigatório");
 
     // 1. Deletar do Auth (Admin) - Isso remove o usuario do sistema
     const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(id);
     if (authError) {
-      console.error('Error deleting auth user:', authError);
+      console.error("Error deleting auth user:", authError);
       throw authError;
     }
 
     // 2. Deletar da tabela user_roles
     const { error: roleError } = await supabaseAdmin
-      .from('user_roles')
+      .from("user_roles")
       .delete()
-      .eq('id', id);
+      .eq("id", id);
 
     if (roleError) {
-      console.error('Error deleting user_role:', roleError);
+      console.error("Error deleting user_role:", roleError);
     }
 
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
   }
 }

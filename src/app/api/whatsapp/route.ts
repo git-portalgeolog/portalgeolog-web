@@ -1,42 +1,107 @@
-import { NextResponse } from 'next/server';
-import {
-  checkRateLimit,
-  getRateLimitHeaders,
-  rateLimitResponse,
-  unauthorizedResponse,
-  sendWhatsAppMessage,
-  validateAuth,
-} from '@/lib/whatsapp';
+import { NextResponse } from "next/server";
+import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/meta";
 
-export const runtime = 'edge';
+export const runtime = "edge";
 
 export async function POST(request: Request) {
   try {
-    if (!checkRateLimit(request, 30, 60)) {
-      return rateLimitResponse(request);
+    const body = await request.json();
+    const {
+      phone,
+      message,
+      useTemplate,
+      templateName,
+      templateVariables,
+      language,
+      buttons,
+    } = body;
+
+    if (!phone) {
+      return NextResponse.json(
+        { success: false, error: "Parâmetro phone é obrigatório." },
+        { status: 400 },
+      );
     }
 
-    const auth = await validateAuth(request);
-    if (!auth) {
-      return unauthorizedResponse(request);
+    // Se usar template
+    if (useTemplate && templateName && templateVariables) {
+      // Converter array de variáveis para formato da Meta API
+      // Todas as variáveis do body devem estar em um ÚNICO componente 'body'
+      const components: Array<Record<string, unknown>> = [
+        {
+          type: "body",
+          parameters: templateVariables.map((text: string) => ({
+            type: "text",
+            text,
+          })),
+        },
+      ];
+
+      // Adicionar payloads de botão (quick_reply) se fornecidos
+      if (Array.isArray(buttons)) {
+        (buttons as Array<{ type: string; payload: string }>).forEach(
+          (btn, index) => {
+            if (btn.type === "quick_reply") {
+              components.push({
+                type: "button",
+                sub_type: "quick_reply",
+                index: String(index),
+                parameters: [{ type: "payload", payload: btn.payload }],
+              });
+            }
+          },
+        );
+      }
+
+      const result = await sendWhatsAppTemplate(
+        phone,
+        templateName,
+        language || "pt_BR",
+        components,
+      );
+
+      if (result.success) {
+        return NextResponse.json({
+          success: true,
+          messageId: result.messageId,
+        });
+      } else {
+        return NextResponse.json(
+          { success: false, error: result.error },
+          { status: 500 },
+        );
+      }
     }
 
-    const { phone, message } = (await request.json()) as { phone: string; message: string };
+    // Se usar mensagem de texto simples
+    if (!message) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Parâmetro message é obrigatório quando não usa template.",
+        },
+        { status: 400 },
+      );
+    }
 
-    const data = await sendWhatsAppMessage(phone, message);
+    const result = await sendWhatsAppMessage(phone, message);
 
-    return NextResponse.json(
-      { success: true, api_response: data },
-      { headers: getRateLimitHeaders(request) }
-    );
-  } catch (error: unknown) {
-    console.error('🔥 Erro Crítico WAHA:', error);
+    if (result.success) {
+      return NextResponse.json({ success: true, messageId: result.messageId });
+    } else {
+      return NextResponse.json(
+        { success: false, error: result.error },
+        { status: 500 },
+      );
+    }
+  } catch (error) {
+    console.error("Erro ao enviar mensagem WhatsApp:", error);
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: error instanceof Error ? error.message : "Erro desconhecido",
       },
-      { status: 500, headers: getRateLimitHeaders(request) }
+      { status: 500 },
     );
   }
 }

@@ -1,13 +1,14 @@
-const { Client } = require('pg');
+const { Client } = require("pg");
 
 async function enableRealtime() {
-  const connectionString = "postgresql://postgres:AdminPGeolog@2026@db.hzpgfapvjwqtjclriisz.supabase.co:5432/postgres";
+  const connectionString =
+    "postgresql://postgres:AdminPGeolog@2026@db.hzpgfapvjwqtjclriisz.supabase.co:5432/postgres";
   const client = new Client({ connectionString });
 
   try {
-    console.log('🔄 Conectando ao banco de dados Supabase...');
+    console.log("🔄 Conectando ao banco de dados Supabase...");
     await client.connect();
-    console.log('✅ Conectado!');
+    console.log("✅ Conectado!");
 
     const sql = `
       BEGIN;
@@ -43,14 +44,13 @@ async function enableRealtime() {
       COMMIT;
     `;
 
-    console.log('🚀 Executando comandos de ativação Realtime...');
+    console.log("🚀 Executando comandos de ativação Realtime...");
     await client.query(sql);
-    console.log('✨ REALTIME ATIVADO COM SUCESSO PARA TODAS AS TABELAS!');
-
+    console.log("✨ REALTIME ATIVADO COM SUCESSO PARA TODAS AS TABELAS!");
   } catch (err) {
-    console.error('❌ Erro ao ativar Realtime:', err.message);
-    if (err.message.includes('password authentication failed')) {
-      console.error('⚠️ A senha fornecida parece estar incorreta.');
+    console.error("❌ Erro ao ativar Realtime:", err.message);
+    if (err.message.includes("password authentication failed")) {
+      console.error("⚠️ A senha fornecida parece estar incorreta.");
     }
     process.exit(1);
   } finally {

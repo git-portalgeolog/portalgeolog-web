@@ -1,6 +1,7 @@
 # Instruções para Deploy no Cloudflare Workers
 
 ## Problema Identificado
+
 Após o deploy, o site não funciona porque as variáveis de ambiente não estão disponíveis no runtime do Cloudflare Workers.
 
 ## Solução Implementada
@@ -8,13 +9,15 @@ Após o deploy, o site não funciona porque as variáveis de ambiente não estã
 ### 1. Configurações Atualizadas
 
 **Arquivos modificados:**
-- `vite.config.ts` - Agora injeta todas as variáveis WAHA_, SUPABASE_ e NEXT_PUBLIC_ no build
+
+- `vite.config.ts` - Agora injeta todas as variáveis WAHA*, SUPABASE* e NEXT*PUBLIC* no build
 - `worker/index.js` - Melhorado o Proxy para process.env que copia variáveis do Cloudflare env
 - `wrangler.toml` e `wrangler.workers.toml` - Adicionados placeholders para todas as variáveis necessárias
 
 ### 2. Passos para Deploy
 
 #### Opção A: Deploy com variáveis de ambiente no build
+
 ```bash
 # Exportar todas as variáveis necessárias
 export WAHA_API_KEY="sua_chave_aqui"
@@ -29,6 +32,7 @@ npx wrangler deploy --config wrangler.workers.toml
 ```
 
 #### Opção B: Usar wrangler secret put (recomendado para produção)
+
 ```bash
 # Fazer build
 npm run build
@@ -45,7 +49,9 @@ npx wrangler deploy --config wrangler.workers.toml
 ```
 
 #### Opção C: Deploy com GitHub Actions/CI/CD
+
 Configure as variáveis de ambiente no seu CI/CD:
+
 - `WAHA_API_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `WHATSAPP_HOOK_HMAC_KEY`
@@ -55,6 +61,7 @@ Configure as variáveis de ambiente no seu CI/CD:
 ### 3. Verificação
 
 Para verificar se as variáveis estão funcionando:
+
 1. Acesse `/api/test-env` no seu site deployado
 2. Deve retornar um JSON mostrando todas as variáveis
 
@@ -79,12 +86,14 @@ curl http://localhost:3000/api/test-env
 
 ### 6. Variáveis Necessárias
 
-**Públicas (NEXT_PUBLIC_):**
+**Públicas (NEXT*PUBLIC*):**
+
 - NEXT_PUBLIC_SUPABASE_URL
 - NEXT_PUBLIC_SUPABASE_ANON_KEY
 - NEXT_PUBLIC_WAHA_SESSION
 
-**Servidor (WAHA_):**
+**Servidor (WAHA\_):**
+
 - WAHA_API_URL
 - WAHA_API_KEY
 - WAHA_SESSION
@@ -95,8 +104,10 @@ curl http://localhost:3000/api/test-env
 - WAHA_REMOTE_DIR
 
 **Supabase:**
+
 - SUPABASE_SERVICE_ROLE_KEY
 
 **Outras:**
+
 - WHATSAPP_HOOK_HMAC_KEY
 - RESEND_API_KEY

@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import React, { useEffect } from 'react';
-import { X } from 'lucide-react';
+import React, { useEffect } from "react";
+import { X } from "lucide-react";
 
 interface StandardModalProps {
   children: React.ReactNode;
@@ -23,9 +23,9 @@ export default function StandardModal({
   subtitle,
   icon,
   footer,
-  maxWidthClassName = 'max-w-2xl',
-  containerClassName = '',
-  bodyClassName = 'p-6 md:p-10 pb-16 space-y-12',
+  maxWidthClassName = "max-w-2xl",
+  containerClassName = "",
+  bodyClassName = "p-6 md:p-10 pb-16 space-y-12",
   disableBackdropClose = false,
 }: StandardModalProps) {
   useEffect(() => {
@@ -33,17 +33,17 @@ export default function StandardModal({
     const scrollY = window.scrollY;
 
     // Bloquear scroll do body quando modal está aberto
-    document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.width = '100%';
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.width = "100%";
     document.body.style.top = `-${scrollY}px`;
 
     return () => {
       // Restaurar scroll quando modal fecha
-      document.body.style.overflow = '';
-      document.body.style.position = '';
-      document.body.style.width = '';
-      document.body.style.top = '';
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.width = "";
+      document.body.style.top = "";
       // Restaurar posição de scroll
       window.scrollTo(0, scrollY);
     };
@@ -51,23 +51,35 @@ export default function StandardModal({
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 modal-font">
-      <div className="absolute inset-0 bg-[#001C3A]/60 backdrop-blur-md" onClick={() => !disableBackdropClose && onClose()} />
+      <div
+        className="absolute inset-0 bg-[#001C3A]/60 backdrop-blur-md"
+        onClick={() => !disableBackdropClose && onClose()}
+      />
       <div
         className={`relative bg-white w-full ${maxWidthClassName} max-h-[92vh] rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-300 border border-slate-200 modal-content ${containerClassName}`}
-        style={{ textRendering: 'geometricPrecision' }}
+        style={{ textRendering: "geometricPrecision" }}
       >
-        <div className="bg-[var(--color-geolog-blue)] p-6 md:p-8 flex items-center justify-between shrink-0 relative overflow-hidden" style={{ paddingBottom: '1.75rem' }}>
+        <div
+          className="bg-[var(--color-geolog-blue)] p-6 md:p-8 flex items-center justify-between shrink-0 relative overflow-hidden"
+          style={{ paddingBottom: "1.75rem" }}
+        >
           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full -mr-32 -mt-32 blur-3xl opacity-50" />
           <div className="flex items-center gap-5 relative z-10">
             <div className="w-12 h-12 md:w-14 md:h-14 bg-white/10 rounded-2xl flex items-center justify-center text-white backdrop-blur-xl border border-white/20">
               {icon}
             </div>
             <div>
-              <h2 className="text-2xl md:text-3xl font-black text-white tracking-tight" style={{ lineHeight: '1.2', marginBottom: '0.25rem' }}>
+              <h2
+                className="text-2xl md:text-3xl font-black text-white tracking-tight"
+                style={{ lineHeight: "1.2", marginBottom: "0.25rem" }}
+              >
                 {title}
               </h2>
               {subtitle && (
-                <p className="text-blue-300/80 text-[11px] font-bold uppercase tracking-[0.2em]" style={{ lineHeight: '1.3' }}>
+                <p
+                  className="text-blue-300/80 text-[11px] font-bold uppercase tracking-[0.2em]"
+                  style={{ lineHeight: "1.3" }}
+                >
                   {subtitle}
                 </p>
               )}
@@ -82,7 +94,9 @@ export default function StandardModal({
           </button>
         </div>
 
-        <div className={`flex-1 overflow-y-auto overflow-hidden custom-scrollbar ${bodyClassName}`}>
+        <div
+          className={`flex-1 overflow-y-auto overflow-hidden custom-scrollbar ${bodyClassName}`}
+        >
           {children}
         </div>
 

@@ -177,12 +177,14 @@ export default function GeologSearchableSelect({
 
   return (
     <div className={`group relative ${className}`} ref={wrapperRef}>
-      <label
-        className={`font-black uppercase text-slate-500 tracking-wider ml-1 ${compact ? "text-[10px]" : "text-sm"} flex items-center gap-1`}
-      >
-        {label}
-        {required && <span className="text-rose-300 text-base">*</span>}
-      </label>
+      {(label || required) && (
+        <label
+          className={`font-black uppercase text-slate-500 tracking-wider ml-1 ${compact ? "text-[10px]" : "text-sm"} flex items-center gap-1`}
+        >
+          {label}
+          {required && <span className="text-rose-300 text-base">*</span>}
+        </label>
+      )}
 
       <div
         ref={triggerRef}
@@ -200,6 +202,7 @@ export default function GeologSearchableSelect({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                setIsOpen(false);
                 onQuickAdd();
               }}
               className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"

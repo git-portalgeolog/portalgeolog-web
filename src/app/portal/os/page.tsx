@@ -1,12 +1,20 @@
-'use client';
+"use client";
 
-import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import StandardModal from '@/components/StandardModal';
-import { 
-  Plus, 
+import React, {
+  useState,
+  useMemo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+} from "react";
+import { createClient } from "@/lib/supabase/client";
+import StandardModal from "@/components/StandardModal";
+import { FormErrorMessage } from "@/components/ui/FormErrorMessage";
+import {
+  Plus,
   Minus,
-  Truck, 
+  Truck,
   User,
   UserPlus,
   Calendar,
@@ -48,22 +56,48 @@ import {
   Filter,
   FilterX,
   Link,
-} from 'lucide-react';
-import { useData, type OrderService, type ParceiroServico } from '@/context/DataContext';
-import { fetchOSById, fetchOSPage } from '@/lib/supabase/queries';
-import { useServerPaginatedTable } from '@/hooks/useServerPaginatedTable';
-import GeologSearchableSelect from '@/components/ui/GeologSearchableSelect';
-import { DataTable } from '@/components/ui/DataTable';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import { toast } from 'sonner';
-import RequiredAsterisk from '@/components/ui/RequiredAsterisk';
-import OSCalendar from '@/components/OS/OSCalendar';
-import { useConfirm } from '@/hooks/useConfirm';
-import { BASE_URL } from '@/lib/constants';
-import { buildDriverNotificationMessage, type ItineraryGroup, type PassengerInfo } from '@/lib/os-messages';
+  History,
+} from "lucide-react";
+import {
+  useData,
+  type OrderService,
+  type ParceiroServico,
+} from "@/context/DataContext";
+import {
+  fetchOSById,
+  fetchOSPage,
+  fetchOSLogs,
+  type OSLog,
+} from "@/lib/supabase/queries";
+import { useServerPaginatedTable } from "@/hooks/useServerPaginatedTable";
+import GeologSearchableSelect from "@/components/ui/GeologSearchableSelect";
+import { DataTable } from "@/components/ui/DataTable";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { toast } from "sonner";
+import RequiredAsterisk from "@/components/ui/RequiredAsterisk";
+import OSCalendar from "@/components/OS/OSCalendar";
+import { useConfirm } from "@/hooks/useConfirm";
+import { BASE_URL } from "@/lib/constants";
+import {
+  buildOperationalCyclesFromWaypoints,
+  getOperationalCycleBannerTitle,
+  getCycleDisplayStatus,
+  deriveCyclesOperationalStatus,
+  type CycleOperationalStatus,
+  type OperationalCycleState,
+} from "@/lib/os-messages";
 
-type FormPassenger = { id: string; solicitanteId: string; nome: string; };
-type FormWaypoint = { label: string; lat: number | null; lng: number | null; comment: string; passengers: FormPassenger[]; itineraryIndex?: number; hora?: string; data?: string; };
+type FormPassenger = { id: string; solicitanteId: string; nome: string };
+type FormWaypoint = {
+  label: string;
+  lat: number | null;
+  lng: number | null;
+  comment: string;
+  passengers: FormPassenger[];
+  itineraryIndex?: number;
+  hora?: string;
+  data?: string;
+};
 type OSFormData = {
   data: string;
   hora: string;
@@ -71,66 +105,97 @@ type OSFormData = {
   os: string;
   clienteId: string;
   solicitante: string;
+  solicitanteId: string;
   motorista: string;
+  driverId: string;
   veiculoId: string;
   centroCusto: string;
   valorBruto: number | null;
   custo: number | null;
+  obsFinanceiras: string;
   waypoints: FormWaypoint[];
 };
 
-type PendingOSData = Omit<OSFormData, 'hora'> & {
+type PendingOSData = Omit<OSFormData, "hora"> & {
   hora: string | null;
   rota: { waypoints: FormWaypoint[] };
 };
 
 // Helper: group waypoints into itineraries
-type ItineraryGroup = { index: number; waypoints: FormWaypoint[]; waypointIndices: number[] };
-const getItineraries = (waypoints: FormWaypoint[]): ItineraryGroup[] => {
-  const groups: Record<number, ItineraryGroup> = {};
+type LocalItineraryGroup = {
+  index: number;
+  waypoints: FormWaypoint[];
+  waypointIndices: number[];
+};
+const getItineraries = (waypoints: FormWaypoint[]): LocalItineraryGroup[] => {
+  const groups: Record<number, LocalItineraryGroup> = {};
   waypoints.forEach((wp, idx) => {
     const it = wp.itineraryIndex ?? 0;
-    if (!groups[it]) groups[it] = { index: it, waypoints: [], waypointIndices: [] };
+    if (!groups[it])
+      groups[it] = { index: it, waypoints: [], waypointIndices: [] };
     groups[it].waypoints.push(wp);
     groups[it].waypointIndices.push(idx);
   });
-  return Object.values(groups).sort((a, b) => a.waypointIndices[0] - b.waypointIndices[0]);
+  return Object.values(groups).sort(
+    (a, b) => a.waypointIndices[0] - b.waypointIndices[0],
+  );
 };
 
-const getItinerarySectionTitle = (): string => 'Rotas e Destinos';
+const getItinerarySectionTitle = (): string => "Rotas e Destinos";
 
 const getItineraryTitle = (itineraryIndex: number): string => {
   if (itineraryIndex < 0) {
-    return 'Retorno';
+    return "Retorno";
   }
-  return 'Itinerário';
+  return "Itinerário";
 };
 
 function numeroParaOrdinal(n: number): string {
   const unidades = [
-    '', 'Primeiro', 'Segundo', 'Terceiro', 'Quarto', 'Quinto',
-    'Sexto', 'Sétimo', 'Oitavo', 'Nono',
+    "",
+    "Primeiro",
+    "Segundo",
+    "Terceiro",
+    "Quarto",
+    "Quinto",
+    "Sexto",
+    "Sétimo",
+    "Oitavo",
+    "Nono",
   ];
   const especiais: Record<number, string> = {
-    10: 'Décimo', 11: 'Décimo Primeiro', 12: 'Décimo Segundo',
-    13: 'Décimo Terceiro', 14: 'Décimo Quarto', 15: 'Décimo Quinto',
-    16: 'Décimo Sexto', 17: 'Décimo Sétimo', 18: 'Décimo Oitavo', 19: 'Décimo Nono',
+    10: "Décimo",
+    11: "Décimo Primeiro",
+    12: "Décimo Segundo",
+    13: "Décimo Terceiro",
+    14: "Décimo Quarto",
+    15: "Décimo Quinto",
+    16: "Décimo Sexto",
+    17: "Décimo Sétimo",
+    18: "Décimo Oitavo",
+    19: "Décimo Nono",
   };
   const dezenas: Record<number, string> = {
-    2: 'Vigésimo', 3: 'Trigésimo', 4: 'Quadragésimo', 5: 'Quinquagésimo',
-    6: 'Sexagésimo', 7: 'Septuagésimo', 8: 'Octogésimo', 9: 'Nonagésimo',
+    2: "Vigésimo",
+    3: "Trigésimo",
+    4: "Quadragésimo",
+    5: "Quinquagésimo",
+    6: "Sexagésimo",
+    7: "Septuagésimo",
+    8: "Octogésimo",
+    9: "Nonagésimo",
   };
   if (n >= 1 && n <= 9) return unidades[n];
-  if (n >= 10 && n <= 19) return especiais[n] || '';
+  if (n >= 10 && n <= 19) return especiais[n] || "";
   if (n >= 20 && n <= 99) {
     const d = Math.floor(n / 10);
     const u = n % 10;
-    const dezenaText = dezenas[d] || '';
-    const unidadeText = u > 0 ? unidades[u] : '';
+    const dezenaText = dezenas[d] || "";
+    const unidadeText = u > 0 ? unidades[u] : "";
     if (dezenaText && unidadeText) return `${dezenaText} ${unidadeText}`;
     return dezenaText || unidadeText || String(n);
   }
-  if (n === 100) return 'Centésimo';
+  if (n === 100) return "Centésimo";
   return String(n);
 }
 
@@ -139,9 +204,9 @@ type QuickAddDriverForm = {
   cpf: string;
   celular: string;
   vehicle_ids: string[];
-  vinculo_tipo: 'interno' | 'parceiro';
+  vinculo_tipo: "interno" | "parceiro" | "autonomo";
   parceiro_id: string;
-  tipo_documento: 'cpf' | 'passaporte';
+  tipo_documento: "cpf" | "passaporte";
 };
 
 type VehicleOption = {
@@ -149,33 +214,39 @@ type VehicleOption = {
   placa: string;
   modelo: string;
   marca: string;
-  tipo?: 'carro' | 'van' | 'onibus' | 'moto' | 'caminhao' | 'outro';
+  tipo?: "carro" | "van" | "onibus" | "moto" | "caminhao" | "outro";
 };
 
 const initialQuickAddDriverForm: QuickAddDriverForm = {
-  name: '',
-  cpf: '',
-  celular: '',
+  name: "",
+  cpf: "",
+  celular: "",
   vehicle_ids: [],
-  vinculo_tipo: 'parceiro',
-  parceiro_id: '',
-  tipo_documento: 'cpf'
+  vinculo_tipo: "parceiro",
+  parceiro_id: "",
+  tipo_documento: "cpf",
 };
 
-const formatDriverDocument = (value: string, tipo: 'cpf' | 'passaporte'): string => {
-  if (tipo === 'cpf') {
-    const digits = value.replace(/\D/g, '').slice(0, 11);
+const formatDriverDocument = (
+  value: string,
+  tipo: "cpf" | "passaporte",
+): string => {
+  if (tipo === "cpf") {
+    const digits = value.replace(/\D/g, "").slice(0, 11);
     return digits
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
   }
 
-  return value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 9);
+  return value
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase()
+    .slice(0, 9);
 };
 
 const formatDriverCelular = (value: string): string => {
-  const digits = value.replace(/\D/g, '').slice(0, 11);
+  const digits = value.replace(/\D/g, "").slice(0, 11);
 
   if (digits.length <= 2) return digits;
   if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
@@ -184,80 +255,252 @@ const formatDriverCelular = (value: string): string => {
 };
 
 const validateDriverCPF = (value: string): boolean => {
-  return value.replace(/\D/g, '').length === 11;
+  const cpfClean = value.replace(/\D/g, "");
+  if (cpfClean.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(cpfClean)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += parseInt(cpfClean.charAt(i)) * (10 - i);
+  }
+  let remainder = (sum * 10) % 11;
+  if (remainder === 10 || remainder === 11) remainder = 0;
+  if (remainder !== parseInt(cpfClean.charAt(9))) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i++) {
+    sum += parseInt(cpfClean.charAt(i)) * (11 - i);
+  }
+  remainder = (sum * 10) % 11;
+  if (remainder === 10 || remainder === 11) remainder = 0;
+  if (remainder !== parseInt(cpfClean.charAt(10))) return false;
+  return true;
 };
 
 const validateDriverCelular = (value: string): boolean => {
-  const digits = value.replace(/\D/g, '');
-  return digits.length === 11 && digits[2] === '9';
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 11) return false;
+  if (digits[2] !== "9") return false;
+  if (/^(\d)\1{10}$/.test(digits)) return false;
+  const ddd = digits.slice(0, 2);
+  const validDDDs = [
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "18",
+    "19",
+    "21",
+    "22",
+    "24",
+    "27",
+    "28",
+    "31",
+    "32",
+    "33",
+    "34",
+    "35",
+    "37",
+    "38",
+    "41",
+    "42",
+    "43",
+    "44",
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "51",
+    "53",
+    "54",
+    "55",
+    "61",
+    "62",
+    "63",
+    "64",
+    "65",
+    "66",
+    "67",
+    "68",
+    "69",
+    "71",
+    "73",
+    "74",
+    "75",
+    "77",
+    "79",
+    "81",
+    "82",
+    "83",
+    "84",
+    "85",
+    "86",
+    "87",
+    "88",
+    "89",
+    "91",
+    "92",
+    "93",
+    "94",
+    "95",
+    "96",
+    "97",
+    "98",
+    "99",
+  ];
+  if (!validDDDs.includes(ddd)) return false;
+  const prefix = digits.slice(3, 7);
+  if (prefix === "0000") return false;
+  return true;
 };
 
-const getDriverDocumentLabel = (tipo: 'cpf' | 'passaporte'): string => {
-  return tipo === 'cpf' ? 'CPF' : 'Passaporte';
+const getDriverDocumentLabel = (tipo: "cpf" | "passaporte"): string => {
+  return tipo === "cpf" ? "CPF" : "Passaporte";
 };
 
-const getDriverDocumentPlaceholder = (tipo: 'cpf' | 'passaporte'): string => {
-  return tipo === 'cpf' ? '000.000.000-00' : 'AA1234567';
+const getDriverDocumentPlaceholder = (tipo: "cpf" | "passaporte"): string => {
+  return tipo === "cpf" ? "000.000.000-00" : "AA1234567";
 };
 
 const tipoDocumentoOptions = [
-  { id: 'cpf', nome: 'CPF' },
-  { id: 'passaporte', nome: 'Passaporte' }
+  { id: "cpf", nome: "CPF" },
+  { id: "passaporte", nome: "Passaporte" },
 ];
 
-const normalizeTextValue = (value: string): string => value.trim().toLowerCase();
-const normalizeDigitsValue = (value: string): string => value.replace(/\D/g, '');
+const normalizeTextValue = (value: string): string =>
+  value.trim().toLowerCase();
+const normalizeDigitsValue = (value: string): string =>
+  value.replace(/\D/g, "");
+const forceUpperText = (value: string): string => value.toUpperCase();
 
 const MARCAS_VEICULOS = [
-  { id: 'Acura', nome: 'Acura' }, { id: 'Alfa Romeo', nome: 'Alfa Romeo' }, { id: 'Aston Martin', nome: 'Aston Martin' },
-  { id: 'Audi', nome: 'Audi' }, { id: 'Bentley', nome: 'Bentley' }, { id: 'BMW', nome: 'BMW' }, { id: 'BYD', nome: 'BYD' },
-  { id: 'Caoa Chery', nome: 'Caoa Chery' }, { id: 'Chevrolet', nome: 'Chevrolet' }, { id: 'Chrysler', nome: 'Chrysler' },
-  { id: 'Citroën', nome: 'Citroën' }, { id: 'Dodge', nome: 'Dodge' }, { id: 'Ferrari', nome: 'Ferrari' },
-  { id: 'Fiat', nome: 'Fiat' }, { id: 'Ford', nome: 'Ford' }, { id: 'GWM', nome: 'GWM' }, { id: 'Honda', nome: 'Honda' },
-  { id: 'Hyundai', nome: 'Hyundai' }, { id: 'Jac', nome: 'Jac' }, { id: 'Jaguar', nome: 'Jaguar' }, { id: 'Jeep', nome: 'Jeep' },
-  { id: 'Kia', nome: 'Kia' }, { id: 'Lamborghini', nome: 'Lamborghini' }, { id: 'Land Rover', nome: 'Land Rover' },
-  { id: 'Lexus', nome: 'Lexus' }, { id: 'Lifan', nome: 'Lifan' }, { id: 'Maserati', nome: 'Maserati' },
-  { id: 'McLaren', nome: 'McLaren' }, { id: 'Mercedes-Benz', nome: 'Mercedes-Benz' }, { id: 'Mini', nome: 'Mini' },
-  { id: 'Mitsubishi', nome: 'Mitsubishi' }, { id: 'Nissan', nome: 'Nissan' }, { id: 'Peugeot', nome: 'Peugeot' },
-  { id: 'Porsche', nome: 'Porsche' }, { id: 'Ram', nome: 'Ram' }, { id: 'Renault', nome: 'Renault' },
-  { id: 'Rolls-Royce', nome: 'Rolls-Royce' }, { id: 'Seat', nome: 'Seat' }, { id: 'Smart', nome: 'Smart' },
-  { id: 'Subaru', nome: 'Subaru' }, { id: 'Suzuki', nome: 'Suzuki' }, { id: 'Tesla', nome: 'Tesla' },
-  { id: 'Toyota', nome: 'Toyota' }, { id: 'Troller', nome: 'Troller' }, { id: 'Volkswagen', nome: 'Volkswagen' },
-  { id: 'Volvo', nome: 'Volvo' }, { id: 'Outra', nome: 'Outra' },
+  { id: "Acura", nome: "Acura" },
+  { id: "Agrale", nome: "Agrale" },
+  { id: "Alfa Romeo", nome: "Alfa Romeo" },
+  { id: "Aston Martin", nome: "Aston Martin" },
+  { id: "Audi", nome: "Audi" },
+  { id: "Bentley", nome: "Bentley" },
+  { id: "BMW", nome: "BMW" },
+  { id: "BYD", nome: "BYD" },
+  { id: "Caoa Chery", nome: "Caoa Chery" },
+  { id: "Chevrolet", nome: "Chevrolet" },
+  { id: "Chrysler", nome: "Chrysler" },
+  { id: "Citroën", nome: "Citroën" },
+  { id: "Dodge", nome: "Dodge" },
+  { id: "Ferrari", nome: "Ferrari" },
+  { id: "Fiat", nome: "Fiat" },
+  { id: "Ford", nome: "Ford" },
+  { id: "GWM", nome: "GWM" },
+  { id: "Honda", nome: "Honda" },
+  { id: "Hyundai", nome: "Hyundai" },
+  { id: "Jac", nome: "Jac" },
+  { id: "Jaguar", nome: "Jaguar" },
+  { id: "Jeep", nome: "Jeep" },
+  { id: "Kia", nome: "Kia" },
+  { id: "Lamborghini", nome: "Lamborghini" },
+  { id: "Land Rover", nome: "Land Rover" },
+  { id: "Lexus", nome: "Lexus" },
+  { id: "Lifan", nome: "Lifan" },
+  { id: "Maserati", nome: "Maserati" },
+  { id: "McLaren", nome: "McLaren" },
+  { id: "Mercedes-Benz", nome: "Mercedes-Benz" },
+  { id: "Mini", nome: "Mini" },
+  { id: "Mitsubishi", nome: "Mitsubishi" },
+  { id: "Nissan", nome: "Nissan" },
+  { id: "Peugeot", nome: "Peugeot" },
+  { id: "Porsche", nome: "Porsche" },
+  { id: "Ram", nome: "Ram" },
+  { id: "Renault", nome: "Renault" },
+  { id: "Rolls-Royce", nome: "Rolls-Royce" },
+  { id: "Seat", nome: "Seat" },
+  { id: "Smart", nome: "Smart" },
+  { id: "Subaru", nome: "Subaru" },
+  { id: "Suzuki", nome: "Suzuki" },
+  { id: "Tesla", nome: "Tesla" },
+  { id: "Toyota", nome: "Toyota" },
+  { id: "Troller", nome: "Troller" },
+  { id: "Volkswagen", nome: "Volkswagen" },
+  { id: "Volvo", nome: "Volvo" },
+  { id: "Outra", nome: "Outra" },
 ];
 
 const TIPOS_VEICULO_OS = [
-  { id: 'carro', nome: 'Carro' }, { id: 'van', nome: 'Van' }, { id: 'onibus', nome: 'Ônibus' },
-  { id: 'moto', nome: 'Moto' }, { id: 'caminhao', nome: 'Caminhão' }, { id: 'outro', nome: 'Outro' },
+  { id: "carro", nome: "Carro" },
+  { id: "van", nome: "Van" },
+  { id: "onibus", nome: "Ônibus" },
+  { id: "moto", nome: "Moto" },
+  { id: "caminhao", nome: "Caminhão" },
+  { id: "outro", nome: "Outro" },
 ];
 
 const formatarPlacaOS = (value: string): string => {
-  const cleaned = value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 7);
-  if (cleaned.length >= 5 && /[A-Z]/.test(cleaned[4])) return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
+  const cleaned = value
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase()
+    .slice(0, 7);
+  if (cleaned.length >= 5 && /[A-Z]/.test(cleaned[4]))
+    return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
   if (cleaned.length >= 4) return `${cleaned.slice(0, 3)}-${cleaned.slice(3)}`;
   return cleaned;
 };
 
 const validarPlacaOS = (placa: string): boolean => {
-  const c = placa.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-  return /^[A-Z]{3}[0-9]{4}$/.test(c) || /^[A-Z]{3}[0-9]{1}[A-Z]{1}[0-9]{2}$/.test(c) || /^[A-Z]{3}[0-9]{2}[A-Z]{1}[0-9]{1}$/.test(c);
+  const c = placa.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  return (
+    /^[A-Z]{3}[0-9]{4}$/.test(c) ||
+    /^[A-Z]{3}[0-9]{1}[A-Z]{1}[0-9]{2}$/.test(c) ||
+    /^[A-Z]{3}[0-9]{2}[A-Z]{1}[0-9]{1}$/.test(c)
+  );
 };
 
 export default function OSOperationalPage() {
-  const { osList, clientes, solicitantes, passageiros, drivers, parceiros, addOS, updateOS, updateOSStatus, deleteOS, addPassageiro, getCentrosCustoByCliente, addCliente, addSolicitante, addCentroCusto, addParceiro, refreshData, impostoPercentual, loading: dataLoading, heavyLoading } = useData();
+  const {
+    osList,
+    clientes,
+    solicitantes,
+    passageiros,
+    drivers,
+    parceiros,
+    addOS,
+    updateOS,
+    updateOSStatus,
+    deleteOS,
+    addPassageiro,
+    getCentrosCustoByCliente,
+    addCliente,
+    addSolicitante,
+    addCentroCusto,
+    addParceiro,
+    refreshData,
+    impostoPercentual,
+    loading: dataLoading,
+    heavyLoading,
+  } = useData();
   const supabase = createClient();
   const { confirm, confirmState, closeConfirm, handleConfirm } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isQuickPassengerModalOpen, setIsQuickPassengerModalOpen] = useState(false);
-  const [quickPassengerTarget, setQuickPassengerTarget] = useState<{ waypointIndex: number; passengerId: string } | null>(null);
+  const [isQuickPassengerModalOpen, setIsQuickPassengerModalOpen] =
+    useState(false);
+  const [quickPassengerTarget, setQuickPassengerTarget] = useState<{
+    waypointIndex: number;
+    passengerId: string;
+  } | null>(null);
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
-  const [calendarMenuPosition, setCalendarMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [calendarMenuPosition, setCalendarMenuPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [editingOSId, setEditingOSId] = useState<string | null>(null);
   const [viewingOSId, setViewingOSId] = useState<string | null>(null);
   const [viewingOSLive, setViewingOSLive] = useState<OrderService | null>(null);
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'table' | 'calendar'>('calendar');
-  const [driverNotificationSentByOS, setDriverNotificationSentByOS] = useState<Record<string, boolean>>({});
+  const [viewMode, setViewMode] = useState<"table" | "calendar">("calendar");
+  const [driverNotificationSentByOS, setDriverNotificationSentByOS] = useState<
+    Record<string, boolean>
+  >({});
+  const [osLogs, setOsLogs] = useState<OSLog[]>([]);
   const actionMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const calendarMenuRef = useRef<HTMLDivElement | null>(null);
   const passengerDraftIdRef = useRef(0);
@@ -273,32 +516,61 @@ export default function OSOperationalPage() {
     passageiro: string;
     dataInicio: string;
     dataFim: string;
-    statusOperacional: '' | 'Pendente' | 'Aguardando' | 'Em Rota' | 'Finalizado' | 'Cancelado';
-    statusFinanceiro: '' | 'Pendente' | 'Pago' | 'Faturado';
+    statusOperacional:
+      | ""
+      | "Pendente"
+      | "Aguardando"
+      | "Em Rota"
+      | "Finalizado"
+      | "Cancelado";
+    statusFinanceiro: "" | "Pendente" | "Pago" | "Faturado";
   };
 
   const defaultAdvancedFilters: AdvancedFilters = {
-    osNumber: '',
-    clienteId: '',
-    centroCustoId: '',
-    solicitante: '',
-    motorista: '',
-    veiculoId: '',
-    passageiro: '',
-    dataInicio: '',
-    dataFim: '',
-    statusOperacional: '',
-    statusFinanceiro: '',
+    osNumber: "",
+    clienteId: "",
+    centroCustoId: "",
+    solicitante: "",
+    motorista: "",
+    veiculoId: "",
+    passageiro: "",
+    dataInicio: "",
+    dataFim: "",
+    statusOperacional: "",
+    statusFinanceiro: "",
   };
 
-  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>(defaultAdvancedFilters);
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>(
+    defaultAdvancedFilters,
+  );
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [clientPage, setClientPage] = useState(1);
   const osTable = useServerPaginatedTable(fetchOSPage, 10, true);
 
+  const syncViewingOS = useCallback(async () => {
+    if (!viewingOSId) return;
+    try {
+      const latest = await fetchOSById(viewingOSId);
+      setViewingOSLive(latest);
+    } catch (error) {
+      console.error("Erro ao sincronizar OS aberta:", error);
+    }
+  }, [viewingOSId]);
+
+  const syncOSLogs = useCallback(async () => {
+    if (!viewingOSId) return;
+    try {
+      const logs = await fetchOSLogs(viewingOSId);
+      setOsLogs(logs);
+    } catch (error) {
+      console.error("Erro ao buscar logs da OS:", error);
+    }
+  }, [viewingOSId]);
+
   useEffect(() => {
     if (!viewingOSId) {
       setViewingOSLive(null);
+      setOsLogs([]);
       if (viewingOSPollRef.current) {
         clearInterval(viewingOSPollRef.current);
         viewingOSPollRef.current = null;
@@ -306,20 +578,8 @@ export default function OSOperationalPage() {
       return;
     }
 
-    let isActive = true;
-
-    const syncViewingOS = async () => {
-      try {
-        const latest = await fetchOSById(viewingOSId);
-        if (isActive) {
-          setViewingOSLive(latest);
-        }
-      } catch (error) {
-        console.error('Erro ao sincronizar OS aberta:', error);
-      }
-    };
-
     void syncViewingOS();
+    void syncOSLogs();
 
     if (viewingOSPollRef.current) {
       clearInterval(viewingOSPollRef.current);
@@ -327,51 +587,78 @@ export default function OSOperationalPage() {
 
     viewingOSPollRef.current = setInterval(() => {
       void syncViewingOS();
-    }, 2000);
+    }, 30000);
 
     const channel = supabase
       .channel(`os-live-${viewingOSId}`)
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'ordens_servico', filter: `id=eq.${viewingOSId}` },
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "ordens_servico",
+          filter: `id=eq.${viewingOSId}`,
+        },
         () => {
           void syncViewingOS();
-        }
+        },
       )
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'os_waypoints', filter: `ordem_servico_id=eq.${viewingOSId}` },
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "os_waypoints",
+          filter: `ordem_servico_id=eq.${viewingOSId}`,
+        },
         () => {
           void syncViewingOS();
-        }
+        },
       )
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'os_waypoint_passengers' },
+        "postgres_changes",
+        { event: "*", schema: "public", table: "os_waypoint_passengers" },
         () => {
           void syncViewingOS();
-        }
+        },
+      )
+      .subscribe();
+
+    const logsChannel = supabase
+      .channel(`os-logs-${viewingOSId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "os_logs",
+          filter: `os_id=eq.${viewingOSId}`,
+        },
+        () => {
+          void syncOSLogs();
+        },
       )
       .subscribe();
 
     return () => {
-      isActive = false;
       if (viewingOSPollRef.current) {
         clearInterval(viewingOSPollRef.current);
         viewingOSPollRef.current = null;
       }
       void supabase.removeChannel(channel);
+      void supabase.removeChannel(logsChannel);
     };
-  }, [supabase, viewingOSId]);
+  }, [supabase, viewingOSId, syncViewingOS, syncOSLogs]);
 
   useEffect(() => {
     if (!viewingOSId) return;
+    if (viewingOSLive) return;
 
     const latestFromList = osList.find((os) => os.id === viewingOSId);
     if (latestFromList) {
       setViewingOSLive(latestFromList);
     }
-  }, [osList, viewingOSId]);
+  }, [osList, viewingOSId, viewingOSLive]);
 
   // Resetar paginação cliente quando filtros ou busca mudam
   useEffect(() => {
@@ -379,148 +666,138 @@ export default function OSOperationalPage() {
   }, [advancedFilters, osTable.searchTerm]);
 
   // Estados para cadastros rápidos
-  const [quickAddModal, setQuickAddModal] = useState<'cliente' | 'motorista' | 'solicitante' | 'centroCusto' | null>(null);
-  const [quickAddForm, setQuickAddForm] = useState({ nome: '' });
-  const [quickAddDriverForm, setQuickAddDriverForm] = useState<QuickAddDriverForm>(initialQuickAddDriverForm);
+  const [quickAddModal, setQuickAddModal] = useState<
+    "cliente" | "motorista" | "solicitante" | "centroCusto" | null
+  >(null);
+  const [quickAddForm, setQuickAddForm] = useState({ nome: "" });
+  const [quickAddDriverForm, setQuickAddDriverForm] =
+    useState<QuickAddDriverForm>(initialQuickAddDriverForm);
 
   // Estados para cadastro rápido de parceiro dentro do modal de motorista
-  type QuickParceiroContato = { setor: string; celular: string; email: string; responsavel: string };
+  type QuickParceiroContato = {
+    setor: string;
+    celular: string;
+    email: string;
+    responsavel: string;
+  };
   type QuickParceiroForm = {
-    pessoaTipo: 'fisica' | 'juridica';
+    pessoaTipo: "fisica" | "juridica";
     documento: string;
     razaoSocialOuNomeCompleto: string;
     contatos: QuickParceiroContato[];
   };
-  const [isQuickParceiroModalOpen, setIsQuickParceiroModalOpen] = useState(false);
-  const [quickParceiroForm, setQuickParceiroForm] = useState<QuickParceiroForm>({
-    pessoaTipo: 'juridica',
-    documento: '',
-    razaoSocialOuNomeCompleto: '',
-    contatos: [{ setor: '', celular: '', email: '', responsavel: '' }],
-  });
+  const [isQuickParceiroModalOpen, setIsQuickParceiroModalOpen] =
+    useState(false);
+  const [quickParceiroForm, setQuickParceiroForm] = useState<QuickParceiroForm>(
+    {
+      pessoaTipo: "juridica",
+      documento: "",
+      razaoSocialOuNomeCompleto: "",
+      contatos: [{ setor: "", celular: "", email: "", responsavel: "" }],
+    },
+  );
 
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
   const [, setVehiclesUnavailable] = useState(false);
-  const [quickAddedDriverOptions, setQuickAddedDriverOptions] = useState<{ id: string; nome: string }[]>([]);
-  const [driverVehiclesAssoc, setDriverVehiclesAssoc] = useState<{ driver_id: string; vehicle_id: string }[]>([]);
-  const [isOsVehicleQuickModalOpen, setIsOsVehicleQuickModalOpen] = useState(false);
+  const [quickAddedDriverOptions, setQuickAddedDriverOptions] = useState<
+    { id: string; nome: string }[]
+  >([]);
+  const [driverVehiclesAssoc, setDriverVehiclesAssoc] = useState<
+    { driver_id: string; vehicle_id: string }[]
+  >([]);
+  const [isOsVehicleQuickModalOpen, setIsOsVehicleQuickModalOpen] =
+    useState(false);
   const [isSubmittingOsVehicle, setIsSubmittingOsVehicle] = useState(false);
-  const [osVehicleQuickForm, setOsVehicleQuickForm] = useState({
-    placa: '', modelo: '', marca: '',
-    tipo: 'carro' as 'carro' | 'van' | 'onibus' | 'moto' | 'caminhao' | 'outro',
-  });
+  const [osVehicleManageIds, setOsVehicleManageIds] = useState<string[]>([]);
 
   // Novos estados para o modal de confirmação de notificações
   const [showNotificationConfirm, setShowNotificationConfirm] = useState(false);
-  const [pendingOSData, setPendingOSData] = useState<PendingOSData | null>(null);
+  const [pendingOSData, setPendingOSData] = useState<PendingOSData | null>(
+    null,
+  );
   const [notificationConfig, setNotificationConfig] = useState({
-    auto: true,
+    auto: false,
     motorista: true,
     passageiros: true,
-    solicitante: false
+    solicitante: false,
   });
   const [isSubmittingOS, setIsSubmittingOS] = useState(false);
 
   // Estados para modal de veículo dentro do cadastro rápido de motorista
-  type QuickVehicleMode = { mode: 'create'; rowIndex: number } | { mode: 'edit'; rowIndex: number; vehicleId: string };
-  const [quickVehicleModal, setQuickVehicleModal] = useState<QuickVehicleMode | null>(null);
-  const [isSubmittingQuickVehicle, setIsSubmittingQuickVehicle] = useState(false);
+  type QuickVehicleMode =
+    | { mode: "create"; rowIndex: number }
+    | { mode: "edit"; rowIndex: number; vehicleId: string };
+  const [quickVehicleModal, setQuickVehicleModal] =
+    useState<QuickVehicleMode | null>(null);
+  const [isSubmittingQuickVehicle, setIsSubmittingQuickVehicle] =
+    useState(false);
   const [vehicleQuickForm, setVehicleQuickForm] = useState({
-    placa: '', modelo: '', marca: '',
-    tipo: 'carro' as 'carro' | 'van' | 'onibus' | 'moto' | 'caminhao' | 'outro',
+    placa: "",
+    modelo: "",
+    marca: "",
+    tipo: "carro" as "carro" | "van" | "onibus" | "moto" | "caminhao" | "outro",
   });
 
-  const hasDuplicatePlateQuick = (placa: string, excludeId?: string): boolean => {
-    const n = placa.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    return vehicles.some(v => v.id !== excludeId && v.placa.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === n);
+  const hasDuplicatePlateQuick = (
+    placa: string,
+    excludeId?: string,
+  ): boolean => {
+    const n = placa.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    return vehicles.some(
+      (v) =>
+        v.id !== excludeId &&
+        v.placa.replace(/[^A-Za-z0-9]/g, "").toUpperCase() === n,
+    );
   };
 
-  const [quickAddedSolicitantes, setQuickAddedSolicitantes] = useState<Array<{ id: string; nome: string; clienteId: string }>>([]);
-  const [quickAddedCentrosCusto, setQuickAddedCentrosCusto] = useState<Array<{ id: string; nome: string; clienteId: string }>>([]);
-  
-  // Status WhatsApp: Realtime (instant via webhook) + polling leve (fallback para detectar queda)
-  const [wppStatus, setWppStatus] = useState<'open' | 'close' | 'connecting' | 'loading'>('loading');
-  const whatsappSessionName = process.env.NEXT_PUBLIC_WAHA_SESSION || 'default';
+  const [quickAddedSolicitantes, setQuickAddedSolicitantes] = useState<
+    Array<{ id: string; nome: string; clienteId: string }>
+  >([]);
+  const [quickAddedCentrosCusto, setQuickAddedCentrosCusto] = useState<
+    Array<{ id: string; nome: string; clienteId: string }>
+  >([]);
 
-  useEffect(() => {
-    const applyState = (s: string) => {
-      if (s === 'open') setWppStatus('open');
-      else if (s === 'connecting') setWppStatus('connecting');
-      else setWppStatus('close');
-    };
-
-    // Leitura inicial imediata do banco (estado já sincronizado pelo webhook)
-    const loadInitial = async () => {
-      try {
-        const { data } = await supabase
-          .from('whatsapp_status')
-          .select('state')
-          .eq('instance_name', whatsappSessionName)
-          .maybeSingle();
-        if (data?.state) applyState(data.state);
-      } catch { /* fallback para poll/realtime */ }
-    };
-    loadInitial();
-
-    // Polling leve a cada 30s — checa WAHA e sincroniza tabela Supabase
-    const pollStatus = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) return;
-        const res = await fetch('/api/whatsapp/status', {
-          headers: { 'Authorization': `Bearer ${session.access_token}` },
-        });
-        const json = await res.json();
-        if (json.success) applyState(json.instance?.state ?? 'close');
-      } catch { /* Realtime é a fonte primária, poll é fallback */ }
-    };
-    pollStatus();
-    const interval = setInterval(pollStatus, 30000);
-
-    // Realtime: atualizações instantâneas via webhook → tabela → cliente
-    const channel = supabase
-      .channel('whatsapp-status')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'whatsapp_status', filter: `instance_name=eq.${whatsappSessionName}` },
-        (payload) => applyState((payload.new as { state: string }).state)
-      )
-      .subscribe();
-
-    return () => {
-      clearInterval(interval);
-      supabase.removeChannel(channel);
-    };
-  }, [supabase, whatsappSessionName]);
+  // Removido: Status WhatsApp (WAHA removido, migrando para Meta API oficial)
+  // A API da Meta não requer polling de status - é stateless
 
   const parceiroOptions = useMemo(
-    () => parceiros.map((parceiro: ParceiroServico) => ({ id: parceiro.id, nome: parceiro.razaoSocialOuNomeCompleto })),
-    [parceiros]
+    () =>
+      parceiros.map((parceiro: ParceiroServico) => ({
+        id: parceiro.id,
+        nome: parceiro.razaoSocialOuNomeCompleto,
+      })),
+    [parceiros],
   );
 
-  const formatParceiroDocument = (value: string, pessoaTipo: 'fisica' | 'juridica'): string => {
-    const digits = value.replace(/\D/g, '').slice(0, pessoaTipo === 'juridica' ? 14 : 11);
-    if (pessoaTipo === 'juridica') {
+  const formatParceiroDocument = (
+    value: string,
+    pessoaTipo: "fisica" | "juridica",
+  ): string => {
+    const digits = value
+      .replace(/\D/g, "")
+      .slice(0, pessoaTipo === "juridica" ? 14 : 11);
+    if (pessoaTipo === "juridica") {
       return digits
-        .replace(/(\d{2})(\d)/, '$1.$2')
-        .replace(/(\d{3})(\d)/, '$1.$2')
-        .replace(/(\d{3})(\d)/, '$1/$2')
-        .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+        .replace(/(\d{2})(\d)/, "$1.$2")
+        .replace(/(\d{3})(\d)/, "$1.$2")
+        .replace(/(\d{3})(\d)/, "$1/$2")
+        .replace(/(\d{4})(\d{1,2})$/, "$1-$2");
     }
     return digits
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
   };
 
   const formatParceiroPhone = (value: string): string => {
-    const digits = value.replace(/\D/g, '').slice(0, 11);
-    if (digits.length <= 10) return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3').trim();
-    return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').trim();
+    const digits = value.replace(/\D/g, "").slice(0, 11);
+    if (digits.length <= 10)
+      return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, "($1) $2-$3").trim();
+    return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, "($1) $2-$3").trim();
   };
 
   const validateParceiroCPF = (cpf: string): boolean => {
-    const cpfClean = cpf.replace(/\D/g, '');
+    const cpfClean = cpf.replace(/\D/g, "");
     if (cpfClean.length !== 11) return false;
     if (/(\d)\1{10}/.test(cpfClean)) return false;
     let sum = 0;
@@ -536,58 +813,72 @@ export default function OSOperationalPage() {
   };
 
   const validateParceiroCNPJ = (cnpj: string): boolean => {
-    const cnpjClean = cnpj.replace(/\D/g, '');
+    const cnpjClean = cnpj.replace(/\D/g, "");
     if (cnpjClean.length !== 14) return false;
     if (/(\d)\1{13}/.test(cnpjClean)) return false;
     const weightsFirst = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     const weightsSecond = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     let sum = 0;
-    for (let i = 0; i < 12; i++) sum += parseInt(cnpjClean.charAt(i)) * weightsFirst[i];
+    for (let i = 0; i < 12; i++)
+      sum += parseInt(cnpjClean.charAt(i)) * weightsFirst[i];
     let remainder = sum % 11;
     const firstDigit = remainder < 2 ? 0 : 11 - remainder;
     if (firstDigit !== parseInt(cnpjClean.charAt(12))) return false;
     sum = 0;
-    for (let i = 0; i < 13; i++) sum += parseInt(cnpjClean.charAt(i)) * weightsSecond[i];
+    for (let i = 0; i < 13; i++)
+      sum += parseInt(cnpjClean.charAt(i)) * weightsSecond[i];
     remainder = sum % 11;
     const secondDigit = remainder < 2 ? 0 : 11 - remainder;
     return secondDigit === parseInt(cnpjClean.charAt(13));
   };
 
   const validateParceiroCelular = (celular: string): boolean => {
-    const celularClean = celular.replace(/\D/g, '');
+    const celularClean = celular.replace(/\D/g, "");
     if (celularClean.length !== 11) return false;
     if (/(\d)\1{10}/.test(celularClean)) return false;
     const ddd = celularClean.substring(0, 2);
-    if (ddd < '11' || ddd > '99') return false;
+    if (ddd < "11" || ddd > "99") return false;
     return true;
   };
 
   const validateQuickParceiro = (): string | null => {
-    if (!quickParceiroForm.razaoSocialOuNomeCompleto.trim()) return 'Razão Social/Nome completo é obrigatório';
-    if (!quickParceiroForm.documento.trim()) return 'CNPJ/CPF é obrigatório';
+    if (!quickParceiroForm.razaoSocialOuNomeCompleto.trim())
+      return "Razão Social/Nome completo é obrigatório";
+    if (!quickParceiroForm.documento.trim()) return "CNPJ/CPF é obrigatório";
     const documentoLimpo = normalizeDigitsValue(quickParceiroForm.documento);
-    if (quickParceiroForm.pessoaTipo === 'juridica') {
-      if (documentoLimpo.length !== 14) return 'CNPJ deve ter 14 dígitos completos';
-      if (!validateParceiroCNPJ(quickParceiroForm.documento)) return 'CNPJ inválido';
+    if (quickParceiroForm.pessoaTipo === "juridica") {
+      if (documentoLimpo.length !== 14)
+        return "CNPJ deve ter 14 dígitos completos";
+      if (!validateParceiroCNPJ(quickParceiroForm.documento))
+        return "CNPJ inválido";
     } else {
-      if (documentoLimpo.length !== 11) return 'CPF deve ter 11 dígitos completos';
-      if (!validateParceiroCPF(quickParceiroForm.documento)) return 'CPF inválido';
+      if (documentoLimpo.length !== 11)
+        return "CPF deve ter 11 dígitos completos";
+      if (!validateParceiroCPF(quickParceiroForm.documento))
+        return "CPF inválido";
     }
     const existingDoc = parceiros.find(
-      (p) => normalizeDigitsValue(p.documento) === documentoLimpo
+      (p) => normalizeDigitsValue(p.documento) === documentoLimpo,
     );
-    if (existingDoc) return `CNPJ/CPF já está sendo usado pelo parceiro "${existingDoc.razaoSocialOuNomeCompleto}".`;
+    if (existingDoc)
+      return `CNPJ/CPF já está sendo usado pelo parceiro "${existingDoc.razaoSocialOuNomeCompleto}".`;
 
     const primeiroContato = quickParceiroForm.contatos[0];
-    if (!primeiroContato.setor.trim()) return 'Setor do primeiro contato é obrigatório';
-    if (!primeiroContato.celular.trim()) return 'Celular do primeiro contato é obrigatório';
-    if (!primeiroContato.responsavel.trim()) return 'Responsável do primeiro contato é obrigatório';
+    if (!primeiroContato.setor.trim())
+      return "Setor do primeiro contato é obrigatório";
+    if (!primeiroContato.celular.trim())
+      return "Celular do primeiro contato é obrigatório";
+    if (!primeiroContato.responsavel.trim())
+      return "Responsável do primeiro contato é obrigatório";
     const celularLimpo = normalizeDigitsValue(primeiroContato.celular);
-    if (celularLimpo.length !== 11) return 'Celular deve ter 11 dígitos completos: (00) 00000-0000';
-    if (!validateParceiroCelular(primeiroContato.celular)) return 'Celular inválido';
+    if (celularLimpo.length !== 11)
+      return "Celular deve ter 11 dígitos completos: (00) 00000-0000";
+    if (!validateParceiroCelular(primeiroContato.celular))
+      return "Celular inválido";
     if (primeiroContato.email && primeiroContato.email.trim()) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(primeiroContato.email.trim())) return 'E-mail inválido';
+      if (!emailRegex.test(primeiroContato.email.trim()))
+        return "E-mail inválido";
     }
 
     const formCelulares = new Map<string, number>();
@@ -595,10 +886,12 @@ export default function OSOperationalPage() {
     for (let i = 0; i < quickParceiroForm.contatos.length; i++) {
       const c = quickParceiroForm.contatos[i];
       const cell = normalizeDigitsValue(c.celular);
-      if (cell && formCelulares.has(cell)) return `Celular ${c.celular} está duplicado entre os contatos deste parceiro.`;
+      if (cell && formCelulares.has(cell))
+        return `Celular ${c.celular} está duplicado entre os contatos deste parceiro.`;
       formCelulares.set(cell, i);
-      const email = normalizeTextValue(c.email || '');
-      if (email && formEmails.has(email)) return `E-mail ${c.email} está duplicado entre os contatos deste parceiro.`;
+      const email = normalizeTextValue(c.email || "");
+      if (email && formEmails.has(email))
+        return `E-mail ${c.email} está duplicado entre os contatos deste parceiro.`;
       formEmails.set(email, i);
     }
 
@@ -607,18 +900,20 @@ export default function OSOperationalPage() {
       if (cell) {
         for (const parceiro of parceiros) {
           const found = parceiro.contatos.find(
-            (c) => normalizeDigitsValue(c.celular) === cell
+            (c) => normalizeDigitsValue(c.celular) === cell,
           );
-          if (found) return `Celular ${contato.celular} já está sendo usado no contato "${found.setor}" do parceiro "${parceiro.razaoSocialOuNomeCompleto}".`;
+          if (found)
+            return `Celular ${contato.celular} já está sendo usado no contato "${found.setor}" do parceiro "${parceiro.razaoSocialOuNomeCompleto}".`;
         }
       }
-      const email = normalizeTextValue(contato.email || '');
+      const email = normalizeTextValue(contato.email || "");
       if (email) {
         for (const parceiro of parceiros) {
           const found = parceiro.contatos.find(
-            (c) => normalizeTextValue(c.email || '') === email
+            (c) => normalizeTextValue(c.email || "") === email,
           );
-          if (found) return `E-mail ${contato.email} já está sendo usado no contato "${found.setor}" do parceiro "${parceiro.razaoSocialOuNomeCompleto}".`;
+          if (found)
+            return `E-mail ${contato.email} já está sendo usado no contato "${found.setor}" do parceiro "${parceiro.razaoSocialOuNomeCompleto}".`;
         }
       }
     }
@@ -636,11 +931,12 @@ export default function OSOperationalPage() {
     const cleanForm = {
       pessoaTipo: quickParceiroForm.pessoaTipo,
       documento: quickParceiroForm.documento.trim(),
-      razaoSocialOuNomeCompleto: quickParceiroForm.razaoSocialOuNomeCompleto.trim(),
+      razaoSocialOuNomeCompleto:
+        quickParceiroForm.razaoSocialOuNomeCompleto.trim(),
       contatos: quickParceiroForm.contatos.map((contato) => ({
         setor: contato.setor.trim(),
         celular: contato.celular.trim(),
-        email: contato.email?.trim() || '',
+        email: contato.email?.trim() || "",
         responsavel: contato.responsavel.trim(),
       })),
       filiais: [],
@@ -648,46 +944,63 @@ export default function OSOperationalPage() {
 
     try {
       const newParceiro = await addParceiro(cleanForm);
-      toast.success('Parceiro cadastrado com sucesso!');
-      setQuickAddDriverForm(prev => ({ ...prev, parceiro_id: newParceiro.id }));
+      toast.success("Parceiro cadastrado com sucesso!");
+      setQuickAddDriverForm((prev) => ({
+        ...prev,
+        parceiro_id: newParceiro.id,
+      }));
       setQuickParceiroForm({
-        pessoaTipo: 'juridica',
-        documento: '',
-        razaoSocialOuNomeCompleto: '',
-        contatos: [{ setor: '', celular: '', email: '', responsavel: '' }],
+        pessoaTipo: "juridica",
+        documento: "",
+        razaoSocialOuNomeCompleto: "",
+        contatos: [{ setor: "", celular: "", email: "", responsavel: "" }],
       });
       setIsQuickParceiroModalOpen(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o parceiro.');
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar o parceiro.",
+      );
     }
   };
 
-  const isAnyModalOpen = isModalOpen || isQuickPassengerModalOpen || Boolean(viewingOSId) || Boolean(cancelTargetId) || Boolean(quickAddModal) || isOsVehicleQuickModalOpen || Boolean(quickVehicleModal) || isQuickParceiroModalOpen;
+  const isAnyModalOpen =
+    isModalOpen ||
+    isQuickPassengerModalOpen ||
+    Boolean(viewingOSId) ||
+    Boolean(cancelTargetId) ||
+    Boolean(quickAddModal) ||
+    isOsVehicleQuickModalOpen ||
+    Boolean(quickVehicleModal) ||
+    isQuickParceiroModalOpen;
 
   // Lock body scroll when modal is open
   useEffect(() => {
     if (isAnyModalOpen) {
-      document.body.style.overflow = 'hidden';
+      document.body.style.overflow = "hidden";
     } else {
-      document.body.style.overflow = 'unset';
+      document.body.style.overflow = "unset";
     }
-    return () => { document.body.style.overflow = 'unset'; };
+    return () => {
+      document.body.style.overflow = "unset";
+    };
   }, [isAnyModalOpen]);
 
   useEffect(() => {
     const fetchVehicles = async () => {
       const { data, error } = await supabase
-        .from('veiculos')
-        .select('id, placa, modelo, marca, tipo')
-        .eq('status', 'ativo')
-        .order('marca', { ascending: true })
-        .order('modelo', { ascending: true });
+        .from("veiculos")
+        .select("id, placa, modelo, marca, tipo")
+        .eq("status", "ativo")
+        .order("marca", { ascending: true })
+        .order("modelo", { ascending: true });
 
       if (error) {
         const isMissingTable =
-          error.code === '42P01' ||
-          error.message?.toLowerCase().includes('veiculos') ||
-          error.message?.toLowerCase().includes('does not exist');
+          error.code === "42P01" ||
+          error.message?.toLowerCase().includes("veiculos") ||
+          error.message?.toLowerCase().includes("does not exist");
 
         if (isMissingTable) {
           setVehiclesUnavailable(true);
@@ -695,8 +1008,8 @@ export default function OSOperationalPage() {
           return;
         }
 
-        console.error('Erro ao buscar veículos:', error);
-        toast.error('Erro ao buscar veículos.');
+        console.error("Erro ao buscar veículos:", error);
+        toast.error("Erro ao buscar veículos.");
         return;
       }
 
@@ -706,25 +1019,32 @@ export default function OSOperationalPage() {
 
     const fetchDriverVehicles = async () => {
       const { data } = await supabase
-        .from('driver_vehicles')
-        .select('driver_id, vehicle_id');
-      if (data) setDriverVehiclesAssoc(data as { driver_id: string; vehicle_id: string }[]);
+        .from("driver_vehicles")
+        .select("driver_id, vehicle_id");
+      if (data)
+        setDriverVehiclesAssoc(
+          data as { driver_id: string; vehicle_id: string }[],
+        );
     };
 
     fetchVehicles();
     fetchDriverVehicles();
 
     const vehiclesChannel = supabase
-      .channel('os-quick-add-vehicles-changes')
+      .channel("os-quick-add-vehicles-changes")
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'veiculos' },
-        () => { fetchVehicles(); }
+        "postgres_changes",
+        { event: "*", schema: "public", table: "veiculos" },
+        () => {
+          fetchVehicles();
+        },
       )
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'driver_vehicles' },
-        () => { fetchDriverVehicles(); }
+        "postgres_changes",
+        { event: "*", schema: "public", table: "driver_vehicles" },
+        () => {
+          fetchDriverVehicles();
+        },
       )
       .subscribe();
 
@@ -735,21 +1055,38 @@ export default function OSOperationalPage() {
 
   // Form State
   const initialForm: OSFormData = {
-    data: new Date().toISOString().split('T')[0],
-    hora: '',
-    horaExtra: '',
-    os: '',
-    clienteId: '',
-    solicitante: '',
-    motorista: '',
-    veiculoId: '',
-    centroCusto: '',
+    data: new Date().toISOString().split("T")[0],
+    hora: "",
+    horaExtra: "",
+    os: "",
+    clienteId: "",
+    solicitante: "",
+    solicitanteId: "",
+    motorista: "",
+    driverId: "",
+    veiculoId: "",
+    centroCusto: "",
     valorBruto: null,
     custo: null,
+    obsFinanceiras: "",
     waypoints: [
-      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: 0 },
-      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: 0 }
-    ]
+      {
+        label: "",
+        lat: null,
+        lng: null,
+        comment: "",
+        passengers: [],
+        itineraryIndex: 0,
+      },
+      {
+        label: "",
+        lat: null,
+        lng: null,
+        comment: "",
+        passengers: [],
+        itineraryIndex: 0,
+      },
+    ],
   };
 
   const resetMainModalState = () => {
@@ -761,6 +1098,7 @@ export default function OSOperationalPage() {
   };
 
   const handleOpenCreateOSModal = () => {
+    void refreshData();
     setEditingOSId(null);
     setFormData(initialForm);
     setOpenWaypointComments({});
@@ -773,41 +1111,51 @@ export default function OSOperationalPage() {
           label: waypoint.label,
           lat: waypoint.lat ?? null,
           lng: waypoint.lng ?? null,
-          comment: waypoint.comment || '',
+          comment: waypoint.comment || "",
           itineraryIndex: waypoint.itineraryIndex ?? 0,
-          hora: waypoint.hora || '',
-          data: waypoint.data || '',
-          passengers: (waypoint.passengers || []).map((passenger, passengerIndex) => {
-            const rec = passageiros.find(x => x.id === passenger.solicitanteId);
-            return {
-              id: passenger.id || `${osItem.id}-${index}-${passengerIndex}`,
-              solicitanteId: passenger.solicitanteId || '',
-              nome: rec?.nomeCompleto || ''
-            };
-          })
+          hora: waypoint.hora || "",
+          data: waypoint.data || "",
+          passengers: (waypoint.passengers || []).map(
+            (passenger, passengerIndex) => {
+              const rec = passageiros.find(
+                (x) => x.id === passenger.solicitanteId,
+              );
+              return {
+                id: passenger.id || `${osItem.id}-${index}-${passengerIndex}`,
+                solicitanteId: passenger.solicitanteId || "",
+                nome: rec?.nomeCompleto || "",
+              };
+            },
+          ),
         }))
       : initialForm.waypoints;
 
     setFormData({
       data: osItem.data,
-      hora: osItem.hora || '',
-      horaExtra: osItem.horaExtra || '',
+      hora: osItem.hora || "",
+      horaExtra: osItem.horaExtra || "",
       os: osItem.os,
       clienteId: osItem.clienteId,
       solicitante: osItem.solicitante,
+      solicitanteId: osItem.solicitanteId || "",
       motorista: osItem.motorista,
-      veiculoId: osItem.veiculoId || '',
-      centroCusto: osItem.centroCustoId || '',
+      driverId: osItem.driverId || "",
+      veiculoId: osItem.veiculoId || "",
+      centroCusto: osItem.centroCustoId || "",
       valorBruto: osItem.valorBruto,
       custo: osItem.custo,
-      waypoints: hydratedWaypoints
+      obsFinanceiras: osItem.obsFinanceiras || "",
+      waypoints: hydratedWaypoints,
     });
 
     setOpenWaypointComments(
-      hydratedWaypoints.reduce<Record<number, boolean>>((acc, waypoint, index) => {
-        acc[index] = Boolean(waypoint.comment.trim());
-        return acc;
-      }, {})
+      hydratedWaypoints.reduce<Record<number, boolean>>(
+        (acc, waypoint, index) => {
+          acc[index] = Boolean(waypoint.comment.trim());
+          return acc;
+        },
+        {},
+      ),
     );
   };
 
@@ -816,39 +1164,52 @@ export default function OSOperationalPage() {
     setOpenActionMenuId(null);
   };
 
-  const handleEditOS = (osId: string) => {
-    const targetOS = osList.find(os => os.id === osId);
-    if (!targetOS) return;
+  const handleEditOS = async (osId: string) => {
+    try {
+      const targetOS = await fetchOSById(osId);
+      if (!targetOS) {
+        toast.error("OS não encontrada.");
+        return;
+      }
 
-    hydrateFormFromOS(targetOS);
-    setOpenWaypointComments({});
-    setEditingOSId(osId);
-    setIsModalOpen(true);
-    setOpenActionMenuId(null);
+      void refreshData();
+      hydrateFormFromOS(targetOS);
+      setOpenWaypointComments({});
+      setEditingOSId(osId);
+      setIsModalOpen(true);
+      setOpenActionMenuId(null);
+    } catch {
+      toast.error("Não foi possível carregar a OS para edição.");
+    }
   };
 
   const handleReopenOS = async (osId: string) => {
     try {
-      await updateOSStatus(osId, { operacional: 'Pendente' });
+      await updateOSStatus(osId, { operacional: "Pendente" });
       await osTable.refresh();
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
         if (session?.access_token) {
-          await fetch('/api/whatsapp/group', {
-            method: 'POST',
+          await fetch("/api/whatsapp/group", {
+            method: "POST",
             headers: {
-              'Content-Type': 'application/json',
+              "Content-Type": "application/json",
               Authorization: `Bearer ${session.access_token}`,
             },
-            body: JSON.stringify({ osId, event: 'reaberta' }),
+            body: JSON.stringify({ osId, event: "reaberta" }),
           });
         }
       } catch (historyError) {
-        console.error('Erro ao registrar histórico de reabertura no grupo:', historyError);
+        console.error(
+          "Erro ao registrar histórico de reabertura no grupo:",
+          historyError,
+        );
       }
     } catch (error) {
-      console.error('Error reopening OS:', error);
-      toast.error('Não foi possível reabrir a OS.');
+      console.error("Error reopening OS:", error);
+      toast.error("Não foi possível reabrir a OS.");
     }
     setOpenActionMenuId(null);
   };
@@ -859,15 +1220,24 @@ export default function OSOperationalPage() {
   };
 
   const handleDeleteOS = async (osId: string) => {
-    const targetOS = osList.find((os) => os.id === osId);
-    if (!targetOS) return;
+    let targetOS: OrderService | null = null;
+    try {
+      targetOS = await fetchOSById(osId);
+    } catch {
+      /* fallback: tentar encontrar em osList */
+      targetOS = osList.find((os) => os.id === osId) || null;
+    }
+    if (!targetOS) {
+      toast.error("OS não encontrada.");
+      return;
+    }
 
     const confirmed = await confirm({
-      title: 'Arquivar OS',
-      message: `Tem certeza que deseja arquivar a OS "${targetOS.protocolo || targetOS.os || 'sem protocolo'}"? Ela não aparecerá mais na lista, mas poderá ser recuperada posteriormente.`,
-      confirmText: 'Sim, arquivar',
-      cancelText: 'Cancelar',
-      type: 'danger',
+      title: "Arquivar OS",
+      message: `Tem certeza que deseja arquivar a OS "${targetOS.protocolo || targetOS.os || "sem protocolo"}"? Ela não aparecerá mais na lista, mas poderá ser recuperada posteriormente.`,
+      confirmText: "Sim, arquivar",
+      cancelText: "Cancelar",
+      type: "danger",
     });
 
     if (!confirmed) return;
@@ -877,50 +1247,60 @@ export default function OSOperationalPage() {
       await osTable.refresh();
       setOpenActionMenuId(null);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
         if (session?.access_token) {
-          await fetch('/api/whatsapp/group', {
-            method: 'POST',
+          await fetch("/api/whatsapp/group", {
+            method: "POST",
             headers: {
-              'Content-Type': 'application/json',
+              "Content-Type": "application/json",
               Authorization: `Bearer ${session.access_token}`,
             },
-            body: JSON.stringify({ osId, event: 'arquivada' }),
+            body: JSON.stringify({ osId, event: "arquivada" }),
           });
         }
       } catch (historyError) {
-        console.error('Erro ao registrar histórico de arquivamento no grupo:', historyError);
+        console.error(
+          "Erro ao registrar histórico de arquivamento no grupo:",
+          historyError,
+        );
       }
-      toast.success('OS arquivada com sucesso!');
+      toast.success("OS arquivada com sucesso!");
     } catch (error) {
-      console.error('Erro ao arquivar OS:', error);
-      toast.error('Erro ao arquivar OS.');
+      console.error("Erro ao arquivar OS:", error);
+      toast.error("Erro ao arquivar OS.");
     }
   };
 
   const confirmCancelOS = async () => {
     if (!cancelTargetId) return;
     try {
-      await updateOSStatus(cancelTargetId, { operacional: 'Cancelado' });
+      await updateOSStatus(cancelTargetId, { operacional: "Cancelado" });
       await osTable.refresh();
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
         if (session?.access_token) {
-          await fetch('/api/whatsapp/group', {
-            method: 'POST',
+          await fetch("/api/whatsapp/group", {
+            method: "POST",
             headers: {
-              'Content-Type': 'application/json',
+              "Content-Type": "application/json",
               Authorization: `Bearer ${session.access_token}`,
             },
-            body: JSON.stringify({ osId: cancelTargetId, event: 'cancelada' }),
+            body: JSON.stringify({ osId: cancelTargetId, event: "cancelada" }),
           });
         }
       } catch (historyError) {
-        console.error('Erro ao registrar histórico de cancelamento no grupo:', historyError);
+        console.error(
+          "Erro ao registrar histórico de cancelamento no grupo:",
+          historyError,
+        );
       }
     } catch (error) {
-      console.error('Error canceling OS:', error);
-      toast.error('Não foi possível cancelar a OS.');
+      console.error("Error canceling OS:", error);
+      toast.error("Não foi possível cancelar a OS.");
     }
     setCancelTargetId(null);
   };
@@ -928,23 +1308,38 @@ export default function OSOperationalPage() {
   // Função auxiliar para notificar passageiro sem depender de viewingOS (usada em notificações automáticas)
   const handleNotifyPassengerDirect = async (
     osData: OrderService,
-    passenger: { nome: string; email: string; celular: string; hasEmail: boolean; hasPhone: boolean; solicitanteId: string },
-    type: 'email' | 'whatsapp' | 'both'
+    passenger: {
+      nome: string;
+      email: string;
+      celular: string;
+      hasEmail: boolean;
+      hasPhone: boolean;
+      solicitanteId: string;
+    },
+    type: "email" | "whatsapp" | "both",
   ) => {
     try {
       const acceptUrl = `${BASE_URL}/a/p`;
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session?.access_token) {
-        console.error('[handleNotifyPassengerDirect] Sessão expirada');
+        console.error("[handleNotifyPassengerDirect] Sessão expirada");
         return;
       }
 
-      console.log('[handleNotifyPassengerDirect] sending', { type, osId: osData.id, passageiroId: passenger.solicitanteId, hasPhone: passenger.hasPhone, celular: passenger.celular });
-      const res = await fetch('/api/notify-passenger', {
-        method: 'POST',
+      console.log("[handleNotifyPassengerDirect] sending", {
+        type,
+        osId: osData.id,
+        passageiroId: passenger.solicitanteId,
+        hasPhone: passenger.hasPhone,
+        celular: passenger.celular,
+      });
+      const res = await fetch("/api/notify-passenger", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           type,
@@ -958,38 +1353,58 @@ export default function OSOperationalPage() {
         }),
       });
       const data = await res.json();
-      console.log('[handleNotifyPassengerDirect] response', data);
+      console.log("[handleNotifyPassengerDirect] response", data);
       if (data.success) {
-        console.log(`[handleNotifyPassengerDirect] Notificação enviada com sucesso para ${passenger.nome}`);
+        console.log(
+          `[handleNotifyPassengerDirect] Notificação enviada com sucesso para ${passenger.nome}`,
+        );
       } else {
-        console.error(`[handleNotifyPassengerDirect] Erro ao enviar: ${data.error || res.status}`);
+        console.error(
+          `[handleNotifyPassengerDirect] Erro ao enviar: ${data.error || res.status}`,
+        );
       }
     } catch (err) {
-      console.error('[handleNotifyPassengerDirect] catch error:', err);
+      console.error("[handleNotifyPassengerDirect] catch error:", err);
     }
   };
 
   const handleNotifyPassenger = async (
     passengerKey: string,
-    type: 'email' | 'whatsapp' | 'both',
-    passenger: { nome: string; email: string; celular: string; hasEmail: boolean; hasPhone: boolean; solicitanteId: string; waypointIndex: number }
+    type: "email" | "whatsapp" | "both",
+    passenger: {
+      nome: string;
+      email: string;
+      celular: string;
+      hasEmail: boolean;
+      hasPhone: boolean;
+      solicitanteId: string;
+      waypointIndex: number;
+    },
   ) => {
     if (!viewingOS) return;
     setNotifyLoadingKey(passengerKey);
     try {
       const acceptUrl = `${BASE_URL}/a/p`;
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session?.access_token) {
-        toast.error('Sessão expirada. Por favor, faça login novamente.');
+        toast.error("Sessão expirada. Por favor, faça login novamente.");
         return;
       }
 
-      console.log('[handleNotifyPassenger] sending', { type, osId: viewingOS.id, passageiroId: passenger.solicitanteId, hasPhone: passenger.hasPhone, celular: passenger.celular });
-      const res = await fetch('/api/notify-passenger', {
-        method: 'POST',
+      console.log("[handleNotifyPassenger] sending", {
+        type,
+        osId: viewingOS.id,
+        passageiroId: passenger.solicitanteId,
+        hasPhone: passenger.hasPhone,
+        celular: passenger.celular,
+      });
+      const res = await fetch("/api/notify-passenger", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           type,
@@ -1003,41 +1418,50 @@ export default function OSOperationalPage() {
         }),
       });
       const data = await res.json();
-      console.log('[handleNotifyPassenger] response', data);
+      console.log("[handleNotifyPassenger] response", data);
       if (data.success) {
-        toast.success('Notificação enviada com sucesso!');
+        toast.success("Notificação enviada com sucesso!");
       } else {
-        toast.error(data.error || `Erro ao enviar notificação. Status: ${res.status}`);
+        toast.error(
+          data.error || `Erro ao enviar notificação. Status: ${res.status}`,
+        );
       }
     } catch (err) {
-      console.error('[handleNotifyPassenger] catch error:', err);
-      toast.error('Erro ao enviar notificação. Verifique o console.');
+      console.error("[handleNotifyPassenger] catch error:", err);
+      toast.error("Erro ao enviar notificação. Verifique o console.");
     } finally {
       setNotifyLoadingKey(null);
       setOpenNotifyMenuKey(null);
     }
   };
 
-  const sendWhatsAppNotification = async (osData: OrderService) => {
+  const sendWhatsAppNotification = async (
+    osData: OrderService,
+    targetCycleIndex?: number,
+  ) => {
     if (!osData.motorista) {
       toast.error("Motorista não atribuído a esta OS.");
       return;
     }
 
-    // Buscar o telefone do motorista pelo nome (case-insensitive e trimmed)
-    const driverObj = drivers.find(d => 
-      d.name.trim().toLowerCase() === osData.motorista.trim().toLowerCase()
-    );
-    
-    let phone = driverObj?.phone || "5522997259180"; 
-    
+    const driverObj = osData.driverId
+      ? drivers.find((d) => d.id === osData.driverId)
+      : drivers.find(
+          (d) =>
+            d.name.trim().toLowerCase() ===
+            osData.motorista.trim().toLowerCase(),
+        );
+
+    let phone = driverObj?.phone || "5522997259180";
+
     if (!driverObj?.phone) {
-      console.warn(`[WhatsApp] Motorista "${osData.motorista}" não encontrado ou sem telefone. Usando fallback.`);
+      console.warn(
+        `[WhatsApp] Motorista "${osData.motorista}" não encontrado ou sem telefone. Usando fallback.`,
+      );
     }
 
-    // Limpeza e formatação do telefone
-    phone = phone.replace(/\D/g, '');
-    if (phone.length > 0 && phone.length <= 11 && !phone.startsWith('55')) {
+    phone = phone.replace(/\D/g, "");
+    if (phone.length > 0 && phone.length <= 11 && !phone.startsWith("55")) {
       phone = `55${phone}`;
     }
 
@@ -1046,128 +1470,51 @@ export default function OSOperationalPage() {
       return;
     }
 
-    const cliente = clientes.find(c => c.id === osData.clienteId)?.nome || 'Empresa não informada';
+    const cycleIdx =
+      typeof targetCycleIndex === "number" ? targetCycleIndex : 0;
+    const templateButtons = [
+      { type: "quick_reply", payload: `accept_${osData.id}_${cycleIdx}` },
+      { type: "quick_reply", payload: `reject_${osData.id}_${cycleIdx}` },
+    ];
 
-    // Veículo da OS ou vinculado ao motorista
-    let vehicleInfo = { tipo: '', placa: '', marca: '', modelo: '' };
-    if (osData.veiculoId) {
-      const v = vehicles.find(v => v.id === osData.veiculoId);
-      if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '', marca: v.marca || '', modelo: v.modelo || '' };
-    } else if (driverObj?.id) {
-      const assoc = driverVehiclesAssoc.find(a => a.driver_id === driverObj.id);
-      if (assoc) {
-        const v = vehicles.find(v => v.id === assoc.vehicle_id);
-        if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '', marca: v.marca || '', modelo: v.modelo || '' };
-      }
-    }
-
-    // Passageiros do itinerário
-    const allPassengers: PassengerInfo[] = [];
-    const waypoints = osData.rota?.waypoints || [];
-    waypoints.forEach((wp) => {
-      (wp.passengers || []).forEach((p) => {
-        const passRecord = passageiros.find(x => x.id === p.solicitanteId);
-        const cel = passRecord?.celular || '';
-        const nomeAtual = passRecord?.nomeCompleto || 'Não identificado';
-        if (!allPassengers.some(x => x.nome === nomeAtual)) {
-          allPassengers.push({
-            nome: nomeAtual,
-            celular: cel ? cel.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3') : null,
-          });
-        }
-      });
-    });
-
-    // Itinerários
-    const itineraries = getItineraries(waypoints as FormWaypoint[]);
-    const itineraryGroups: ItineraryGroup[] = itineraries.map((it) => {
-      const firstWp = it.waypoints[0];
-      const itData = firstWp?.data || osData.data;
-      const itHora = firstWp?.hora || osData.hora;
-      const dateTime = itData
-        ? `${itData.split('-').reverse().join('/')}${itHora ? ` - ${itHora.slice(0, 5)}` : ''}`
-        : (itHora ? itHora.slice(0, 5) : null);
-      return {
-        index: it.index,
-        dateTime,
-        stops: it.waypoints.map((w, relIdx) => ({
-          label: w.label.trim(),
-          comment: w.comment?.trim() || null,
-          isOrigin: relIdx === 0,
-          isDestination: relIdx === it.waypoints.length - 1,
-        })),
-      };
-    });
-
-    // Buscar ou criar slug curto para a OS
-    let shortSlug = osData.id;
+    setNotifyLoadingKey("driver-whatsapp");
     try {
-      const { data: existing } = await supabase
-        .from('os_link_shortcuts')
-        .select('slug')
-        .eq('os_id', osData.id)
-        .eq('type', 'driver')
-        .maybeSingle();
-      if (existing?.slug) {
-        shortSlug = existing.slug;
-      } else {
-        const newSlug = Math.random().toString(36).slice(2, 17);
-        const { data: inserted } = await supabase
-          .from('os_link_shortcuts')
-          .insert({ os_id: osData.id, slug: newSlug, type: 'driver' })
-          .select('slug')
-          .maybeSingle();
-        if (inserted?.slug) shortSlug = inserted.slug;
-      }
-    } catch {
-      /* fallback: usa o UUID */
-    }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    const acceptLink = `${BASE_URL}/a/m/${shortSlug}`;
-
-    const message = buildDriverNotificationMessage({
-      protocolo: osData.protocolo,
-      osNumber: osData.os || null,
-      fornecedor: 'Geolog Transporte Executivo',
-      empresa: cliente,
-      solicitante: osData.solicitante || null,
-      transporteTipo: vehicleInfo.tipo || null,
-      motorista: osData.motorista,
-      motoristaTelefone: driverObj?.phone || null,
-      veiculoTipo: vehicleInfo.tipo || null,
-      veiculoMarcaModelo: vehicleInfo.marca && vehicleInfo.modelo ? `${vehicleInfo.marca} ${vehicleInfo.modelo}` : null,
-      veiculoPlaca: vehicleInfo.placa || null,
-      passageiros: allPassengers,
-      itineraries: itineraryGroups,
-      acceptLink,
-    });
-
-    setNotifyLoadingKey('driver-whatsapp');
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
       if (!session) {
         toast.error("Sessão expirada. Por favor, faça login novamente.");
         return;
       }
 
-      console.log(`[WhatsApp] Enviando notificação para ${osData.motorista} (${phone})`);
+      console.log(
+        `[WhatsApp] Enviando notificação para ${osData.motorista} (${phone})`,
+      );
 
-      // 1. Enviar mensagem informativa com link curto
-      const msgResponse = await fetch('/api/whatsapp', {
-        method: 'POST',
+      const msgResponse = await fetch("/api/whatsapp", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ phone, message })
+        body: JSON.stringify({
+          phone,
+          useTemplate: true,
+          templateName: "appointment_scheduling",
+          templateVariables: [osData.motorista],
+          buttons: templateButtons,
+          language: "pt_BR",
+        }),
       });
 
       const msgData = await msgResponse.json();
 
       if (!msgResponse.ok || !msgData.success) {
-        console.error('[WhatsApp] Erro na API de mensagem:', msgData);
-        toast.error(`Falha ao enviar mensagem: ${msgData.error || 'Erro na API WAHA'}`);
+        console.error("[WhatsApp] Erro na API de mensagem:", msgData);
+        toast.error(
+          `Falha ao enviar mensagem: ${msgData.error || "Erro na API"}`,
+        );
         setNotifyLoadingKey(null);
         return;
       }
@@ -1179,14 +1526,18 @@ export default function OSOperationalPage() {
       }));
       try {
         await supabase
-          .from('ordens_servico')
+          .from("ordens_servico")
           .update({
             driver_message_sent_at: new Date().toISOString(),
-            driver_whatsapp_state: 'awaiting_accept',
+            driver_whatsapp_state: "awaiting_accept",
+            driver_template_message_id: msgData.messageId ?? null,
           })
-          .eq('id', osData.id);
+          .eq("id", osData.id);
       } catch (dbErr) {
-        console.error('[WhatsApp] Erro ao registrar timestamp de envio:', dbErr);
+        console.error(
+          "[WhatsApp] Erro ao registrar timestamp de envio:",
+          dbErr,
+        );
       }
       void refreshData();
     } catch (err) {
@@ -1198,107 +1549,158 @@ export default function OSOperationalPage() {
   };
 
   const sendAdminGroupMessage = async (osData: OrderService) => {
-    const clienteRecord = clientes.find(c => c.id === osData.clienteId);
-    const cliente = clienteRecord?.nome || 'Empresa não informada';
-    const centroCusto = clienteRecord?.centrosCusto?.find(cc => cc.id === osData.centroCustoId)?.nome || 'Não informado';
+    const clienteRecord = clientes.find((c) => c.id === osData.clienteId);
+    const cliente = clienteRecord?.nome || "Empresa não informada";
+    const centroCusto =
+      clienteRecord?.centrosCusto?.find((cc) => cc.id === osData.centroCustoId)
+        ?.nome || "Não informado";
 
     // Motorista e contato
-    const driverObj = drivers.find(d =>
-      d.name.trim().toLowerCase() === osData.motorista.trim().toLowerCase()
+    const driverObj = drivers.find(
+      (d) =>
+        d.name.trim().toLowerCase() === osData.motorista.trim().toLowerCase(),
     );
-    const driverPhone = driverObj?.phone || 'Não informado';
+    const driverPhone = driverObj?.phone || "Não informado";
 
     // Veículo
-    let vehicleInfo = { tipo: '', placa: '', marca: '', modelo: '' };
+    let vehicleInfo = { tipo: "", placa: "", marca: "", modelo: "" };
     if (osData.veiculoId) {
-      const v = vehicles.find(v => v.id === osData.veiculoId);
-      if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '', marca: v.marca || '', modelo: v.modelo || '' };
+      const v = vehicles.find((v) => v.id === osData.veiculoId);
+      if (v)
+        vehicleInfo = {
+          tipo: v.tipo || "",
+          placa: v.placa || "",
+          marca: v.marca || "",
+          modelo: v.modelo || "",
+        };
     } else if (driverObj?.id) {
-      const assoc = driverVehiclesAssoc.find(a => a.driver_id === driverObj.id);
+      const assoc = driverVehiclesAssoc.find(
+        (a) => a.driver_id === driverObj.id,
+      );
       if (assoc) {
-        const v = vehicles.find(v => v.id === assoc.vehicle_id);
-        if (v) vehicleInfo = { tipo: v.tipo || '', placa: v.placa || '', marca: v.marca || '', modelo: v.modelo || '' };
+        const v = vehicles.find((v) => v.id === assoc.vehicle_id);
+        if (v)
+          vehicleInfo = {
+            tipo: v.tipo || "",
+            placa: v.placa || "",
+            marca: v.marca || "",
+            modelo: v.modelo || "",
+          };
       }
     }
     const tipoCapitalizado = vehicleInfo.tipo
       ? vehicleInfo.tipo.charAt(0).toUpperCase() + vehicleInfo.tipo.slice(1)
-      : 'Não informado';
+      : "Não informado";
 
     // Passageiros
     const allPassengers: { nome: string; celular: string }[] = [];
     const waypoints = osData.rota?.waypoints || [];
     waypoints.forEach((wp) => {
       (wp.passengers || []).forEach((p) => {
-        const passRecord = passageiros.find(x => x.id === p.solicitanteId);
-        const cel = passRecord?.celular || '';
-        const nomeAtual = passRecord?.nomeCompleto || 'Não identificado';
-        if (!allPassengers.some(x => x.nome === nomeAtual)) {
+        const passRecord = passageiros.find((x) => x.id === p.solicitanteId);
+        const cel = passRecord?.celular || "";
+        const nomeAtual = passRecord?.nomeCompleto || "Não identificado";
+        if (!allPassengers.some((x) => x.nome === nomeAtual)) {
           allPassengers.push({
             nome: nomeAtual,
-            celular: cel ? cel.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3') : 'Não informado',
+            celular: cel
+              ? cel.replace(/(\d{2})(\d{5})(\d{4})/, "($1) $2-$3")
+              : "Não informado",
           });
         }
       });
     });
-    const paxText = allPassengers.length > 0
-      ? allPassengers.map(p => `• ${p.nome}${p.celular !== 'Não informado' ? ` – ${p.celular}` : ''}`).join('\n')
-      : 'Não informado';
+    const paxText =
+      allPassengers.length > 0
+        ? allPassengers
+            .map(
+              (p) =>
+                `• ${p.nome}${p.celular !== "Não informado" ? ` – ${p.celular}` : ""}`,
+            )
+            .join("\n")
+        : "Não informado";
 
     // Itinerário com observações (separa ida/retorno)
-    let itineraryText = '';
+    let itineraryText = "";
     const itineraries = getItineraries(waypoints as FormWaypoint[]);
     if (itineraries.length > 0) {
-      itineraryText = itineraries.map((it) => {
-        const firstWp = it.waypoints[0];
-        const itData = firstWp?.data || osData.data;
-        const itHora = firstWp?.hora || osData.hora;
-        const dateTimeLine = itData
-          ? ` — ${itData.split('-').reverse().join('/')}${itHora ? ` - ${itHora.slice(0, 5)}` : ''}`
-          : (itHora ? ` — ${itHora.slice(0, 5)}` : '');
-        const itTitle = it.index < 0
-          ? `🔄 *${numeroParaOrdinal(Math.abs(it.index))} Retorno${dateTimeLine}*`
-          : `📍 *${numeroParaOrdinal(it.index + 1)} Itinerário${dateTimeLine}*`;
-        const stops = it.waypoints.map((w, relIdx) => {
-          const label = w.label.trim();
-          const comment = w.comment?.trim();
-          let line = '';
-          if (relIdx === 0) line = `🟢 *Origem:* ${label}`;
-          else if (relIdx === it.waypoints.length - 1) line = `🔵 *Destino Final:* ${label}`;
-          else line = `🔘 *Parada ${relIdx}:* ${label}`;
-          if (comment) line += `\n   _Obs: ${comment}_`;
-          return line;
-        }).join('\n\n');
-        return `────────────────\n${itTitle}\n\n${stops}`;
-      }).join('\n\n');
+      itineraryText = itineraries
+        .map((it) => {
+          const firstWp = it.waypoints[0];
+          const itData = firstWp?.data || osData.data;
+          const itHora = firstWp?.hora || osData.hora;
+          const dateTimeLine = itData
+            ? ` — ${itData.split("-").reverse().join("/")}${itHora ? ` - ${itHora.slice(0, 5)}` : ""}`
+            : itHora
+              ? ` — ${itHora.slice(0, 5)}`
+              : "";
+          const itTitle =
+            it.index < 0
+              ? `${numeroParaOrdinal(Math.abs(it.index))} Retorno${dateTimeLine}`
+              : `${numeroParaOrdinal(it.index + 1)} Itinerário${dateTimeLine}`;
+          const stops = it.waypoints
+            .map((w, relIdx) => {
+              const label = w.label.trim();
+              const comment = w.comment?.trim();
+              let line = "";
+              if (relIdx === 0) line = `❇️ *Origem:* ${label}`;
+              else if (relIdx === it.waypoints.length - 1)
+                line = `🛄*Destino:* ${label}`;
+              else line = `▫️ *Parada ${relIdx}:* ${label}`;
+              if (comment) line += `\n   _Obs: ${comment}_`;
+              return line;
+            })
+            .join("\n\n");
+          return `📍 *${itTitle}*\n\n${stops}`;
+        })
+        .join("\n\n");
     }
+
+    const firstItWp = itineraries[0]?.waypoints[0];
+    const firstItData = firstItWp?.data || osData.data;
+    const firstItHora = firstItWp?.hora || osData.hora;
+    const dataHoraHeaderParts: string[] = [];
+    if (firstItData)
+      dataHoraHeaderParts.push(
+        `*Data: ${firstItData.split("-").reverse().join("/")}*`,
+      );
+    if (firstItHora)
+      dataHoraHeaderParts.push(`*Horário: ${firstItHora.slice(0, 5)}*`);
+    const dataHoraHeader =
+      dataHoraHeaderParts.length > 0
+        ? `\n${dataHoraHeaderParts.join("\n")}\n\n`
+        : "";
 
     // Financeiro
     const formatCurrency = (value: number) =>
-      new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+      new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      }).format(value);
 
-    const osLine = osData.os ? `🆔 *OS:* ${osData.os.toUpperCase()}\n` : '';
-
-    const marcaModeloLine = (vehicleInfo.marca || vehicleInfo.modelo)
-      ? `🏭 *Marca/Modelo:* ${[vehicleInfo.marca, vehicleInfo.modelo].filter(Boolean).join(' ')}\n`
-      : '';
+    const marcaModeloLine =
+      vehicleInfo.marca || vehicleInfo.modelo
+        ? `*Marca/Modelo:* ${[vehicleInfo.marca, vehicleInfo.modelo].filter(Boolean).join(" ")}\n`
+        : "";
 
     const message =
       `📋 *NOVO ATENDIMENTO*\n` +
-      `🏷️ *Protocolo:* ${osData.protocolo}\n` +
-      `🚛 *Fornecedor:* Geolog Transporte Executivo\n` +
-      `${osLine}` +
-      `🏢 *Empresa:* ${cliente}\n` +
-      `👤 *Solicitante:* ${osData.solicitante || 'Não informado'}\n` +
-      `💼 *C. Custo:* ${centroCusto}\n\n` +
-      `────────────────\n` +
-      `👥 *Passageiro(s):*\n${paxText}\n\n` +
-      `${itineraryText ? `${itineraryText}\n\n` : '────────────────\n📍 *Itinerário:* Não informado\n\n'}` +
+      `*Protocolo:* ${osData.protocolo ?? "N/A"}\n` +
+      `${dataHoraHeader}` +
+      `*Fornecedor:* Geolog Transporte Executivo\n` +
+      `*Empresa:* ${cliente}\n` +
+      `*Solicitante:* ${osData.solicitante || "Não informado"}\n` +
+      `*C. Custo:* ${centroCusto}\n\n` +
       `────────────────\n` +
       `👨‍✈️ *Motorista:* ${osData.motorista}\n` +
-      `📞 *Contato:* ${driverPhone}\n` +
-      `🚘 *Veículo:* ${tipoCapitalizado}\n` +
+      `*Contato:* ${driverPhone}\n` +
+      `*Veículo:* ${tipoCapitalizado}\n` +
       `${marcaModeloLine}` +
-      `📝 *Placa:* ${vehicleInfo.placa || 'Não informada'}\n\n` +
+      `*Placa:* ${vehicleInfo.placa || "Não informada"}\n\n` +
+      `────────────────\n` +
+      `👥 *Passageiro(s):*\n${paxText}\n\n` +
+      `────────────────\n` +
+      `${itineraryText ? `${itineraryText}\n\n` : "📍 *Itinerário:* Não informado\n\n"}` +
       `────────────────\n` +
       `💰 *Financeiro:*\n` +
       `• Valor Bruto: ${formatCurrency(osData.valorBruto ?? 0)}\n` +
@@ -1306,28 +1708,37 @@ export default function OSOperationalPage() {
       `• Lucro Líquido: ${formatCurrency(osData.lucro ?? 0)}`;
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) return;
 
-      const response = await fetch('/api/whatsapp/group', {
-        method: 'POST',
+      // Envia mensagem administrativa para contato fixo via API WhatsApp
+      const response = await fetch("/api/whatsapp", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ message }),
+        // Telefone fixo +5522997599213
+        body: JSON.stringify({ phone: "+5522997599213", message }),
       });
 
       const result = await response.json();
       if (!response.ok || !result.success) {
-        console.error('[AdminGroup] Falha ao enviar relatório administrativo:', result);
-        toast.error(`Relatório administrativo não enviado: ${result.error || 'Erro desconhecido'}`);
+        console.error(
+          "[AdminGroup] Falha ao enviar relatório administrativo:",
+          result,
+        );
+        toast.error(
+          `Relatório administrativo não enviado: ${result.error || "Erro desconhecido"}`,
+        );
       } else {
-        toast.success('Relatório administrativo enviado ao grupo!');
+        toast.success("Relatório administrativo enviado ao grupo!");
       }
     } catch (err) {
-      console.error('[AdminGroup] Erro crítico:', err);
-      toast.error('Erro ao enviar relatório administrativo ao grupo.');
+      console.error("[AdminGroup] Erro crítico:", err);
+      toast.error("Erro ao enviar relatório administrativo ao grupo.");
     }
   };
 
@@ -1339,52 +1750,191 @@ export default function OSOperationalPage() {
       const currentMenu = actionMenuRefs.current[openActionMenuId];
       // Para modo calendário - verifica ref do menu do calendário
       const calendarMenu = calendarMenuRef.current;
-      
-      const clickedOutsideTableMenu = currentMenu && !currentMenu.contains(event.target as Node);
-      const clickedOutsideCalendarMenu = calendarMenu && !calendarMenu.contains(event.target as Node);
-      
+
+      const clickedOutsideTableMenu =
+        currentMenu && !currentMenu.contains(event.target as Node);
+      const clickedOutsideCalendarMenu =
+        calendarMenu && !calendarMenu.contains(event.target as Node);
+
       if (clickedOutsideTableMenu || clickedOutsideCalendarMenu) {
         setOpenActionMenuId(null);
         setCalendarMenuPosition(null);
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [openActionMenuId]);
 
-  const [openNotifyMenuKey, setOpenNotifyMenuKey] = useState<string | null>(null);
+  const [openNotifyMenuKey, setOpenNotifyMenuKey] = useState<string | null>(
+    null,
+  );
   const [notifyLoadingKey, setNotifyLoadingKey] = useState<string | null>(null);
-  const [notifyMenuPosition, setNotifyMenuPosition] = useState<{ x: number; y: number } | null>(null);
-  const [passengerConfirmations, setPassengerConfirmations] = useState<Record<string, boolean>>({});
+
+  // State variables for new modals
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+  const [showAcceptRevert, setShowAcceptRevert] = useState(false);
+  const [showRouteMenu, setShowRouteMenu] = useState(false);
+  const [selectedCycleIndex, setSelectedCycleIndex] = useState<number | null>(
+    null,
+  );
+  const [routeMenuPosition, setRouteMenuPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [notifyMenuPosition, setNotifyMenuPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [passengerConfirmations, setPassengerConfirmations] = useState<
+    Record<string, boolean>
+  >({});
   const [openDriverNotifyMenu, setOpenDriverNotifyMenu] = useState(false);
-  const [driverNotifyMenuPos, setDriverNotifyMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [driverNotifyMenuPos, setDriverNotifyMenuPos] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [driverNotifyTargetCycleIndex, setDriverNotifyTargetCycleIndex] =
+    useState<number | null>(null);
 
   useEffect(() => {
     if (!openNotifyMenuKey) return;
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (target.closest('[data-notify-menu]') || target.closest('[data-notify-button]')) return;
+      if (
+        target.closest("[data-notify-menu]") ||
+        target.closest("[data-notify-button]")
+      )
+        return;
       setOpenNotifyMenuKey(null);
       setNotifyMenuPosition(null);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [openNotifyMenuKey]);
 
   useEffect(() => {
     if (!openDriverNotifyMenu) return;
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (target.closest('[data-driver-notify-menu]') || target.closest('[data-driver-notify-button]')) return;
+      if (
+        target.closest("[data-driver-notify-menu]") ||
+        target.closest("[data-driver-notify-button]")
+      )
+        return;
       setOpenDriverNotifyMenu(false);
       setDriverNotifyMenuPos(null);
+      setDriverNotifyTargetCycleIndex(null);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [openDriverNotifyMenu]);
+
+  // Close route menu when clicking outside
+  useEffect(() => {
+    if (!showRouteMenu) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (
+        target.closest("[data-route-menu]") ||
+        target.closest("[data-route-button]")
+      )
+        return;
+      setShowRouteMenu(false);
+      setRouteMenuPosition(null);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showRouteMenu]);
+
+  /**
+   * Handler functions for manual cycle status updates
+   */
+  const handleManualFinishCycle = async (osId: string, cycleIndex: number) => {
+    try {
+      const response = await fetch("/api/os-manual-cycle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          os_id: osId,
+          cycle_index: cycleIndex,
+          action: "finish_cycle",
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        toast.error(result.error || "Erro ao finalizar etapa");
+        return;
+      }
+
+      toast.success("Etapa finalizada com sucesso!");
+      await syncViewingOS();
+    } catch (error) {
+      console.error("Erro ao finalizar ciclo manualmente:", error);
+      toast.error("Erro ao finalizar etapa. Tente novamente.");
+    }
+  };
+
+  const handleManualRevertAccept = async (osId: string, cycleIndex: number) => {
+    try {
+      const response = await fetch("/api/os-manual-cycle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          os_id: osId,
+          cycle_index: cycleIndex,
+          action: "revert_to_pending",
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        toast.error(result.error || "Erro ao retornar para pendente");
+        return;
+      }
+
+      toast.success("Status retornado para pendente!");
+      await syncViewingOS();
+    } catch (error) {
+      console.error("Erro ao reverter aceite:", error);
+      toast.error("Erro ao retornar status. Tente novamente.");
+    }
+  };
+
+  const handleManualRevertToAccept = async (
+    osId: string,
+    cycleIndex: number,
+  ) => {
+    try {
+      const response = await fetch("/api/os-manual-cycle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          os_id: osId,
+          cycle_index: cycleIndex,
+          action: "revert_to_accept",
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        toast.error(result.error || "Erro ao retornar para aceite");
+        return;
+      }
+
+      toast.success("Status retornado para aceite!");
+      await syncViewingOS();
+    } catch (error) {
+      console.error("Erro ao reverter para aceite:", error);
+      toast.error("Erro ao retornar status. Tente novamente.");
+    }
+  };
 
   useEffect(() => {
     if (!viewingOSId) {
@@ -1394,15 +1944,17 @@ export default function OSOperationalPage() {
 
     const fetchConfirmations = async () => {
       const { data } = await supabase
-        .from('os_passenger_confirmations')
-        .select('passageiro_id, aceito')
-        .eq('os_id', viewingOSId);
+        .from("os_passenger_confirmations")
+        .select("passageiro_id, aceito")
+        .eq("os_id", viewingOSId);
 
       if (data) {
         const map: Record<string, boolean> = {};
-        data.forEach((row: { passageiro_id: string | null; aceito: boolean }) => {
-          if (row.passageiro_id) map[row.passageiro_id] = row.aceito;
-        });
+        data.forEach(
+          (row: { passageiro_id: string | null; aceito: boolean }) => {
+            if (row.passageiro_id) map[row.passageiro_id] = row.aceito;
+          },
+        );
         setPassengerConfirmations(map);
       }
     };
@@ -1412,16 +1964,16 @@ export default function OSOperationalPage() {
     const channel = supabase
       .channel(`os-confirmations-${viewingOSId}`)
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
-          table: 'os_passenger_confirmations',
+          event: "*",
+          schema: "public",
+          table: "os_passenger_confirmations",
           filter: `os_id=eq.${viewingOSId}`,
         },
         () => {
           void fetchConfirmations();
-        }
+        },
       )
       .subscribe();
 
@@ -1429,17 +1981,17 @@ export default function OSOperationalPage() {
     const osStatusChannel = supabase
       .channel(`os-status-${viewingOSId}`)
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
-          table: 'ordens_servico',
+          event: "*",
+          schema: "public",
+          table: "ordens_servico",
           filter: `id=eq.${viewingOSId}`,
         },
         () => {
           // Refresh the data table to reflect the new status
           void osTable.refresh();
-        }
+        },
       )
       .subscribe();
 
@@ -1450,26 +2002,38 @@ export default function OSOperationalPage() {
   }, [viewingOSId, supabase, osTable]);
 
   const [formData, setFormData] = useState(initialForm);
-  const [openWaypointComments, setOpenWaypointComments] = useState<Record<number, boolean>>({});
-  const waypointTimelineRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const [destinationPassengerLineEnds, setDestinationPassengerLineEnds] = useState<Record<number, number>>({});
+  const [openWaypointComments, setOpenWaypointComments] = useState<
+    Record<number, boolean>
+  >({});
+  const waypointTimelineRefs = useRef<Record<number, HTMLDivElement | null>>(
+    {},
+  );
+  const [destinationPassengerLineEnds, setDestinationPassengerLineEnds] =
+    useState<Record<number, number>>({});
   const initialQuickPassengerForm = {
-    nomeCompleto: '',
-    celular: '',
-    rotulo: 'RESIDENCIAL',
-    referencia: '',
-    enderecoCompleto: '',
-    notificar: 'Sim'
+    nomeCompleto: "",
+    celular: "",
+    rotulo: "RESIDENCIAL",
+    referencia: "",
+    enderecoCompleto: "",
+    notificar: "Sim",
   };
-  const [quickPassengerForm, setQuickPassengerForm] = useState(initialQuickPassengerForm);
-  const [quickPassengerErrors, setQuickPassengerErrors] = useState<{ celular?: string }>({});
+  const [quickPassengerForm, setQuickPassengerForm] = useState(
+    initialQuickPassengerForm,
+  );
+  const [quickPassengerErrors, setQuickPassengerErrors] = useState<{
+    nomeCompleto?: string;
+    celular?: string;
+  }>({});
   const [isAddressExpanded, setIsAddressExpanded] = useState(false);
   const [isEstrangeiro, setIsEstrangeiro] = useState(false);
   const driverOptions = useMemo(() => {
-    const baseOptions = drivers.filter(d => d.status !== 'inactive').map(d => ({
-      id: d.name,
-      nome: d.name
-    }));
+    const baseOptions = drivers
+      .filter((d) => d.status !== "inactive")
+      .map((d) => ({
+        id: d.id,
+        nome: d.name,
+      }));
 
     const mergedOptions = [...quickAddedDriverOptions, ...baseOptions];
     const seen = new Set<string>();
@@ -1483,22 +2047,26 @@ export default function OSOperationalPage() {
 
   const formatPhone = (value: string) => {
     if (isEstrangeiro) {
-      return value.replace(/\D/g, '').slice(0, 15);
+      return value.replace(/\D/g, "").slice(0, 15);
     }
-    const digits = value.replace(/\D/g, '').slice(0, 11);
+    const digits = value.replace(/\D/g, "").slice(0, 11);
     if (digits.length <= 10) {
-      return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3').trim();
+      return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, "($1) $2-$3").trim();
     }
-    return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').trim();
+    return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, "($1) $2-$3").trim();
   };
 
-  const formItineraries = useMemo(() => getItineraries(formData.waypoints), [formData.waypoints]);
+  const formItineraries = useMemo(
+    () => getItineraries(formData.waypoints),
+    [formData.waypoints],
+  );
 
   useLayoutEffect(() => {
     const nextEnds: Record<number, number> = {};
 
     formItineraries.forEach((it) => {
-      const destinationIndex = it.waypointIndices[it.waypointIndices.length - 1];
+      const destinationIndex =
+        it.waypointIndices[it.waypointIndices.length - 1];
       const waypoint = formData.waypoints[destinationIndex];
       if (!waypoint || (waypoint.passengers?.length || 0) === 0) {
         return;
@@ -1509,15 +2077,21 @@ export default function OSOperationalPage() {
         return;
       }
 
-      const passengerLineElements = waypointElement.querySelectorAll('[data-passenger-line]') as NodeListOf<HTMLElement>;
+      const passengerLineElements = waypointElement.querySelectorAll(
+        "[data-passenger-line]",
+      ) as NodeListOf<HTMLElement>;
       if (!passengerLineElements || passengerLineElements.length === 0) {
         return;
       }
 
-      const lastPassengerLineElement = passengerLineElements[passengerLineElements.length - 1];
+      const lastPassengerLineElement =
+        passengerLineElements[passengerLineElements.length - 1];
       const containerRect = waypointElement.getBoundingClientRect();
       const lineRect = lastPassengerLineElement.getBoundingClientRect();
-      const measuredHeight = Math.max(0, Math.round(lineRect.top - containerRect.top - 29));
+      const measuredHeight = Math.max(
+        0,
+        Math.round(lineRect.top - containerRect.top - 29),
+      );
       nextEnds[destinationIndex] = measuredHeight;
     });
 
@@ -1537,65 +2111,169 @@ export default function OSOperationalPage() {
 
   const viewingOS = useMemo(() => {
     if (!viewingOSId) return null;
-    return viewingOSLive || osList.find(os => os.id === viewingOSId) || null;
+    return viewingOSLive || osList.find((os) => os.id === viewingOSId) || null;
   }, [osList, viewingOSId, viewingOSLive]);
-  const cancelTargetOS = useMemo(() => osList.find(os => os.id === cancelTargetId) || null, [osList, cancelTargetId]);
+  const cancelTargetOS = useMemo(
+    () => osList.find((os) => os.id === cancelTargetId) || null,
+    [osList, cancelTargetId],
+  );
 
   const operationalPassengerList = useMemo(() => {
     if (!viewingOS?.rota?.waypoints) return [];
 
     return viewingOS.rota.waypoints.flatMap((waypoint, waypointIndex) =>
       (waypoint.passengers || []).map((passenger, passengerIndex) => {
-        const passengerRecord = passageiros.find(p => p.id === passenger.solicitanteId);
+        const passengerRecord = passageiros.find(
+          (p) => p.id === passenger.solicitanteId,
+        );
         return {
           key: `${waypointIndex}-${passenger.id}-${passengerIndex}`,
           waypointLabel: waypoint.label,
-          nome: passengerRecord?.nomeCompleto || 'Passageiro não identificado',
-          celular: passengerRecord?.celular || 'Não informado',
-          email: passengerRecord?.email || 'Não informado',
-          endereco: passengerRecord?.enderecos?.[0]?.enderecoCompleto || 'Não informado',
-          hasEmail: Boolean(passengerRecord?.email && passengerRecord.email.trim() !== ''),
-          hasPhone: Boolean(passengerRecord?.celular && passengerRecord.celular.replace(/\D/g, '').length > 0),
-          solicitanteId: passenger.solicitanteId || '',
+          nome: passengerRecord?.nomeCompleto || "Passageiro não identificado",
+          celular: passengerRecord?.celular || "Não informado",
+          email: passengerRecord?.email || "Não informado",
+          endereco:
+            passengerRecord?.enderecos?.[0]?.enderecoCompleto ||
+            "Não informado",
+          hasEmail: Boolean(
+            passengerRecord?.email && passengerRecord.email.trim() !== "",
+          ),
+          hasPhone: Boolean(
+            passengerRecord?.celular &&
+            passengerRecord.celular.replace(/\D/g, "").length > 0,
+          ),
+          solicitanteId: passenger.solicitanteId || "",
           waypointIndex,
         };
-      })
+      }),
     );
   }, [viewingOS, passageiros]);
 
   const driverFlow = useMemo(() => {
-    const status = viewingOS?.status.operacional;
+    const status =
+      viewingOS?.operationalCycles && viewingOS.operationalCycles.length > 0
+        ? deriveCyclesOperationalStatus(viewingOS.operationalCycles)
+        : viewingOS?.status.operacional;
     return {
       received: Boolean(
         viewingOS &&
         (driverNotificationSentByOS[viewingOS.id] ||
           viewingOS.driverMessageSentAt ||
-          status !== 'Pendente')
+          status !== "Pendente"),
       ),
       accepted: Boolean(
         viewingOS?.driverAcceptedAt ||
-        status === 'Aguardando' ||
-        status === 'Em Rota' ||
-        status === 'Finalizado'
+        status === "Aguardando" ||
+        status === "Em Rota" ||
+        status === "Finalizado",
       ),
       started: Boolean(
         viewingOS?.routeStartedAt ||
-        status === 'Em Rota' ||
-        status === 'Finalizado'
+        status === "Em Rota" ||
+        status === "Finalizado",
       ),
-      finished: Boolean(
-        viewingOS?.routeFinishedAt ||
-        status === 'Finalizado'
-      ),
+      finished: Boolean(viewingOS?.routeFinishedAt || status === "Finalizado"),
     };
   }, [driverNotificationSentByOS, viewingOS]);
 
+  const operationalCycleTimeline = useMemo(() => {
+    if (!viewingOS) return [];
+
+    if (viewingOS.operationalCycles && viewingOS.operationalCycles.length > 0) {
+      return viewingOS.operationalCycles;
+    }
+
+    const fallbackWaypoints = (viewingOS.rota?.waypoints || []).map(
+      (wp, position) => ({
+        itineraryIndex: wp.itineraryIndex ?? null,
+        position,
+      }),
+    );
+
+    return buildOperationalCyclesFromWaypoints(fallbackWaypoints);
+  }, [viewingOS]);
+
+  const cyclesToRender = useMemo(() => {
+    if (operationalCycleTimeline.length > 0) {
+      return operationalCycleTimeline;
+    }
+
+    if (!viewingOS) {
+      return [];
+    }
+
+    return [
+      {
+        itineraryIndex: 0,
+        sequenceOrder: 0,
+        kind: "itinerary" as const,
+        ordinal: 1,
+        title: "Primeiro Itinerário",
+        state: driverFlow.finished
+          ? "completed"
+          : driverFlow.started
+            ? "awaiting_finish"
+            : driverFlow.accepted
+              ? "awaiting_start"
+              : driverFlow.received
+                ? "awaiting_accept"
+                : "pending",
+        messageSentAt: viewingOS.driverMessageSentAt ?? null,
+        acceptedAt: viewingOS.driverAcceptedAt ?? null,
+        startedAt: viewingOS.routeStartedAt ?? null,
+        finishedAt: viewingOS.routeFinishedAt ?? null,
+        kmInitial: viewingOS.routeStartedKm ?? null,
+        kmFinal: viewingOS.routeFinishedKm ?? null,
+      },
+    ];
+  }, [
+    driverFlow.accepted,
+    driverFlow.finished,
+    driverFlow.received,
+    driverFlow.started,
+    operationalCycleTimeline,
+    viewingOS,
+  ]);
+
+  const effectiveOperationalStatus = useMemo((): CycleOperationalStatus => {
+    if (cyclesToRender.length > 0) {
+      const normalizedCycles = cyclesToRender.map((c) => ({
+        ...c,
+        state: (c.state as OperationalCycleState) || "pending",
+      }));
+      return deriveCyclesOperationalStatus(normalizedCycles);
+    }
+    return (viewingOS?.status.operacional ??
+      "Pendente") as CycleOperationalStatus;
+  }, [cyclesToRender, viewingOS?.status.operacional]);
+
+  const getOperationalStatusForOS = useCallback(
+    (os?: OrderService | null): CycleOperationalStatus => {
+      if (!os) return "Pendente";
+      if (os.operationalCycles && os.operationalCycles.length > 0) {
+        return deriveCyclesOperationalStatus(os.operationalCycles);
+      }
+      return os.status.operacional;
+    },
+    [],
+  );
+
   const handleAddWaypoint = (targetItineraryIndex: number) => {
     const itineraries = getItineraries(formData.waypoints);
-    const targetIt = itineraries.find(it => it.index === targetItineraryIndex);
+    const targetIt = itineraries.find(
+      (it) => it.index === targetItineraryIndex,
+    );
     if (!targetIt) return;
-    const insertIdx = targetIt.waypointIndices[targetIt.waypointIndices.length - 1]; // before destination
-    const newWaypoint = { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: targetIt.index };
+    const insertIdx =
+      targetIt.waypointIndices[targetIt.waypointIndices.length - 1]; // before destination
+    const newWaypoint = {
+      label: "",
+      lat: null,
+      lng: null,
+      comment: "",
+      passengers: [],
+      itineraryIndex: targetIt.index,
+    };
     const newWaypoints = [...formData.waypoints];
     newWaypoints.splice(insertIdx, 0, newWaypoint);
     setOpenWaypointComments((prev) => {
@@ -1608,21 +2286,35 @@ export default function OSOperationalPage() {
       next[insertIdx] = false;
       return next;
     });
-    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+    setFormData((prev) => ({ ...prev, waypoints: newWaypoints }));
   };
 
   const handleAddItinerary = () => {
     const itineraries = getItineraries(formData.waypoints);
     const maxItineraryIndex = itineraries
-      .filter(it => it.index >= 0)
+      .filter((it) => it.index >= 0)
       .reduce((max, it) => Math.max(max, it.index), -1);
     const newItIndex = maxItineraryIndex + 1;
     const newWaypoints = [...formData.waypoints];
     newWaypoints.push(
-      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: newItIndex },
-      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: newItIndex }
+      {
+        label: "",
+        lat: null,
+        lng: null,
+        comment: "",
+        passengers: [],
+        itineraryIndex: newItIndex,
+      },
+      {
+        label: "",
+        lat: null,
+        lng: null,
+        comment: "",
+        passengers: [],
+        itineraryIndex: newItIndex,
+      },
     );
-    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+    setFormData((prev) => ({ ...prev, waypoints: newWaypoints }));
   };
 
   const handleAddReturn = () => {
@@ -1630,26 +2322,41 @@ export default function OSOperationalPage() {
     const lastGroup = itineraries[itineraries.length - 1];
 
     if (!lastGroup || lastGroup.index < 0) {
-      toast.error('Adicione um itinerário antes de adicionar um retorno.');
+      toast.error("Adicione um itinerário antes de adicionar um retorno.");
       return;
     }
 
     const returnIndex = -(lastGroup.index + 1);
     const newWaypoints = [...formData.waypoints];
     newWaypoints.push(
-      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: returnIndex },
-      { label: '', lat: null, lng: null, comment: '', passengers: [], itineraryIndex: returnIndex }
+      {
+        label: "",
+        lat: null,
+        lng: null,
+        comment: "",
+        passengers: [],
+        itineraryIndex: returnIndex,
+      },
+      {
+        label: "",
+        lat: null,
+        lng: null,
+        comment: "",
+        passengers: [],
+        itineraryIndex: returnIndex,
+      },
     );
-    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+    setFormData((prev) => ({ ...prev, waypoints: newWaypoints }));
   };
 
   const handleRemoveWaypoint = (index: number) => {
     const itineraries = getItineraries(formData.waypoints);
-    const it = itineraries.find(g => g.waypointIndices.includes(index));
+    const it = itineraries.find((g) => g.waypointIndices.includes(index));
     if (!it) return;
     // Don't allow removing origin or destination if it would leave < 2 waypoints in itinerary
     const isOrigin = it.waypointIndices[0] === index;
-    const isDestination = it.waypointIndices[it.waypointIndices.length - 1] === index;
+    const isDestination =
+      it.waypointIndices[it.waypointIndices.length - 1] === index;
     if ((isOrigin || isDestination) && it.waypoints.length <= 2) return;
     // If removing origin or destination of an itinerary with > 2 waypoints, convert next/prev stop
     const newWaypoints = [...formData.waypoints];
@@ -1663,31 +2370,31 @@ export default function OSOperationalPage() {
       });
       return next;
     });
-    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+    setFormData((prev) => ({ ...prev, waypoints: newWaypoints }));
   };
 
   const handleRemoveItinerary = async (itineraryIndex: number) => {
     const itineraries = getItineraries(formData.waypoints);
     if (itineraries.length <= 1) {
-      toast.error('Pelo menos 1 itinerário é obrigatório.');
+      toast.error("Pelo menos 1 itinerário é obrigatório.");
       return;
     }
-    const targetIt = itineraries.find(it => it.index === itineraryIndex);
+    const targetIt = itineraries.find((it) => it.index === itineraryIndex);
     if (!targetIt) return;
 
     const confirmed = await confirm({
-      title: 'Remover itinerário',
-      message: `Deseja realmente remover o ${itineraryIndex < 0 ? 'retorno' : `itinerário ${itineraryIndex + 1}`}? Esta ação não pode ser desfeita.`,
-      confirmText: 'Remover',
-      cancelText: 'Cancelar',
-      type: 'danger'
+      title: "Remover itinerário",
+      message: `Deseja realmente remover o ${itineraryIndex < 0 ? "retorno" : `itinerário ${itineraryIndex + 1}`}? Esta ação não pode ser desfeita.`,
+      confirmText: "Remover",
+      cancelText: "Cancelar",
+      type: "danger",
     });
     if (!confirmed) return;
 
     const indicesToRemove = new Set(targetIt.waypointIndices);
     const reindexedWaypoints = formData.waypoints
       .filter((_, idx) => !indicesToRemove.has(idx))
-      .map(wp => {
+      .map((wp) => {
         const itIdx = wp.itineraryIndex ?? 0;
         if (itineraryIndex >= 0 && itIdx > itineraryIndex) {
           return { ...wp, itineraryIndex: itIdx - 1 };
@@ -1709,36 +2416,36 @@ export default function OSOperationalPage() {
       });
       return next;
     });
-    setFormData(prev => ({ ...prev, waypoints: reindexedWaypoints }));
+    setFormData((prev) => ({ ...prev, waypoints: reindexedWaypoints }));
   };
 
   const handleWaypointChange = (index: number, value: string) => {
     const newWaypoints = [...formData.waypoints];
     newWaypoints[index] = { ...newWaypoints[index], label: value };
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      waypoints: newWaypoints
+      waypoints: newWaypoints,
     }));
   };
 
   const handleWaypointCommentChange = (index: number, value: string) => {
     const newWaypoints = [...formData.waypoints];
     newWaypoints[index] = { ...newWaypoints[index], comment: value };
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      waypoints: newWaypoints
+      waypoints: newWaypoints,
     }));
   };
 
   const handleWaypointHoraChange = (index: number, value: string) => {
-    let cleanValue = value.replace(/\D/g, '');
+    let cleanValue = value.replace(/\D/g, "");
     if (cleanValue.length > 4) cleanValue = cleanValue.slice(0, 4);
 
     let hours = cleanValue.slice(0, 2);
     let minutes = cleanValue.slice(2, 4);
 
-    if (hours && parseInt(hours) > 23) hours = '23';
-    if (minutes && parseInt(minutes) > 59) minutes = '59';
+    if (hours && parseInt(hours) > 23) hours = "23";
+    if (minutes && parseInt(minutes) > 59) minutes = "59";
 
     let formatted = hours;
     if (minutes) {
@@ -1749,22 +2456,22 @@ export default function OSOperationalPage() {
 
     const newWaypoints = [...formData.waypoints];
     newWaypoints[index] = { ...newWaypoints[index], hora: formatted };
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      waypoints: newWaypoints
+      waypoints: newWaypoints,
     }));
   };
 
   const handleWaypointDataChange = (index: number, value: string) => {
-    let cleanValue = value.replace(/\D/g, '');
+    let cleanValue = value.replace(/\D/g, "");
     if (cleanValue.length > 8) cleanValue = cleanValue.slice(0, 8);
 
-    if (cleanValue === '') {
+    if (cleanValue === "") {
       const newWaypoints = [...formData.waypoints];
-      newWaypoints[index] = { ...newWaypoints[index], data: '' };
-      setFormData(prev => ({
+      newWaypoints[index] = { ...newWaypoints[index], data: "" };
+      setFormData((prev) => ({
         ...prev,
-        waypoints: newWaypoints
+        waypoints: newWaypoints,
       }));
       return;
     }
@@ -1773,9 +2480,9 @@ export default function OSOperationalPage() {
     let month = cleanValue.slice(2, 4);
     let year = cleanValue.slice(4, 8);
 
-    if (day && parseInt(day) > 31) day = '31';
-    if (month && parseInt(month) > 12) month = '12';
-    if (year && parseInt(year) > 5000) year = '5000';
+    if (day && parseInt(day) > 31) day = "31";
+    if (month && parseInt(month) > 12) month = "12";
+    if (year && parseInt(year) > 5000) year = "5000";
 
     const validatedClean = day + month + year;
 
@@ -1785,9 +2492,9 @@ export default function OSOperationalPage() {
 
     const newWaypoints = [...formData.waypoints];
     newWaypoints[index] = { ...newWaypoints[index], data: formatted };
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      waypoints: newWaypoints
+      waypoints: newWaypoints,
     }));
   };
 
@@ -1796,16 +2503,18 @@ export default function OSOperationalPage() {
     if (!waypoint || waypoint.data) return;
 
     const fallbackDate = formData.data
-      ? (formData.data.includes('-') ? formData.data.split('-').reverse().join('/') : formData.data)
-      : '';
+      ? formData.data.includes("-")
+        ? formData.data.split("-").reverse().join("/")
+        : formData.data
+      : "";
 
     if (!fallbackDate) return;
 
     const newWaypoints = [...formData.waypoints];
     newWaypoints[index] = { ...newWaypoints[index], data: fallbackDate };
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      waypoints: newWaypoints
+      waypoints: newWaypoints,
     }));
   };
 
@@ -1823,7 +2532,7 @@ export default function OSOperationalPage() {
 
     setOpenWaypointComments((prev) => ({
       ...prev,
-      [index]: true
+      [index]: true,
     }));
   };
 
@@ -1831,66 +2540,93 @@ export default function OSOperationalPage() {
     const newWaypoints = [...formData.waypoints];
     const waypoint = { ...newWaypoints[waypointIndex] };
     passengerDraftIdRef.current += 1;
-    waypoint.passengers = [...(waypoint.passengers || []), { id: `draft-passenger-${passengerDraftIdRef.current}`, solicitanteId: '', nome: '' }];
+    waypoint.passengers = [
+      ...(waypoint.passengers || []),
+      {
+        id: `draft-passenger-${passengerDraftIdRef.current}`,
+        solicitanteId: "",
+        nome: "",
+      },
+    ];
     newWaypoints[waypointIndex] = waypoint;
-    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+    setFormData((prev) => ({ ...prev, waypoints: newWaypoints }));
   };
 
-  const handleRemovePassenger = (waypointIndex: number, passengerId: string) => {
+  const handleRemovePassenger = (
+    waypointIndex: number,
+    passengerId: string,
+  ) => {
     const newWaypoints = [...formData.waypoints];
     const waypoint = { ...newWaypoints[waypointIndex] };
-    waypoint.passengers = (waypoint.passengers || []).filter((p) => p.id !== passengerId);
-    newWaypoints[waypointIndex] = waypoint;
-    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
-  };
-
-  const handlePassengerChange = (waypointIndex: number, passengerId: string, novoPassageiroId: string) => {
-    const newWaypoints = [...formData.waypoints];
-    const waypoint = { ...newWaypoints[waypointIndex] };
-    const passageiroSelecionado = passageiros.find(p => p.id === novoPassageiroId);
-    waypoint.passengers = (waypoint.passengers || []).map((p) => 
-      p.id === passengerId ? { ...p, solicitanteId: novoPassageiroId, nome: passageiroSelecionado?.nomeCompleto || '' } : p
+    waypoint.passengers = (waypoint.passengers || []).filter(
+      (p) => p.id !== passengerId,
     );
     newWaypoints[waypointIndex] = waypoint;
-    setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+    setFormData((prev) => ({ ...prev, waypoints: newWaypoints }));
+  };
+
+  const handlePassengerChange = (
+    waypointIndex: number,
+    passengerId: string,
+    novoPassageiroId: string,
+  ) => {
+    const newWaypoints = [...formData.waypoints];
+    const waypoint = { ...newWaypoints[waypointIndex] };
+    const passageiroSelecionado = passageiros.find(
+      (p) => p.id === novoPassageiroId,
+    );
+    waypoint.passengers = (waypoint.passengers || []).map((p) =>
+      p.id === passengerId
+        ? {
+            ...p,
+            solicitanteId: novoPassageiroId,
+            nome: passageiroSelecionado?.nomeCompleto || "",
+          }
+        : p,
+    );
+    newWaypoints[waypointIndex] = waypoint;
+    setFormData((prev) => ({ ...prev, waypoints: newWaypoints }));
   };
 
   const getWaypointInfo = (waypointIndex: number) => {
     const totalWaypoints = formData.waypoints.length;
     const isFirst = waypointIndex === 0;
     const isLast = waypointIndex === totalWaypoints - 1;
-    
+
     if (isFirst) {
       return {
-        type: 'ORIGEM',
-        color: 'emerald',
-        bgColor: 'bg-emerald-50',
-        textColor: 'text-emerald-600',
-        borderColor: 'border-emerald-200',
-        description: 'Ponto de partida'
+        type: "ORIGEM",
+        color: "emerald",
+        bgColor: "bg-emerald-50",
+        textColor: "text-emerald-600",
+        borderColor: "border-emerald-200",
+        description: "Ponto de partida",
       };
     } else if (isLast) {
       return {
-        type: 'DESTINO FINAL',
-        color: 'blue',
-        bgColor: 'bg-blue-50',
-        textColor: 'text-blue-600',
-        borderColor: 'border-blue-200',
-        description: 'Ponto de chegada'
+        type: "DESTINO FINAL",
+        color: "blue",
+        bgColor: "bg-blue-50",
+        textColor: "text-blue-600",
+        borderColor: "border-blue-200",
+        description: "Ponto de chegada",
       };
     } else {
       return {
-        type: 'PARADA',
-        color: 'slate',
-        bgColor: 'bg-slate-50',
-        textColor: 'text-slate-600',
-        borderColor: 'border-slate-200',
-        description: 'Parada intermediária'
+        type: "PARADA",
+        color: "slate",
+        bgColor: "bg-slate-50",
+        textColor: "text-slate-600",
+        borderColor: "border-slate-200",
+        description: "Parada intermediária",
       };
     }
   };
 
-  const openQuickPassengerModal = (waypointIndex: number, passengerId: string) => {
+  const openQuickPassengerModal = (
+    waypointIndex: number,
+    passengerId: string,
+  ) => {
     setQuickPassengerTarget({ waypointIndex, passengerId });
     setQuickPassengerForm(initialQuickPassengerForm);
     setQuickPassengerErrors({});
@@ -1898,83 +2634,125 @@ export default function OSOperationalPage() {
     setIsQuickPassengerModalOpen(true);
   };
 
-  
   const handleQuickAddMotorista = () => {
-    setQuickAddModal('motorista');
-    setQuickAddForm({ nome: '' });
+    setQuickAddModal("motorista");
+    setQuickAddForm({ nome: "" });
     setQuickAddDriverForm(initialQuickAddDriverForm);
   };
 
   const handleQuickAddSolicitante = () => {
     if (!formData.clienteId) {
-      toast.error('Selecione primeiro uma empresa/cliente');
+      toast.error("Selecione primeiro uma empresa/cliente");
       return;
     }
-    setQuickAddModal('solicitante');
-    setQuickAddForm({ nome: '' });
+    setQuickAddModal("solicitante");
+    setQuickAddForm({ nome: "" });
   };
 
   const handleQuickAddCentroCusto = () => {
     if (!formData.clienteId) {
-      toast.error('Selecione primeiro uma empresa/cliente');
+      toast.error("Selecione primeiro uma empresa/cliente");
       return;
     }
-    setQuickAddModal('centroCusto');
-    setQuickAddForm({ nome: '' });
+    setQuickAddModal("centroCusto");
+    setQuickAddForm({ nome: "" });
   };
 
   const handleQuickAddVeiculo = () => {
     if (!formData.motorista) {
-      toast.error('Selecione primeiro o motorista.');
+      toast.error("Selecione primeiro o motorista.");
       return;
     }
-    setOsVehicleQuickForm({ placa: '', modelo: '', marca: '', tipo: 'carro' });
+    const driver = drivers.find((d) => d.name === formData.motorista);
+    const linked = driverVehiclesAssoc
+      .filter((a) => a.driver_id === driver?.id)
+      .map((a) => a.vehicle_id);
+    setOsVehicleManageIds(linked);
     setIsOsVehicleQuickModalOpen(true);
   };
 
-  const handleOsVehicleQuickSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const driver = drivers.find(d => d.name === formData.motorista);
+  const handleOsVehicleManageConfirm = async () => {
+    const driver = drivers.find((d) => d.name === formData.motorista);
     if (!driver) {
-      toast.error('Motorista não encontrado no sistema.');
+      toast.error("Motorista não encontrado no sistema.");
       return;
     }
+    const finalIds = osVehicleManageIds.filter(
+      (id, idx, arr) => id && arr.indexOf(id) === idx,
+    );
     setIsSubmittingOsVehicle(true);
     try {
-      if (!validarPlacaOS(osVehicleQuickForm.placa)) {
-        throw new Error('Formato de placa inválido. Use ABC-1234 ou Mercosul ABC-1D23.');
+      const currentAssoc = driverVehiclesAssoc.filter(
+        (a) => a.driver_id === driver.id,
+      );
+      const currentIds = currentAssoc.map((a) => a.vehicle_id);
+      const toAdd = finalIds.filter((id) => !currentIds.includes(id));
+      const toRemove = currentIds.filter((id) => !finalIds.includes(id));
+
+      if (toRemove.length > 0) {
+        const { error: delError } = await supabase
+          .from("driver_vehicles")
+          .delete()
+          .eq("driver_id", driver.id)
+          .in("vehicle_id", toRemove);
+        if (delError) throw delError;
       }
-      const plateNorm = osVehicleQuickForm.placa.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-      if (vehicles.some(v => v.placa.replace(/[^A-Za-z0-9]/g, '').toUpperCase() === plateNorm)) {
-        throw new Error('Já existe um veículo com esta placa.');
+      if (toAdd.length > 0) {
+        const { error: insError } = await supabase
+          .from("driver_vehicles")
+          .insert(
+            toAdd.map((vid) => ({ driver_id: driver.id, vehicle_id: vid })),
+          );
+        if (insError) throw insError;
       }
-      const { data: newV, error: vehicleError } = await supabase
-        .from('veiculos')
-        .insert([{
-          placa: osVehicleQuickForm.placa.trim().toUpperCase(),
-          modelo: osVehicleQuickForm.modelo.trim(),
-          marca: osVehicleQuickForm.marca.trim(),
-          tipo: osVehicleQuickForm.tipo,
-          status: 'ativo',
-          ano: new Date().getFullYear(),
-          renavam: '',
-        }])
-        .select('id, placa, modelo, marca')
-        .single();
-      if (vehicleError) throw vehicleError;
-      const { error: linkError } = await supabase
-        .from('driver_vehicles')
-        .insert([{ driver_id: driver.id, vehicle_id: newV.id }]);
-      if (linkError) throw linkError;
-      setVehicles(prev => [...prev, { ...newV }]);
-      setDriverVehiclesAssoc(prev => [...prev, { driver_id: driver.id, vehicle_id: newV.id }]);
-      setFormData(prev => ({ ...prev, veiculoId: newV.id }));
-      toast.success('Veículo cadastrado e vinculado ao motorista!');
+
+      setDriverVehiclesAssoc((prev) => [
+        ...prev.filter((a) => a.driver_id !== driver.id),
+        ...finalIds.map((vid) => ({ driver_id: driver.id, vehicle_id: vid })),
+      ]);
+      setFormData((prev) => ({ ...prev, veiculoId: finalIds[0] || "" }));
+      toast.success("Veículos vinculados atualizados!");
       setIsOsVehicleQuickModalOpen(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Erro ao salvar veículo.');
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao atualizar vínculos.",
+      );
     } finally {
       setIsSubmittingOsVehicle(false);
+    }
+  };
+
+  const handleRemoveVehicleFromManage = async (
+    vehicleId: string,
+    index: number,
+  ) => {
+    if (!vehicleId) return;
+    if (!formData.driverId) return;
+
+    const hasActiveOS = osList.some(
+      (os) =>
+        os.driverId === formData.driverId &&
+        os.veiculoId === vehicleId &&
+        ["Pendente", "Aguardando", "Em Rota"].includes(os.status.operacional),
+    );
+
+    if (hasActiveOS) {
+      toast.error(
+        "Não é possível remover este veículo. Existe uma OS ativa vinculada a ele.",
+      );
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: "Remover veículo vinculado",
+      message: "Tem certeza que deseja remover este veículo do motorista?",
+      confirmText: "Remover",
+      cancelText: "Cancelar",
+      type: "danger",
+    });
+
+    if (confirmed) {
+      setOsVehicleManageIds((prev) => prev.filter((_, idx) => idx !== index));
     }
   };
 
@@ -1984,43 +2762,74 @@ export default function OSOperationalPage() {
     setIsSubmittingQuickVehicle(true);
     try {
       if (!validarPlacaOS(vehicleQuickForm.placa)) {
-        throw new Error('Formato de placa inválido. Use ABC-1234 ou Mercosul ABC-1D23.');
+        throw new Error(
+          "Formato de placa inválido. Use ABC-1234 ou Mercosul ABC-1D23.",
+        );
       }
-      if (quickVehicleModal.mode === 'create') {
-        if (hasDuplicatePlateQuick(vehicleQuickForm.placa)) throw new Error('Já existe um veículo com esta placa.');
-        const { data, error } = await supabase.from('veiculos').insert([{
-          placa: vehicleQuickForm.placa.trim().toUpperCase(),
-          modelo: vehicleQuickForm.modelo.trim(),
-          marca: vehicleQuickForm.marca.trim(),
-          tipo: vehicleQuickForm.tipo,
-          status: 'ativo',
-          ano: new Date().getFullYear(),
-          renavam: '',
-        }]).select('id, placa, modelo, marca').single();
+      if (quickVehicleModal.mode === "create") {
+        if (hasDuplicatePlateQuick(vehicleQuickForm.placa))
+          throw new Error("Já existe um veículo com esta placa.");
+        const { data, error } = await supabase
+          .from("veiculos")
+          .insert([
+            {
+              placa: vehicleQuickForm.placa.trim().toUpperCase(),
+              modelo: vehicleQuickForm.modelo.trim(),
+              marca: vehicleQuickForm.marca.trim(),
+              tipo: vehicleQuickForm.tipo,
+              status: "ativo",
+              ano: new Date().getFullYear(),
+              renavam: "",
+            },
+          ])
+          .select("id, placa, modelo, marca")
+          .single();
         if (error) throw error;
         const newV = data as VehicleOption;
-        setVehicles(prev => [...prev, newV].sort((a, b) => a.marca.localeCompare(b.marca, 'pt-BR') || a.modelo.localeCompare(b.modelo, 'pt-BR')));
-        setQuickAddDriverForm(prev => ({
-          ...prev,
-          vehicle_ids: prev.vehicle_ids.map((id, idx) => idx === quickVehicleModal.rowIndex ? newV.id : id),
-        }));
-        toast.success('Veículo cadastrado e selecionado!');
+        setVehicles((prev) =>
+          [...prev, newV].sort(
+            (a, b) =>
+              a.marca.localeCompare(b.marca, "pt-BR") ||
+              a.modelo.localeCompare(b.modelo, "pt-BR"),
+          ),
+        );
+        if (isOsVehicleQuickModalOpen) {
+          setOsVehicleManageIds((prev) => [...prev, newV.id]);
+        } else {
+          setQuickAddDriverForm((prev) => ({
+            ...prev,
+            vehicle_ids: prev.vehicle_ids.map((id, idx) =>
+              idx === quickVehicleModal.rowIndex ? newV.id : id,
+            ),
+          }));
+        }
+        toast.success("Veículo cadastrado e selecionado!");
       } else {
         const { vehicleId } = quickVehicleModal;
-        if (hasDuplicatePlateQuick(vehicleQuickForm.placa, vehicleId)) throw new Error('Já existe um veículo com esta placa.');
-        const { data, error } = await supabase.from('veiculos').update({
-          placa: vehicleQuickForm.placa.trim().toUpperCase(),
-          modelo: vehicleQuickForm.modelo.trim(),
-          marca: vehicleQuickForm.marca.trim(),
-          tipo: vehicleQuickForm.tipo,
-        }).eq('id', vehicleId).select('id, placa, modelo, marca').single();
+        if (hasDuplicatePlateQuick(vehicleQuickForm.placa, vehicleId))
+          throw new Error("Já existe um veículo com esta placa.");
+        const { data, error } = await supabase
+          .from("veiculos")
+          .update({
+            placa: vehicleQuickForm.placa.trim().toUpperCase(),
+            modelo: vehicleQuickForm.modelo.trim(),
+            marca: vehicleQuickForm.marca.trim(),
+            tipo: vehicleQuickForm.tipo,
+          })
+          .eq("id", vehicleId)
+          .select("id, placa, modelo, marca")
+          .single();
         if (error) throw error;
-        setVehicles(prev => prev.map(v => v.id === vehicleId ? (data as VehicleOption) : v));
-        toast.success('Veículo atualizado!');
+        setVehicles((prev) =>
+          prev.map((v) => (v.id === vehicleId ? (data as VehicleOption) : v)),
+        );
+        toast.success("Veículo atualizado!");
       }
       setQuickVehicleModal(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Erro ao salvar veículo.');
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao salvar veículo.",
+      );
     } finally {
       setIsSubmittingQuickVehicle(false);
     }
@@ -2028,75 +2837,96 @@ export default function OSOperationalPage() {
 
   const closeQuickAddModal = () => {
     setQuickAddModal(null);
-    setQuickAddForm({ nome: '' });
+    setQuickAddForm({ nome: "" });
     setQuickAddDriverForm(initialQuickAddDriverForm);
   };
 
   const handleQuickAddSubmit = async () => {
     if (!quickAddModal) return;
 
-    if (quickAddModal !== 'motorista' && !quickAddForm.nome.trim()) return;
+    if (quickAddModal !== "motorista" && !quickAddForm.nome.trim()) return;
 
     try {
       switch (quickAddModal) {
-        case 'cliente': {
+        case "cliente": {
           const newCliente = await addCliente(quickAddForm.nome.trim());
-          toast.success('Empresa cadastrada com sucesso!');
+          toast.success("Empresa cadastrada com sucesso!");
           // Selecionar automaticamente
-          setFormData(prev => ({ ...prev, clienteId: newCliente.id, solicitante: '', centroCusto: '' }));
+          setFormData((prev) => ({
+            ...prev,
+            clienteId: newCliente.id,
+            solicitante: "",
+            solicitanteId: "",
+            centroCusto: "",
+          }));
           break;
         }
-                case 'motorista': {
-          const name = quickAddDriverForm.name.trim();
-          const cpfDigits = quickAddDriverForm.cpf.replace(/\D/g, '');
-          const celularDigits = quickAddDriverForm.celular.replace(/\D/g, '');
+        case "motorista": {
+          const name = forceUpperText(quickAddDriverForm.name.trim());
+          const cpfDigits = quickAddDriverForm.cpf.replace(/\D/g, "");
+          const celularDigits = quickAddDriverForm.celular.replace(/\D/g, "");
 
           if (!name) {
-            toast.error('Nome completo é obrigatório.');
+            toast.error("Nome completo é obrigatório.");
+            return;
+          }
+
+          if (!/^\S+(?:\s+\S+)+$/.test(name.trim())) {
+            toast.error(
+              "Nome completo deve conter pelo menos nome e sobrenome.",
+            );
             return;
           }
 
           if (!validateDriverCPF(quickAddDriverForm.cpf)) {
-            toast.error(`CPF deve ter exatamente 11 dígitos. Você informou ${cpfDigits.length} dígitos.`);
+            toast.error("CPF inválido. Verifique os dígitos informados.");
             return;
           }
 
-          if (celularDigits.length !== 11) {
-            toast.error(`Celular deve ter exatamente 11 dígitos. Você informou ${celularDigits.length} dígitos.`);
+          if (!validateDriverCelular(quickAddDriverForm.celular)) {
+            toast.error(
+              "Celular inválido. Use um número real com DDD brasileiro. Ex: (11) 91234-5678",
+            );
             return;
           }
 
-          if (celularDigits[2] !== '9') {
-            toast.error('Celular deve iniciar com 9 após o DDD. Ex: (11) 91234-5678');
-            return;
-          }
-
-          if (quickAddDriverForm.vinculo_tipo === 'parceiro' && !quickAddDriverForm.parceiro_id) {
-            toast.error('Selecione o parceiro de serviço primeiro.');
+          if (
+            quickAddDriverForm.vinculo_tipo === "parceiro" &&
+            !quickAddDriverForm.parceiro_id
+          ) {
+            toast.error("Selecione o parceiro de serviço primeiro.");
             return;
           }
 
           if (quickAddDriverForm.vehicle_ids.length === 0) {
-            toast.error('Adicione pelo menos um veículo ao motorista.');
+            toast.error("Adicione pelo menos um veículo ao motorista.");
             return;
           }
 
-          const duplicateName = drivers.some((driver) => normalizeTextValue(driver.name) === normalizeTextValue(name));
-          const duplicateCpf = drivers.some((driver) => normalizeDigitsValue(driver.cpf || '') === cpfDigits);
-          const duplicatePhone = drivers.some((driver) => normalizeDigitsValue(driver.phone || '') === celularDigits);
+          const duplicateName = drivers.some(
+            (driver) =>
+              normalizeTextValue(driver.name) === normalizeTextValue(name),
+          );
+          const duplicateCpf = drivers.some(
+            (driver) => normalizeDigitsValue(driver.cpf || "") === cpfDigits,
+          );
+          const duplicatePhone = drivers.some(
+            (driver) =>
+              normalizeDigitsValue(driver.phone || "") === celularDigits,
+          );
 
           if (duplicateName) {
-            toast.error('Já existe um motorista com este nome.');
+            toast.error("Já existe um motorista com este nome.");
             return;
           }
 
           if (duplicateCpf) {
-            toast.error('Já existe um motorista com este CPF.');
+            toast.error("Já existe um motorista com este CPF.");
             return;
           }
 
           if (duplicatePhone) {
-            toast.error('Já existe um motorista com este celular.');
+            toast.error("Já existe um motorista com este celular.");
             return;
           }
 
@@ -2105,36 +2935,42 @@ export default function OSOperationalPage() {
             cpf: cpfDigits,
             phone: celularDigits,
             vehicle_id: quickAddDriverForm.vehicle_ids[0],
-            status: 'active',
+            status: "active",
             vinculo_tipo: quickAddDriverForm.vinculo_tipo,
           };
 
-          if (quickAddDriverForm.vinculo_tipo === 'parceiro') {
+          if (quickAddDriverForm.vinculo_tipo === "parceiro") {
             insertData.parceiro_id = quickAddDriverForm.parceiro_id;
+          } else {
+            insertData.parceiro_id = null;
           }
 
           const { data, error } = await supabase
-            .from('drivers')
+            .from("drivers")
             .insert([insertData])
-            .select('id, name')
+            .select("id, name")
             .single();
 
           if (error) throw error;
 
           // Inserir veículos vinculados
           if (data && quickAddDriverForm.vehicle_ids.length > 0) {
-            const driverVehicles = quickAddDriverForm.vehicle_ids.map(vehicleId => ({
-              driver_id: data.id,
-              vehicle_id: vehicleId,
-            }));
+            const driverVehicles = quickAddDriverForm.vehicle_ids.map(
+              (vehicleId) => ({
+                driver_id: data.id,
+                vehicle_id: vehicleId,
+              }),
+            );
 
             const { error: vehiclesError } = await supabase
-              .from('driver_vehicles')
+              .from("driver_vehicles")
               .insert(driverVehicles);
 
             if (vehiclesError) {
-              console.error('Erro ao vincular veículos:', vehiclesError);
-              toast.error('Motorista criado, mas houve erro ao vincular veículos.');
+              console.error("Erro ao vincular veículos:", vehiclesError);
+              toast.error(
+                "Motorista criado, mas houve erro ao vincular veículos.",
+              );
             } else {
               setDriverVehiclesAssoc((prev) => [
                 ...prev,
@@ -2146,63 +2982,100 @@ export default function OSOperationalPage() {
             }
           }
 
-          toast.success('Motorista cadastrado com sucesso!');
+          toast.success("Motorista cadastrado com sucesso!");
           if (data) {
             setQuickAddedDriverOptions((prev) => {
               if (prev.some((option) => option.id === data.id)) return prev;
               return [...prev, { id: data.id, nome: data.name }];
             });
-            setFormData((prev) => ({ ...prev, motorista: data.name }));
+            setFormData((prev) => ({
+              ...prev,
+              driverId: data.id,
+              motorista: data.name,
+              veiculoId: "",
+            }));
           }
           void refreshData();
           break;
         }
-        case 'solicitante': {
+        case "solicitante": {
           const cleanName = quickAddForm.nome.trim();
           const duplicateSolicitante = availableSolicitantes.some(
-            (solicitante) => normalizeTextValue(solicitante.nome) === normalizeTextValue(cleanName)
+            (solicitante) =>
+              normalizeTextValue(solicitante.nome) ===
+              normalizeTextValue(cleanName),
           );
 
           if (duplicateSolicitante) {
-            toast.error('Já existe um solicitante com este nome para esta empresa.');
+            toast.error(
+              "Já existe um solicitante com este nome para esta empresa.",
+            );
             return;
           }
 
-          const newSolicitante = await addSolicitante(cleanName, formData.clienteId);
-          toast.success('Solicitante cadastrado com sucesso!');
+          const newSolicitante = await addSolicitante(
+            cleanName,
+            formData.clienteId,
+          );
+          toast.success("Solicitante cadastrado com sucesso!");
           setQuickAddedSolicitantes((prev) => {
             if (prev.some((item) => item.id === newSolicitante.id)) return prev;
-            return [...prev, { id: newSolicitante.id, nome: newSolicitante.nome, clienteId: newSolicitante.clienteId }];
+            return [
+              ...prev,
+              {
+                id: newSolicitante.id,
+                nome: newSolicitante.nome,
+                clienteId: newSolicitante.clienteId,
+              },
+            ];
           });
           // Selecionar automaticamente
-          setFormData(prev => ({ ...prev, solicitante: newSolicitante.nome }));
+          setFormData((prev) => ({
+            ...prev,
+            solicitanteId: newSolicitante.id,
+            solicitante: newSolicitante.nome,
+          }));
           break;
         }
-        case 'centroCusto': {
+        case "centroCusto": {
           const cleanName = quickAddForm.nome.trim();
           const duplicateCentroCusto = availableCentrosCusto.some(
-            (centroCusto) => normalizeTextValue(centroCusto.nome) === normalizeTextValue(cleanName)
+            (centroCusto) =>
+              normalizeTextValue(centroCusto.nome) ===
+              normalizeTextValue(cleanName),
           );
 
           if (duplicateCentroCusto) {
-            toast.error('Já existe um centro de custo com este nome para esta empresa.');
+            toast.error(
+              "Já existe um centro de custo com este nome para esta empresa.",
+            );
             return;
           }
 
-          const newCentroCusto = await addCentroCusto(cleanName, formData.clienteId);
-          toast.success('Centro de custo cadastrado com sucesso!');
+          const newCentroCusto = await addCentroCusto(
+            cleanName,
+            formData.clienteId,
+          );
+          toast.success("Centro de custo cadastrado com sucesso!");
           setQuickAddedCentrosCusto((prev) => {
             if (prev.some((item) => item.id === newCentroCusto.id)) return prev;
-            return [...prev, { id: newCentroCusto.id, nome: newCentroCusto.nome, clienteId: newCentroCusto.clienteId }];
+            return [
+              ...prev,
+              {
+                id: newCentroCusto.id,
+                nome: newCentroCusto.nome,
+                clienteId: newCentroCusto.clienteId,
+              },
+            ];
           });
           // Selecionar automaticamente
-          setFormData(prev => ({ ...prev, centroCusto: newCentroCusto.id }));
+          setFormData((prev) => ({ ...prev, centroCusto: newCentroCusto.id }));
           break;
         }
       }
       closeQuickAddModal();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Erro ao cadastrar');
+      toast.error(error instanceof Error ? error.message : "Erro ao cadastrar");
     }
   };
 
@@ -2217,22 +3090,28 @@ export default function OSOperationalPage() {
 
     const trimmedNome = quickPassengerForm.nomeCompleto.trim();
     const trimmedEndereco = quickPassengerForm.enderecoCompleto.trim();
-    const phoneDigits = quickPassengerForm.celular.replace(/\D/g, '');
+    const phoneDigits = quickPassengerForm.celular.replace(/\D/g, "");
 
     setQuickPassengerErrors({});
 
-    const errors: { celular?: string } = {};
-    if (!isEstrangeiro && phoneDigits.length !== 11) {
-      errors.celular = 'Celular brasileiro deve conter 11 dígitos.';
+    const errors: { nomeCompleto?: string; celular?: string } = {};
+    if (!trimmedNome) {
+      errors.nomeCompleto = "Informe o nome completo do passageiro.";
     }
 
-    if (!trimmedNome || Object.keys(errors).length > 0) {
+    if (!isEstrangeiro && phoneDigits.length !== 11) {
+      errors.celular = "Celular brasileiro deve conter 11 dígitos.";
+    }
+
+    if (Object.keys(errors).length > 0) {
       setQuickPassengerErrors(errors);
       return;
     }
 
     if (isAddressExpanded && !trimmedEndereco) {
-      toast.error('Informe o endereço completo ou recolha a seção de endereço para salvar sem endereço.');
+      toast.error(
+        "Informe o endereço completo ou recolha a seção de endereço para salvar sem endereço.",
+      );
       return;
     }
 
@@ -2241,8 +3120,8 @@ export default function OSOperationalPage() {
           {
             rotulo: quickPassengerForm.rotulo.trim(),
             referencia: quickPassengerForm.referencia.trim(),
-            enderecoCompleto: trimmedEndereco
-          }
+            enderecoCompleto: trimmedEndereco,
+          },
         ]
       : [];
 
@@ -2250,24 +3129,32 @@ export default function OSOperationalPage() {
       const novoPassageiro = await addPassageiro({
         nomeCompleto: trimmedNome.toUpperCase(),
         celular: quickPassengerForm.celular.trim(),
-        notificar: quickPassengerForm.notificar === 'Sim',
-        enderecos
+        notificar: quickPassengerForm.notificar === "Sim",
+        enderecos,
       });
 
       const newWaypoints = [...formData.waypoints];
       const waypoint = { ...newWaypoints[quickPassengerTarget.waypointIndex] };
       waypoint.passengers = (waypoint.passengers || []).map((p) =>
         p.id === quickPassengerTarget.passengerId
-          ? { ...p, solicitanteId: novoPassageiro.id, nome: novoPassageiro.nomeCompleto }
-          : p
+          ? {
+              ...p,
+              solicitanteId: novoPassageiro.id,
+              nome: novoPassageiro.nomeCompleto,
+            }
+          : p,
       );
       newWaypoints[quickPassengerTarget.waypointIndex] = waypoint;
-      setFormData(prev => ({ ...prev, waypoints: newWaypoints }));
+      setFormData((prev) => ({ ...prev, waypoints: newWaypoints }));
 
       setIsQuickPassengerModalOpen(false);
       setQuickPassengerTarget(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o passageiro.');
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar o passageiro.",
+      );
     }
   };
 
@@ -2275,7 +3162,7 @@ export default function OSOperationalPage() {
     const osIdParamStr = String(osIdParam || "");
     console.log("[AutoNotif] Starting with osIdParam:", osIdParamStr);
     // Pequeno delay para garantir que os dados estão disponíveis no Supabase
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     // 1. Notificar Motorista
     if (notificationConfig.motorista) {
@@ -2290,7 +3177,7 @@ export default function OSOperationalPage() {
     }
 
     // Pequeno delay entre notificações para evitar bloqueios
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await new Promise((resolve) => setTimeout(resolve, 800));
 
     // 2. Notificar Passageiros
     if (notificationConfig.passageiros) {
@@ -2299,18 +3186,24 @@ export default function OSOperationalPage() {
         if (latestOS && latestOS.rota?.waypoints) {
           for (const wp of latestOS.rota.waypoints) {
             for (const p of wp.passengers) {
-              const passRecord = passageiros.find(x => x.id === p.solicitanteId);
+              const passRecord = passageiros.find(
+                (x) => x.id === p.solicitanteId,
+              );
               if (passRecord && passRecord.celular) {
-                await handleNotifyPassengerDirect(latestOS, {
-                  nome: passRecord.nomeCompleto,
-                  email: passRecord.email || '',
-                  celular: passRecord.celular,
-                  hasEmail: !!passRecord.email,
-                  hasPhone: true,
-                  solicitanteId: p.solicitanteId,
-                }, 'whatsapp');
+                await handleNotifyPassengerDirect(
+                  latestOS,
+                  {
+                    nome: passRecord.nomeCompleto,
+                    email: passRecord.email || "",
+                    celular: passRecord.celular,
+                    hasEmail: !!passRecord.email,
+                    hasPhone: true,
+                    solicitanteId: p.solicitanteId,
+                  },
+                  "whatsapp",
+                );
                 // Delay entre passageiros
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise((resolve) => setTimeout(resolve, 500));
               }
             }
           }
@@ -2321,7 +3214,10 @@ export default function OSOperationalPage() {
     }
   };
 
-  const executeSaveOS = async (osData: PendingOSData, targetId?: string | null) => {
+  const executeSaveOS = async (
+    osData: PendingOSData,
+    targetId?: string | null,
+  ) => {
     setIsSubmittingOS(true);
     try {
       if (targetId) {
@@ -2329,7 +3225,12 @@ export default function OSOperationalPage() {
         await osTable.refresh();
         setShowNotificationConfirm(false);
         resetMainModalState();
-        toast.success('Atendimento atualizado com sucesso.');
+        toast.success("Atendimento atualizado com sucesso.");
+        // Enviar mensagem administrativa via WhatsApp para contato fixo ao atualizar
+        void sendAdminGroupMessage({
+          ...osData,
+          id: targetId,
+        } as unknown as OrderService);
       } else {
         const newOSId = await addOS(osData);
         await osTable.refresh();
@@ -2338,12 +3239,24 @@ export default function OSOperationalPage() {
         if (notificationConfig.auto) {
           void processAutoNotifications(newOSId.id);
         }
-        // Enviar relatório administrativo obrigatoriamente ao grupo de Programações
+        // Enviar email administrativo obrigatoriamente (tanto manual quanto automático)
+        void fetch("/api/admin-notify-os", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ osId: newOSId.id }),
+        }).catch((err) =>
+          console.error("Erro ao enviar email administrativo:", err),
+        );
+        // Enviar mensagem administrativa via WhatsApp para contato fixo
         void sendAdminGroupMessage(newOSId);
       }
     } catch (error) {
-      console.error('Error saving OS:', error);
-      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar a ordem de serviço.');
+      console.error("Error saving OS:", error);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar a ordem de serviço.",
+      );
     } finally {
       setIsSubmittingOS(false);
     }
@@ -2351,34 +3264,44 @@ export default function OSOperationalPage() {
 
   const handleAddOS = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Validação dos campos obrigatórios
-    if (!formData.data || !formData.clienteId || !formData.motorista || !formData.veiculoId) {
-      toast.error('Preencha todos os campos obrigatórios.');
+    if (
+      !formData.data ||
+      !formData.clienteId ||
+      !formData.driverId ||
+      !formData.veiculoId
+    ) {
+      toast.error("Preencha todos os campos obrigatórios.");
       return;
     }
 
-    // Validação: origem do primeiro itinerário deve ter hora
+    // Validação: origem do primeiro itinerário deve ter data e hora
     const itineraries = getItineraries(formData.waypoints);
-    const firstItinerary = itineraries.find(it => it.index === 0);
+    const firstItinerary = itineraries.find((it) => it.index === 0);
     const firstOriginIndex = firstItinerary?.waypointIndices[0];
     if (firstOriginIndex !== undefined) {
+      const originData = formData.waypoints[firstOriginIndex]?.data;
+      if (!originData || originData.trim().length < 10) {
+        toast.error("Informe a data de início do Itinerário 1.");
+        return;
+      }
       const originHora = formData.waypoints[firstOriginIndex]?.hora;
       if (!originHora || originHora.trim().length < 4) {
-        toast.error('Informe a hora de início do Itinerário 1.');
+        toast.error("Informe a hora de início do Itinerário 1.");
         return;
       }
     }
-    
+
     // Sincroniza a data da OS com a data do primeiro waypoint (fonte de verdade)
     const firstWaypointData = firstItinerary?.waypoints[0]?.data;
     let syncedData = formData.data;
-    
+
     if (firstWaypointData) {
-      if (firstWaypointData.includes('-')) {
+      if (firstWaypointData.includes("-")) {
         syncedData = firstWaypointData;
-      } else if (firstWaypointData.includes('/')) {
-        const [d, m, y] = firstWaypointData.split('/');
+      } else if (firstWaypointData.includes("/")) {
+        const [d, m, y] = firstWaypointData.split("/");
         if (d && m && y) {
           syncedData = `${y}-${m}-${d}`;
         }
@@ -2394,7 +3317,7 @@ export default function OSOperationalPage() {
       ...formData,
       data: syncedData,
       hora: null,
-      rota: { waypoints: formData.waypoints }
+      rota: { waypoints: formData.waypoints },
     };
 
     setPendingOSData(finalData);
@@ -2415,20 +3338,23 @@ export default function OSOperationalPage() {
   };
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
     }).format(value);
   };
 
   const currentImposto = (formData.valorBruto ?? 0) * (impostoPercentual / 100);
-  const currentLucro = (formData.valorBruto ?? 0) - currentImposto - (formData.custo ?? 0);
+  const currentLucro =
+    (formData.valorBruto ?? 0) - currentImposto - (formData.custo ?? 0);
 
   const availableSolicitantes = useMemo(() => {
     if (!formData.clienteId) return [];
     const mergedSolicitantes = [
       ...solicitantes.filter((s) => s.clienteId === formData.clienteId),
-      ...quickAddedSolicitantes.filter((s) => s.clienteId === formData.clienteId),
+      ...quickAddedSolicitantes.filter(
+        (s) => s.clienteId === formData.clienteId,
+      ),
     ];
     const seenIds = new Set<string>();
 
@@ -2440,25 +3366,24 @@ export default function OSOperationalPage() {
   }, [formData.clienteId, solicitantes, quickAddedSolicitantes]);
 
   const selectedDriverVehicleOptions = useMemo(() => {
-    if (!formData.motorista) return [];
-    const driver = drivers.find(d => d.name === formData.motorista)
-      ?? quickAddedDriverOptions.find(d => d.nome === formData.motorista);
-    if (!driver) return [];
+    if (!formData.driverId) return [];
     const vehicleIds = new Set(
       driverVehiclesAssoc
-        .filter(dv => dv.driver_id === driver.id)
-        .map(dv => dv.vehicle_id)
+        .filter((dv) => dv.driver_id === formData.driverId)
+        .map((dv) => dv.vehicle_id),
     );
     return vehicles
-      .filter(v => vehicleIds.has(v.id))
-      .map(v => ({ id: v.id, nome: `${v.marca} ${v.modelo} - ${v.placa}` }));
-  }, [drivers, formData.motorista, driverVehiclesAssoc, vehicles, quickAddedDriverOptions]);
+      .filter((v) => vehicleIds.has(v.id))
+      .map((v) => ({ id: v.id, nome: `${v.marca} ${v.modelo} - ${v.placa}` }));
+  }, [formData.driverId, driverVehiclesAssoc, vehicles]);
 
   const availableCentrosCusto = useMemo(() => {
     if (!formData.clienteId) return [];
     const mergedCentrosCusto = [
       ...getCentrosCustoByCliente(formData.clienteId),
-      ...quickAddedCentrosCusto.filter((cc) => cc.clienteId === formData.clienteId),
+      ...quickAddedCentrosCusto.filter(
+        (cc) => cc.clienteId === formData.clienteId,
+      ),
     ];
     const seenIds = new Set<string>();
 
@@ -2470,49 +3395,115 @@ export default function OSOperationalPage() {
   }, [formData.clienteId, getCentrosCustoByCliente, quickAddedCentrosCusto]);
 
   const handleClienteChange = (id: string) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       clienteId: id,
-      solicitante: '',
-      centroCusto: ''
+      solicitante: "",
+      solicitanteId: "",
+      centroCusto: "",
     }));
   };
 
   const filteredData = useMemo(() => {
-    return osList.filter(item => {
-      const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || '';
+    return osList.filter((item) => {
+      const clienteNome =
+        clientes.find((c) => c.id === item.clienteId)?.nome || "";
+      const motoristaNomeAtual = item.driverId
+        ? drivers.find((d) => d.id === item.driverId)?.name || item.motorista
+        : item.motorista;
+      const solicitanteNomeAtual = item.solicitanteId
+        ? solicitantes.find((s) => s.id === item.solicitanteId)?.nome ||
+          item.solicitante
+        : item.solicitante;
       const searchValue = osTable.searchTerm.toLowerCase().trim();
-      const matchSearch = searchValue === '' ||
+      const matchSearch =
+        searchValue === "" ||
         item.os.toLowerCase().includes(searchValue) ||
         item.protocolo.toLowerCase().includes(searchValue) ||
         clienteNome.toLowerCase().includes(searchValue) ||
-        item.motorista.toLowerCase().includes(searchValue);
+        motoristaNomeAtual.toLowerCase().includes(searchValue) ||
+        solicitanteNomeAtual.toLowerCase().includes(searchValue);
       if (!matchSearch) return false;
 
-      if (advancedFilters.osNumber && !item.os.toLowerCase().includes(advancedFilters.osNumber.toLowerCase())) return false;
-      if (advancedFilters.clienteId && item.clienteId !== advancedFilters.clienteId) return false;
-      if (advancedFilters.centroCustoId && item.centroCustoId !== advancedFilters.centroCustoId) return false;
-      if (advancedFilters.solicitante && !item.solicitante.toLowerCase().includes(advancedFilters.solicitante.toLowerCase())) return false;
-      if (advancedFilters.motorista && !item.motorista.toLowerCase().includes(advancedFilters.motorista.toLowerCase())) return false;
-      if (advancedFilters.veiculoId && item.veiculoId !== advancedFilters.veiculoId) return false;
+      if (
+        advancedFilters.osNumber &&
+        !item.os.toLowerCase().includes(advancedFilters.osNumber.toLowerCase())
+      )
+        return false;
+      if (
+        advancedFilters.clienteId &&
+        item.clienteId !== advancedFilters.clienteId
+      )
+        return false;
+      if (
+        advancedFilters.centroCustoId &&
+        item.centroCustoId !== advancedFilters.centroCustoId
+      )
+        return false;
+      if (
+        advancedFilters.solicitante &&
+        !solicitanteNomeAtual
+          .toLowerCase()
+          .includes(advancedFilters.solicitante.toLowerCase())
+      )
+        return false;
+      if (
+        advancedFilters.motorista &&
+        !motoristaNomeAtual
+          .toLowerCase()
+          .includes(advancedFilters.motorista.toLowerCase())
+      )
+        return false;
+      if (
+        advancedFilters.veiculoId &&
+        item.veiculoId !== advancedFilters.veiculoId
+      )
+        return false;
       if (advancedFilters.passageiro) {
-        const passageirosOS = item.rota?.waypoints?.flatMap(w => w.passengers.map(p => {
-        const rec = passageiros.find(x => x.id === p.solicitanteId);
-        return (rec?.nomeCompleto || '').toLowerCase();
-      })) || [];
-        if (!passageirosOS.some(p => p.includes(advancedFilters.passageiro.toLowerCase()))) return false;
+        const passageirosOS =
+          item.rota?.waypoints?.flatMap((w) =>
+            w.passengers.map((p) => {
+              const rec = passageiros.find((x) => x.id === p.solicitanteId);
+              return (rec?.nomeCompleto || "").toLowerCase();
+            }),
+          ) || [];
+        if (
+          !passageirosOS.some((p) =>
+            p.includes(advancedFilters.passageiro.toLowerCase()),
+          )
+        )
+          return false;
       }
-      if (advancedFilters.dataInicio && item.data < advancedFilters.dataInicio) return false;
-      if (advancedFilters.dataFim && item.data > advancedFilters.dataFim) return false;
-      if (advancedFilters.statusOperacional && item.status.operacional !== advancedFilters.statusOperacional) return false;
-      if (advancedFilters.statusFinanceiro && item.status.financeiro !== advancedFilters.statusFinanceiro) return false;
+      if (advancedFilters.dataInicio && item.data < advancedFilters.dataInicio)
+        return false;
+      if (advancedFilters.dataFim && item.data > advancedFilters.dataFim)
+        return false;
+      if (
+        advancedFilters.statusOperacional &&
+        getOperationalStatusForOS(item) !== advancedFilters.statusOperacional
+      )
+        return false;
+      if (
+        advancedFilters.statusFinanceiro &&
+        item.status.financeiro !== advancedFilters.statusFinanceiro
+      )
+        return false;
 
       return true;
     });
-  }, [osList, clientes, passageiros, osTable.searchTerm, advancedFilters]);
+  }, [
+    osList,
+    clientes,
+    passageiros,
+    drivers,
+    solicitantes,
+    osTable.searchTerm,
+    advancedFilters,
+    getOperationalStatusForOS,
+  ]);
 
   const hasActiveAdvancedFilters = useMemo(() => {
-    return Object.values(advancedFilters).some(v => v !== '');
+    return Object.values(advancedFilters).some((v) => v !== "");
   }, [advancedFilters]);
 
   const clientPageSize = 10;
@@ -2531,25 +3522,29 @@ export default function OSOperationalPage() {
     return osTable.totalCount;
   }, [hasActiveAdvancedFilters, filteredData.length, osTable.totalCount]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = (
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    >,
+  ) => {
     const { name, value } = e.target;
-    
-    if (name === 'horaExtra') {
+
+    if (name === "horaExtra") {
       // Permitir apenas dígitos
-      const numericValue = value.replace(/\D/g, '');
-      setFormData(prev => ({ ...prev, [name]: numericValue }));
+      const numericValue = value.replace(/\D/g, "");
+      setFormData((prev) => ({ ...prev, [name]: numericValue }));
       return;
     }
 
-    if (name === 'hora') {
-      let cleanValue = value.replace(/\D/g, '');
+    if (name === "hora") {
+      let cleanValue = value.replace(/\D/g, "");
       if (cleanValue.length > 4) cleanValue = cleanValue.slice(0, 4);
 
       let hours = cleanValue.slice(0, 2);
       let minutes = cleanValue.slice(2, 4);
 
-      if (hours && parseInt(hours) > 23) hours = '23';
-      if (minutes && parseInt(minutes) > 59) minutes = '59';
+      if (hours && parseInt(hours) > 23) hours = "23";
+      if (minutes && parseInt(minutes) > 59) minutes = "59";
 
       let formatted = hours;
       if (minutes) {
@@ -2558,110 +3553,115 @@ export default function OSOperationalPage() {
         formatted = `${hours}:`;
       }
 
-      setFormData(prev => ({ ...prev, hora: formatted }));
+      setFormData((prev) => ({ ...prev, hora: formatted }));
       return;
     }
-    
-    if (name === 'data') {
+
+    if (name === "data") {
       // Máscara DD/MM/AAAA
-      let cleanValue = value.replace(/\D/g, '');
+      let cleanValue = value.replace(/\D/g, "");
       if (cleanValue.length > 8) cleanValue = cleanValue.slice(0, 8);
-      
+
       // Validações de valores
       let day = cleanValue.slice(0, 2);
       let month = cleanValue.slice(2, 4);
       let year = cleanValue.slice(4, 8);
 
-      if (day && parseInt(day) > 31) day = '31';
-      if (month && parseInt(month) > 12) month = '12';
-      if (year && parseInt(year) > 5000) year = '5000';
+      if (day && parseInt(day) > 31) day = "31";
+      if (month && parseInt(month) > 12) month = "12";
+      if (year && parseInt(year) > 5000) year = "5000";
 
       const validatedClean = day + month + year;
-      
+
       let formatted = validatedClean;
-      if (validatedClean.length > 2) formatted = `${validatedClean.slice(0, 2)}/${validatedClean.slice(2)}`;
-      if (validatedClean.length > 4) formatted = `${validatedClean.slice(0, 2)}/${validatedClean.slice(2, 4)}/${validatedClean.slice(4)}`;
-      
+      if (validatedClean.length > 2)
+        formatted = `${validatedClean.slice(0, 2)}/${validatedClean.slice(2)}`;
+      if (validatedClean.length > 4)
+        formatted = `${validatedClean.slice(0, 2)}/${validatedClean.slice(2, 4)}/${validatedClean.slice(4)}`;
+
       if (validatedClean.length === 8) {
         const d = validatedClean.slice(0, 2);
         const m = validatedClean.slice(2, 4);
         const y = validatedClean.slice(4);
-        setFormData(prev => ({ ...prev, data: `${y}-${m}-${d}` }));
+        setFormData((prev) => ({ ...prev, data: `${y}-${m}-${d}` }));
       } else {
-        setFormData(prev => ({ ...prev, data: formatted }));
+        setFormData((prev) => ({ ...prev, data: formatted }));
       }
       return;
     }
 
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: name === 'valorBruto' || name === 'custo'
-        ? (value === '' ? null : parseFloat(value))
-        : value
+      [name]:
+        name === "valorBruto" || name === "custo"
+          ? value === ""
+            ? null
+            : parseFloat(value)
+          : value,
     }));
   };
 
   const getStatusConfig = (status: string) => {
     switch (status) {
-      case 'Pendente':
+      case "Pendente":
         return {
           icon: <Clock size={20} />,
-          bg: 'bg-slate-50/50',
-          border: 'border-slate-100',
-          accent: 'bg-slate-500',
-          shadow: 'shadow-slate-200',
-          text: 'text-slate-700',
-          label: 'Pendente'
+          bg: "bg-slate-50/50",
+          border: "border-slate-100",
+          accent: "bg-slate-500",
+          shadow: "shadow-slate-200",
+          text: "text-slate-700",
+          label: "Pendente",
         };
-      case 'Aguardando': 
+      case "Aguardando":
         return {
           icon: <Clock size={20} />,
-          bg: 'bg-indigo-50/50',
-          border: 'border-indigo-100',
-          accent: 'bg-indigo-500',
-          shadow: 'shadow-indigo-200',
-          text: 'text-indigo-700',
-          label: 'Aguardando'
+          bg: "bg-indigo-50/50",
+          border: "border-indigo-100",
+          accent: "bg-indigo-500",
+          shadow: "shadow-indigo-200",
+          text: "text-indigo-700",
+          label: "Aguardando",
         };
-      case 'Em Rota': 
+      case "Em Rota":
         return {
           icon: <Navigation size={20} />,
-          bg: 'bg-blue-50/50',
-          border: 'border-blue-100',
-          accent: 'bg-blue-500',
-          shadow: 'shadow-blue-200',
-          text: 'text-blue-700',
-          label: 'Em Rota'
+          bg: "bg-blue-50/50",
+          border: "border-blue-100",
+          accent: "bg-blue-500",
+          shadow: "shadow-blue-200",
+          text: "text-blue-700",
+          label: "Em Rota",
         };
-      case 'Finalizado': 
+      case "Finalizado":
         return {
           icon: <CheckCircle2 size={20} />,
-          bg: 'bg-emerald-50/50',
-          border: 'border-emerald-100',
-          accent: 'bg-emerald-500',
-          shadow: 'shadow-emerald-200',
-          text: 'text-emerald-700',
-          label: 'Finalizado'
+          bg: "bg-emerald-50/50",
+          border: "border-emerald-100",
+          accent: "bg-emerald-500",
+          shadow: "shadow-emerald-200",
+          text: "text-emerald-700",
+          label: "Finalizado",
         };
-      case 'Cancelado':
+      case "Cancelado":
         return {
           icon: <X size={20} />,
-          bg: 'bg-rose-50/50',
-          border: 'border-rose-100',
-          accent: 'bg-rose-500',
-          shadow: 'shadow-rose-200',
-          text: 'text-rose-700',
-          label: 'Cancelado'
+          bg: "bg-rose-50/50",
+          border: "border-rose-100",
+          accent: "bg-rose-500",
+          shadow: "shadow-rose-200",
+          text: "text-rose-700",
+          label: "Cancelado",
         };
-      default: 
+      default:
         return {
           icon: <FileText size={20} />,
-          bg: 'bg-slate-50/50',
-          border: 'border-slate-100',
-          accent: 'bg-slate-500',
-          shadow: 'shadow-slate-200',
-          text: 'text-slate-700',
-          label: 'N/A'
+          bg: "bg-slate-50/50",
+          border: "border-slate-100",
+          accent: "bg-slate-500",
+          shadow: "shadow-slate-200",
+          text: "text-slate-700",
+          label: "N/A",
         };
     }
   };
@@ -2670,10 +3670,38 @@ export default function OSOperationalPage() {
     <div className="space-y-6">
       {/* Operational Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <OpStatCard label="Pendentes" value={osList.filter(o => o.status.operacional === 'Pendente').length} icon={<Clock className="text-slate-500" size={20} />} />
-        <OpStatCard label="Aguardando" value={osList.filter(o => o.status.operacional === 'Aguardando').length} icon={<Clock className="text-indigo-500" size={20} />} />
-        <OpStatCard label="Em Rota" value={osList.filter(o => o.status.operacional === 'Em Rota').length} icon={<Navigation className="text-blue-500" size={20} />} />
-        <OpStatCard label="Finalizados" value={osList.filter(o => o.status.operacional === 'Finalizado').length} icon={<CheckCircle2 className="text-emerald-500" size={20} />} />
+        <OpStatCard
+          label="Pendentes"
+          value={
+            osList.filter((o) => getOperationalStatusForOS(o) === "Pendente")
+              .length
+          }
+          icon={<Clock className="text-slate-500" size={20} />}
+        />
+        <OpStatCard
+          label="Aguardando"
+          value={
+            osList.filter((o) => getOperationalStatusForOS(o) === "Aguardando")
+              .length
+          }
+          icon={<Clock className="text-indigo-500" size={20} />}
+        />
+        <OpStatCard
+          label="Em Rota"
+          value={
+            osList.filter((o) => getOperationalStatusForOS(o) === "Em Rota")
+              .length
+          }
+          icon={<Navigation className="text-blue-500" size={20} />}
+        />
+        <OpStatCard
+          label="Finalizados"
+          value={
+            osList.filter((o) => getOperationalStatusForOS(o) === "Finalizado")
+              .length
+          }
+          icon={<CheckCircle2 className="text-emerald-500" size={20} />}
+        />
       </div>
 
       {/* Header com Toggle e Botão Nova OS */}
@@ -2681,7 +3709,17 @@ export default function OSOperationalPage() {
         <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
           {/* Campo de busca (sempre visível) */}
           <div className="relative group flex-1">
-            <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <circle cx="11" cy="11" r="8"></circle>
               <path d="m21 21-4.3-4.3"></path>
             </svg>
@@ -2696,86 +3734,72 @@ export default function OSOperationalPage() {
 
           {/* Botão Filtros Avançados */}
           <button
-            onClick={() => setShowAdvancedFilters(prev => !prev)}
+            onClick={() => setShowAdvancedFilters((prev) => !prev)}
             className={`flex items-center gap-2 px-4 py-3.5 rounded-2xl font-bold text-sm uppercase tracking-widest transition-all shadow-sm border cursor-pointer shrink-0 ${
               hasActiveAdvancedFilters || showAdvancedFilters
-                ? 'bg-blue-50 border-blue-200 text-blue-700'
-                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                ? "bg-blue-50 border-blue-200 text-blue-700"
+                : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
             }`}
           >
-            {hasActiveAdvancedFilters ? <Filter size={16} /> : <FilterX size={16} />}
+            {hasActiveAdvancedFilters ? (
+              <Filter size={16} />
+            ) : (
+              <FilterX size={16} />
+            )}
             Filtros
             {hasActiveAdvancedFilters && (
               <span className="ml-1 inline-flex items-center justify-center w-5 h-5 bg-blue-600 text-white text-[10px] font-black rounded-full">
-                {Object.values(advancedFilters).filter(v => v !== '').length}
+                {Object.values(advancedFilters).filter((v) => v !== "").length}
               </span>
             )}
           </button>
 
-          {/* Status do WhatsApp WAHA */}
-          <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm shrink-0">
-          <div className="flex items-center gap-2.5 px-3 py-1.5">
-            <div className={`w-2.5 h-2.5 rounded-full ${
-              wppStatus === 'open' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 
-              wppStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : 
-              'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]'
-            }`} />
-            <div className="flex flex-col">
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-0.5">WhatsApp</span>
-              <span className={`text-[11px] font-bold leading-none ${
-                wppStatus === 'open' ? 'text-emerald-600' : 
-                wppStatus === 'connecting' ? 'text-amber-600' : 
-                'text-rose-600'
-              }`}>
-                {wppStatus === 'open' ? 'Online' : wppStatus === 'connecting' ? 'Conectando' : 'Offline'}
-              </span>
-            </div>
+          {/* Toggle Tabela/Calendário */}
+          <div
+            className={`flex items-center bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm shrink-0 ${viewMode === "calendar" ? "md:ml-0" : ""}`}
+          >
+            <button
+              onClick={() => setViewMode("table")}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm uppercase tracking-widest transition-all cursor-pointer ${
+                viewMode === "table"
+                  ? "bg-[var(--color-geolog-blue)] text-white shadow-md"
+                  : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <LayoutGrid size={16} strokeWidth={2.5} />
+              Tabela
+            </button>
+            <button
+              onClick={() => setViewMode("calendar")}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm uppercase tracking-widest transition-all cursor-pointer ${
+                viewMode === "calendar"
+                  ? "bg-[var(--color-geolog-blue)] text-white shadow-md"
+                  : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <CalendarDays size={16} strokeWidth={2.5} />
+              Calendário
+            </button>
           </div>
-          
-        </div>
 
-        {/* Toggle Tabela/Calendário */}
-        <div className={`flex items-center bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm shrink-0 ${viewMode === 'calendar' ? 'md:ml-0' : ''}`}>
+          {/* Botão Nova OS */}
           <button
-            onClick={() => setViewMode('table')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm uppercase tracking-widest transition-all cursor-pointer ${
-              viewMode === 'table'
-                ? 'bg-[var(--color-geolog-blue)] text-white shadow-md'
-                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-            }`}
+            onClick={handleOpenCreateOSModal}
+            className="flex items-center justify-center gap-2 bg-[var(--color-geolog-blue)] text-white px-8 py-3.5 rounded-2xl font-black shadow-lg shadow-blue-900/10 hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest shrink-0 w-full md:w-auto cursor-pointer whitespace-nowrap"
           >
-            <LayoutGrid size={16} strokeWidth={2.5} />
-            Tabela
-          </button>
-          <button
-            onClick={() => setViewMode('calendar')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm uppercase tracking-widest transition-all cursor-pointer ${
-              viewMode === 'calendar'
-                ? 'bg-[var(--color-geolog-blue)] text-white shadow-md'
-                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-            }`}
-          >
-            <CalendarDays size={16} strokeWidth={2.5} />
-            Calendário
+            <Plus size={18} strokeWidth={3} />
+            Nova OS
           </button>
         </div>
-
-        {/* Botão Nova OS */}
-        <button 
-          onClick={handleOpenCreateOSModal}
-          className="flex items-center justify-center gap-2 bg-[var(--color-geolog-blue)] text-white px-8 py-3.5 rounded-2xl font-black shadow-lg shadow-blue-900/10 hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest shrink-0 w-full md:w-auto cursor-pointer whitespace-nowrap"
-        >
-          <Plus size={18} strokeWidth={3} />
-          Nova OS
-        </button>
-      </div>
       </div>
 
       {/* Painel de Filtros Avançados */}
       {showAdvancedFilters && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 md:p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-black uppercase tracking-widest text-slate-600">Filtros Avançados</h3>
+            <h3 className="text-sm font-black uppercase tracking-widest text-slate-600">
+              Filtros Avançados
+            </h3>
             {hasActiveAdvancedFilters && (
               <button
                 onClick={() => setAdvancedFilters(defaultAdvancedFilters)}
@@ -2788,11 +3812,18 @@ export default function OSOperationalPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {/* OS */}
             <div className="space-y-1">
-              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">Número OS</label>
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                Número OS
+              </label>
               <input
                 type="text"
                 value={advancedFilters.osNumber}
-                onChange={(e) => setAdvancedFilters(prev => ({ ...prev, osNumber: e.target.value }))}
+                onChange={(e) =>
+                  setAdvancedFilters((prev) => ({
+                    ...prev,
+                    osNumber: e.target.value,
+                  }))
+                }
                 placeholder="Ex: 00123"
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
               />
@@ -2800,9 +3831,18 @@ export default function OSOperationalPage() {
             {/* Empresa */}
             <GeologSearchableSelect
               label="Empresa"
-              options={[{ id: '', nome: 'Todas' }, ...clientes.map(c => ({ id: c.id, nome: c.nome }))]}
+              options={[
+                { id: "", nome: "Todas" },
+                ...clientes.map((c) => ({ id: c.id, nome: c.nome })),
+              ]}
               value={advancedFilters.clienteId}
-              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, clienteId: id, centroCustoId: '' }))}
+              onChange={(id) =>
+                setAdvancedFilters((prev) => ({
+                  ...prev,
+                  clienteId: id,
+                  centroCustoId: "",
+                }))
+              }
               compact
               disableSearch={false}
             />
@@ -2810,11 +3850,16 @@ export default function OSOperationalPage() {
             <GeologSearchableSelect
               label="Centro de Custo"
               options={[
-                { id: '', nome: 'Todos' },
-                ...(advancedFilters.clienteId ? getCentrosCustoByCliente(advancedFilters.clienteId) : []).map(cc => ({ id: cc.id, nome: cc.nome }))
+                { id: "", nome: "Todos" },
+                ...(advancedFilters.clienteId
+                  ? getCentrosCustoByCliente(advancedFilters.clienteId)
+                  : []
+                ).map((cc) => ({ id: cc.id, nome: cc.nome })),
               ]}
               value={advancedFilters.centroCustoId}
-              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, centroCustoId: id }))}
+              onChange={(id) =>
+                setAdvancedFilters((prev) => ({ ...prev, centroCustoId: id }))
+              }
               disabled={!advancedFilters.clienteId}
               compact
               disableSearch={false}
@@ -2823,23 +3868,36 @@ export default function OSOperationalPage() {
             <GeologSearchableSelect
               label="Solicitante"
               options={[
-                { id: '', nome: 'Todos' },
+                { id: "", nome: "Todos" },
                 ...solicitantes
-                  .filter(s => !advancedFilters.clienteId || s.clienteId === advancedFilters.clienteId)
-                  .map(s => ({ id: s.nome, nome: s.nome }))
+                  .filter(
+                    (s) =>
+                      !advancedFilters.clienteId ||
+                      s.clienteId === advancedFilters.clienteId,
+                  )
+                  .map((s) => ({ id: s.nome, nome: s.nome })),
               ]}
               value={advancedFilters.solicitante}
-              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, solicitante: id }))}
+              onChange={(id) =>
+                setAdvancedFilters((prev) => ({ ...prev, solicitante: id }))
+              }
               compact
               disableSearch={false}
             />
             {/* Motorista */}
             <div className="space-y-1">
-              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">Motorista</label>
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                Motorista
+              </label>
               <input
                 type="text"
                 value={advancedFilters.motorista}
-                onChange={(e) => setAdvancedFilters(prev => ({ ...prev, motorista: e.target.value }))}
+                onChange={(e) =>
+                  setAdvancedFilters((prev) => ({
+                    ...prev,
+                    motorista: e.target.value,
+                  }))
+                }
                 placeholder="Nome do motorista..."
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
               />
@@ -2848,42 +3906,68 @@ export default function OSOperationalPage() {
             <GeologSearchableSelect
               label="Veículo"
               options={[
-                { id: '', nome: 'Todos' },
-                ...vehicles.map(v => ({ id: v.id, nome: `${v.marca} ${v.modelo} — ${v.placa}` }))
+                { id: "", nome: "Todos" },
+                ...vehicles.map((v) => ({
+                  id: v.id,
+                  nome: `${v.marca} ${v.modelo} — ${v.placa}`,
+                })),
               ]}
               value={advancedFilters.veiculoId}
-              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, veiculoId: id }))}
+              onChange={(id) =>
+                setAdvancedFilters((prev) => ({ ...prev, veiculoId: id }))
+              }
               compact
               disableSearch={false}
             />
             {/* Passageiro */}
             <div className="space-y-1">
-              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">Passageiro</label>
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                Passageiro
+              </label>
               <input
                 type="text"
                 value={advancedFilters.passageiro}
-                onChange={(e) => setAdvancedFilters(prev => ({ ...prev, passageiro: e.target.value }))}
+                onChange={(e) =>
+                  setAdvancedFilters((prev) => ({
+                    ...prev,
+                    passageiro: e.target.value,
+                  }))
+                }
                 placeholder="Nome do passageiro..."
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
               />
             </div>
             {/* Data Início */}
             <div className="space-y-1">
-              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">Data Início</label>
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                Data Início
+              </label>
               <input
                 type="date"
                 value={advancedFilters.dataInicio}
-                onChange={(e) => setAdvancedFilters(prev => ({ ...prev, dataInicio: e.target.value }))}
+                onChange={(e) =>
+                  setAdvancedFilters((prev) => ({
+                    ...prev,
+                    dataInicio: e.target.value,
+                  }))
+                }
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
               />
             </div>
             {/* Data Fim */}
             <div className="space-y-1">
-              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">Data Fim</label>
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                Data Fim
+              </label>
               <input
                 type="date"
                 value={advancedFilters.dataFim}
-                onChange={(e) => setAdvancedFilters(prev => ({ ...prev, dataFim: e.target.value }))}
+                onChange={(e) =>
+                  setAdvancedFilters((prev) => ({
+                    ...prev,
+                    dataFim: e.target.value,
+                  }))
+                }
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
               />
             </div>
@@ -2891,15 +3975,20 @@ export default function OSOperationalPage() {
             <GeologSearchableSelect
               label="Status Operacional"
               options={[
-                { id: '', nome: 'Todos' },
-                { id: 'Pendente', nome: 'Pendente' },
-                { id: 'Aguardando', nome: 'Aguardando' },
-                { id: 'Em Rota', nome: 'Em Rota' },
-                { id: 'Finalizado', nome: 'Finalizado' },
-                { id: 'Cancelado', nome: 'Cancelado' },
+                { id: "", nome: "Todos" },
+                { id: "Pendente", nome: "Pendente" },
+                { id: "Aguardando", nome: "Aguardando" },
+                { id: "Em Rota", nome: "Em Rota" },
+                { id: "Finalizado", nome: "Finalizado" },
+                { id: "Cancelado", nome: "Cancelado" },
               ]}
               value={advancedFilters.statusOperacional}
-              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, statusOperacional: id as AdvancedFilters['statusOperacional'] }))}
+              onChange={(id) =>
+                setAdvancedFilters((prev) => ({
+                  ...prev,
+                  statusOperacional: id as AdvancedFilters["statusOperacional"],
+                }))
+              }
               compact
               disableSearch={false}
             />
@@ -2907,13 +3996,18 @@ export default function OSOperationalPage() {
             <GeologSearchableSelect
               label="Status Financeiro"
               options={[
-                { id: '', nome: 'Todos' },
-                { id: 'Pendente', nome: 'Pendente' },
-                { id: 'Pago', nome: 'Pago' },
-                { id: 'Faturado', nome: 'Faturado' },
+                { id: "", nome: "Todos" },
+                { id: "Pendente", nome: "Pendente" },
+                { id: "Pago", nome: "Pago" },
+                { id: "Faturado", nome: "Faturado" },
               ]}
               value={advancedFilters.statusFinanceiro}
-              onChange={(id) => setAdvancedFilters(prev => ({ ...prev, statusFinanceiro: id as AdvancedFilters['statusFinanceiro'] }))}
+              onChange={(id) =>
+                setAdvancedFilters((prev) => ({
+                  ...prev,
+                  statusFinanceiro: id as AdvancedFilters["statusFinanceiro"],
+                }))
+              }
               compact
               disableSearch={false}
             />
@@ -2922,26 +4016,30 @@ export default function OSOperationalPage() {
       )}
 
       {/* Conteúdo: Tabela ou Calendário */}
-      {viewMode === 'table' ? (
+      {viewMode === "table" ? (
         <DataTable
           data={tableItems}
           loading={(dataLoading || heavyLoading) && !hasActiveAdvancedFilters}
           disableClientSearch
-          pagination={hasActiveAdvancedFilters ? {
-            page: clientPage,
-            pageSize: clientPageSize,
-            totalItems: filteredData.length,
-            onPageChange: setClientPage,
-          } : {
-            page: osTable.page,
-            pageSize: osTable.pageSize,
-            totalItems: tableTotalCount,
-            onPageChange: osTable.setPage,
-          }}
+          pagination={
+            hasActiveAdvancedFilters
+              ? {
+                  page: clientPage,
+                  pageSize: clientPageSize,
+                  totalItems: filteredData.length,
+                  onPageChange: setClientPage,
+                }
+              : {
+                  page: osTable.page,
+                  pageSize: osTable.pageSize,
+                  totalItems: tableTotalCount,
+                  onPageChange: osTable.setPage,
+                }
+          }
           columns={[
             {
-              key: 'protocolo',
-              title: 'Protocolo',
+              key: "protocolo",
+              title: "Protocolo",
               render: (value: unknown, item: OrderService) => {
                 void value;
 
@@ -2952,54 +4050,71 @@ export default function OSOperationalPage() {
                 const displayHora = firstWp?.hora || item.hora;
 
                 return (
-                <div className="space-y-1">
-                  <p className="font-black text-base text-slate-800 tracking-tight">{item.protocolo}</p>
-                  <p className="text-sm font-semibold" style={{ color: 'rgb(97, 130, 209)' }}>
-                    {displayDate.split('-').reverse().join('/')}
-                    {displayHora && <span className="ml-1 text-slate-500">· {displayHora.slice(0, 5)}</span>}
+                  <div className="space-y-1">
+                    <p className="font-black text-base text-slate-800 tracking-tight">
+                      {item.protocolo}
+                    </p>
+                    <p
+                      className="text-sm font-semibold"
+                      style={{ color: "rgb(97, 130, 209)" }}
+                    >
+                      {displayDate.split("-").reverse().join("/")}
+                      {displayHora && (
+                        <span className="ml-1 text-slate-500">
+                          · {displayHora.slice(0, 5)}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                );
+              },
+            },
+            {
+              key: "os",
+              title: "OS",
+              render: (value: unknown, item: OrderService) => {
+                void value;
+
+                return (
+                  <p className="font-black text-base text-slate-700">
+                    {item.os || "—"}
                   </p>
-                </div>
                 );
-              }
+              },
             },
             {
-              key: 'os',
-              title: 'OS',
+              key: "cliente",
+              title: "Cliente",
+              width: "380px",
               render: (value: unknown, item: OrderService) => {
                 void value;
 
+                const clienteNome =
+                  clientes.find((c) => c.id === item.clienteId)?.nome || "N/A";
                 return (
-                <p className="font-black text-base text-slate-700">{item.os || '—'}</p>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
+                      <Building size={18} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm text-slate-700">
+                        {clienteNome}
+                      </p>
+                    </div>
+                  </div>
                 );
-              }
+              },
             },
             {
-              key: 'cliente',
-              title: 'Cliente',
-              width: '380px',
+              key: "itinerario",
+              title: "Itinerário",
+              width: "200px",
               render: (value: unknown, item: OrderService) => {
                 void value;
-
-                const clienteNome = clientes.find(c => c.id === item.clienteId)?.nome || 'N/A';
-                return (
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
-                    <Building size={18} />
-                  </div>
-                  <div>
-                    <p className="font-bold text-sm text-slate-700">{clienteNome}</p>
-                  </div>
-                </div>
-                );
-              }
-            },
-            {
-              key: 'itinerario',
-              title: 'Itinerário',
-              width: '200px',
-              render: (value: unknown, item: OrderService) => {
-                void value;
-                const waypointCount = item.rota?.waypoints?.filter((waypoint) => waypoint.label.trim() !== '').length ?? 0;
+                const waypointCount =
+                  item.rota?.waypoints?.filter(
+                    (waypoint) => waypoint.label.trim() !== "",
+                  ).length ?? 0;
                 const stopCount = waypointCount > 1 ? waypointCount - 2 : 0;
                 const displayCount = waypointCount > 0 ? waypointCount : 1;
 
@@ -3007,158 +4122,206 @@ export default function OSOperationalPage() {
                   <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 rounded-lg">
                       <Navigation size={13} className="text-blue-600" />
-                      <span className="text-sm font-extrabold text-blue-700">{displayCount}</span>
+                      <span className="text-sm font-extrabold text-blue-700">
+                        {displayCount}
+                      </span>
                     </div>
                     <span className="text-base font-medium text-slate-500">
-                      {waypointCount <= 1 ? 'Direto' : stopCount === 1 ? '1 parada' : `${stopCount} paradas`}
+                      {waypointCount <= 1
+                        ? "Direto"
+                        : stopCount === 1
+                          ? "1 parada"
+                          : `${stopCount} paradas`}
                     </span>
                   </div>
                 );
-              }
+              },
             },
             {
-              key: 'passageiros',
-              title: 'Passageiros',
-              width: '120px',
-              align: 'center',
+              key: "passageiros",
+              title: "Passageiros",
+              width: "120px",
+              align: "center",
               render: (value: unknown, item: OrderService) => {
                 void value;
-                const passengerCount = item.rota?.waypoints?.reduce((total, waypoint) => {
-                  return total + (waypoint.passengers?.length ?? 0);
-                }, 0) ?? 0;
-                
+                const passengerCount =
+                  item.rota?.waypoints?.reduce((total, waypoint) => {
+                    return total + (waypoint.passengers?.length ?? 0);
+                  }, 0) ?? 0;
+
                 return (
                   <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-xl border border-emerald-100">
                     <Users size={14} className="text-emerald-600" />
-                    <span className="text-sm font-bold text-emerald-700">{passengerCount}</span>
+                    <span className="text-sm font-bold text-emerald-700">
+                      {passengerCount}
+                    </span>
                   </div>
                 );
-              }
+              },
             },
             {
-              key: 'motorista',
-              title: 'Motorista',
-              width: '250px',
+              key: "motorista",
+              title: "Motorista",
+              width: "250px",
               render: (value: unknown, item: OrderService) => {
                 void value;
 
-                const motoristaParts = String(item.motorista).trim().split(/\s+/).filter(Boolean);
-                const motoristaNomeCurto = motoristaParts.length > 1
-                  ? `${motoristaParts[0]} ${motoristaParts[1]}`
-                  : motoristaParts[0] || '—';
+                const motoristaNomeAtual = item.driverId
+                  ? drivers.find((d) => d.id === item.driverId)?.name ||
+                    item.motorista
+                  : item.motorista;
+                const motoristaParts = String(motoristaNomeAtual)
+                  .trim()
+                  .split(/\s+/)
+                  .filter(Boolean);
+                const motoristaNomeCurto =
+                  motoristaParts.length > 1
+                    ? `${motoristaParts[0]} ${motoristaParts[1]}`
+                    : motoristaParts[0] || "—";
 
                 return (
-                <div className="flex items-center gap-3">
-                  <User size={14} className="text-blue-500" />
-                  <span className="text-base font-bold">{motoristaNomeCurto}</span>
-                </div>
-              )
-              }
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center">
+                      <Truck className="text-slate-400" size={16} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-800 text-base">
+                        {motoristaNomeCurto}
+                      </p>
+                    </div>
+                  </div>
+                );
+              },
             },
             {
-              key: 'status',
-              title: 'Status',
-              align: 'center',
-              width: '140px',
+              key: "status",
+              title: "Status",
+              align: "center",
+              width: "140px",
               render: (value: unknown, item: OrderService) => {
                 void value;
 
-                const config = getStatusConfig(item.status.operacional);
+                const config = getStatusConfig(getOperationalStatusForOS(item));
                 return (
-                  <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs md:text-sm font-bold uppercase tracking-wide border ${config.bg} ${config.border} ${config.text}`}>
+                  <span
+                    className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs md:text-sm font-bold uppercase tracking-wide border ${config.bg} ${config.border} ${config.text}`}
+                  >
                     {config.icon}
                     {config.label}
                   </span>
                 );
-              }
+              },
             },
             {
-              key: 'acoes',
-              title: 'Ações',
-              align: 'center',
+              key: "acoes",
+              title: "Ações",
+              align: "center",
               render: (value: unknown, item: OrderService) => {
                 void value;
 
                 return (
-                <div
-                  className="relative inline-block"
-                  ref={(el) => {
-                    if (el) {
-                      actionMenuRefs.current[item.id] = el;
-                    } else {
-                      delete actionMenuRefs.current[item.id];
-                    }
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
+                  <div
+                    className="relative inline-block"
+                    ref={(el) => {
+                      if (el) {
+                        actionMenuRefs.current[item.id] = el;
+                      } else {
+                        delete actionMenuRefs.current[item.id];
+                      }
                     }}
-                    className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm cursor-pointer"
-                    aria-haspopup="true"
-                    aria-expanded={openActionMenuId === item.id}
                   >
-                    <MoreVertical size={18} />
-                  </button>
-                  {openActionMenuId === item.id && (() => {
-                    const rect = actionMenuRefs.current[item.id]?.getBoundingClientRect();
-                    if (!rect) return null;
-                    const menuHeight = 200; // Altura aproximada do menu
-                    const spaceBelow = window.innerHeight - rect.bottom;
-                    const shouldOpenUp = spaceBelow < menuHeight + 16;
-                    return (
-                      <div
-                        className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
-                        style={{
-                          top: shouldOpenUp ? rect.top - menuHeight - 8 : rect.bottom + 8,
-                          right: window.innerWidth - rect.right
-                        }}
-                      >
-                        <button
-                          onClick={() => handleViewOS(item.id)}
-                          className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-cyan-50 hover:text-cyan-600 flex items-center gap-3 cursor-pointer"
-                        >
-                          <Eye size={16} className="text-slate-400 group-hover:text-cyan-600" />
-                          Visualizar
-                        </button>
-                        <button
-                          onClick={() => handleEditOS(item.id)}
-                          className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-blue-50 hover:text-blue-600 flex items-center gap-3 cursor-pointer"
-                        >
-                          <Pencil size={16} className="text-slate-400 group-hover:text-blue-600" />
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => handleReopenOS(item.id)}
-                          className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 flex items-center gap-3 cursor-pointer"
-                        >
-                          <RotateCcw size={16} className="text-slate-400 group-hover:text-emerald-600" />
-                          Reabrir
-                        </button>
-                        <button
-                          onClick={() => handleCancelOS(item.id)}
-                          className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-100 hover:text-slate-600 flex items-center gap-3 cursor-pointer"
-                        >
-                          <XOctagon size={16} className="text-slate-400 group-hover:text-slate-600" />
-                          Cancelar
-                        </button>
-                        <button
-                          onClick={() => handleDeleteOS(item.id)}
-                          className="group w-full px-4 py-2 text-left text-sm font-bold rounded-xl bg-rose-50 hover:bg-rose-100 flex items-center gap-3 cursor-pointer"
-                          style={{ color: 'rgb(219, 132, 153)' }}
-                        >
-                          <XOctagon size={16} style={{ color: 'rgb(219, 132, 153)' }} />
-                          Excluir
-                        </button>
-                      </div>
-                    );
-                  })()}
-                </div>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setOpenActionMenuId((prev) =>
+                          prev === item.id ? null : item.id,
+                        );
+                      }}
+                      className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm cursor-pointer"
+                      aria-haspopup="true"
+                      aria-expanded={openActionMenuId === item.id}
+                    >
+                      <MoreVertical size={18} />
+                    </button>
+                    {openActionMenuId === item.id &&
+                      (() => {
+                        const rect =
+                          actionMenuRefs.current[
+                            item.id
+                          ]?.getBoundingClientRect();
+                        if (!rect) return null;
+                        const menuHeight = 200; // Altura aproximada do menu
+                        const spaceBelow = window.innerHeight - rect.bottom;
+                        const shouldOpenUp = spaceBelow < menuHeight + 16;
+                        return (
+                          <div
+                            className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
+                            style={{
+                              top: shouldOpenUp
+                                ? rect.top - menuHeight - 8
+                                : rect.bottom + 8,
+                              right: window.innerWidth - rect.right,
+                            }}
+                          >
+                            <button
+                              onClick={() => handleViewOS(item.id)}
+                              className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-cyan-50 hover:text-cyan-600 flex items-center gap-3 cursor-pointer"
+                            >
+                              <Eye
+                                size={16}
+                                className="text-slate-400 group-hover:text-cyan-600"
+                              />
+                              Visualizar
+                            </button>
+                            <button
+                              onClick={() => handleEditOS(item.id)}
+                              className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-blue-50 hover:text-blue-600 flex items-center gap-3 cursor-pointer"
+                            >
+                              <Pencil
+                                size={16}
+                                className="text-slate-400 group-hover:text-blue-600"
+                              />
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => handleReopenOS(item.id)}
+                              className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 flex items-center gap-3 cursor-pointer"
+                            >
+                              <RotateCcw
+                                size={16}
+                                className="text-slate-400 group-hover:text-emerald-600"
+                              />
+                              Reabrir
+                            </button>
+                            <button
+                              onClick={() => handleCancelOS(item.id)}
+                              className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-100 hover:text-slate-600 flex items-center gap-3 cursor-pointer"
+                            >
+                              <XOctagon
+                                size={16}
+                                className="text-slate-400 group-hover:text-slate-600"
+                              />
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={() => handleDeleteOS(item.id)}
+                              className="group w-full px-4 py-2 text-left text-sm font-bold rounded-xl bg-rose-50 hover:bg-rose-100 flex items-center gap-3 cursor-pointer"
+                              style={{ color: "rgb(219, 132, 153)" }}
+                            >
+                              <XOctagon
+                                size={16}
+                                style={{ color: "rgb(219, 132, 153)" }}
+                              />
+                              Excluir
+                            </button>
+                          </div>
+                        );
+                      })()}
+                  </div>
                 );
-              }
-            }
+              },
+            },
           ]}
           searchPlaceholder=""
           emptyMessage="Nenhuma OS encontrada."
@@ -3167,70 +4330,108 @@ export default function OSOperationalPage() {
         />
       ) : (
         <>
-          <OSCalendar 
-            osList={filteredData} 
+          <OSCalendar
+            osList={filteredData}
             clientes={clientes}
             loading={dataLoading || heavyLoading}
-            onEventClick={(osId: string, position?: { x: number; y: number }) => {
+            onEventClick={(
+              osId: string,
+              position?: { x: number; y: number },
+            ) => {
               setOpenActionMenuId(osId);
               setCalendarMenuPosition(position || null);
             }}
           />
-          
+
           {/* Menu de Ações para o Calendário */}
-          {viewMode === 'calendar' && openActionMenuId && calendarMenuPosition && (() => {
-            const osId = openActionMenuId;
-            const menuHeight = 200;
-            const spaceBelow = window.innerHeight - calendarMenuPosition.y;
-            const shouldOpenUp = spaceBelow < menuHeight + 16;
-            return (
-              <div
-                ref={calendarMenuRef}
-                className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
-                style={{
-                  top: shouldOpenUp ? calendarMenuPosition.y - menuHeight - 8 : calendarMenuPosition.y + 8,
-                  left: calendarMenuPosition.x
-                }}
-              >
-                <button
-                  onClick={() => { handleViewOS(osId); setCalendarMenuPosition(null); }}
-                  className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-cyan-50 hover:text-cyan-600 flex items-center gap-3 cursor-pointer"
+          {viewMode === "calendar" &&
+            openActionMenuId &&
+            calendarMenuPosition &&
+            (() => {
+              const osId = openActionMenuId;
+              const menuHeight = 200;
+              const spaceBelow = window.innerHeight - calendarMenuPosition.y;
+              const shouldOpenUp = spaceBelow < menuHeight + 16;
+              return (
+                <div
+                  ref={calendarMenuRef}
+                  className="fixed min-w-[200px] bg-white border border-slate-200 rounded-2xl shadow-2xl p-2 space-y-1 z-[9999]"
+                  style={{
+                    top: shouldOpenUp
+                      ? calendarMenuPosition.y - menuHeight - 8
+                      : calendarMenuPosition.y + 8,
+                    left: calendarMenuPosition.x,
+                  }}
                 >
-                  <Eye size={16} className="text-slate-400 group-hover:text-cyan-600" />
-                  Visualizar
-                </button>
-                <button
-                  onClick={() => { handleEditOS(osId); setCalendarMenuPosition(null); }}
-                  className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-blue-50 hover:text-blue-600 flex items-center gap-3 cursor-pointer"
-                >
-                  <Pencil size={16} className="text-slate-400 group-hover:text-blue-600" />
-                  Editar
-                </button>
-                <button
-                  onClick={() => { handleReopenOS(osId); setCalendarMenuPosition(null); }}
-                  className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 flex items-center gap-3 cursor-pointer"
-                >
-                  <RotateCcw size={16} className="text-slate-400 group-hover:text-emerald-600" />
-                  Reabrir
-                </button>
-                <button
-                  onClick={() => { handleCancelOS(osId); setCalendarMenuPosition(null); }}
-                  className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-100 hover:text-slate-600 flex items-center gap-3 cursor-pointer"
-                >
-                  <XOctagon size={16} className="text-slate-400 group-hover:text-slate-600" />
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => { handleDeleteOS(osId); setCalendarMenuPosition(null); }}
-                  className="group w-full px-4 py-2 text-left text-sm font-bold rounded-xl bg-rose-50 hover:bg-rose-100 flex items-center gap-3 cursor-pointer"
-                  style={{ color: 'rgb(219, 132, 153)' }}
-                >
-                  <XOctagon size={16} style={{ color: 'rgb(219, 132, 153)' }} />
-                  Excluir
-                </button>
-              </div>
-            );
-          })()}
+                  <button
+                    onClick={() => {
+                      handleViewOS(osId);
+                      setCalendarMenuPosition(null);
+                    }}
+                    className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-cyan-50 hover:text-cyan-600 flex items-center gap-3 cursor-pointer"
+                  >
+                    <Eye
+                      size={16}
+                      className="text-slate-400 group-hover:text-cyan-600"
+                    />
+                    Visualizar
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleEditOS(osId);
+                      setCalendarMenuPosition(null);
+                    }}
+                    className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-blue-50 hover:text-blue-600 flex items-center gap-3 cursor-pointer"
+                  >
+                    <Pencil
+                      size={16}
+                      className="text-slate-400 group-hover:text-blue-600"
+                    />
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleReopenOS(osId);
+                      setCalendarMenuPosition(null);
+                    }}
+                    className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 flex items-center gap-3 cursor-pointer"
+                  >
+                    <RotateCcw
+                      size={16}
+                      className="text-slate-400 group-hover:text-emerald-600"
+                    />
+                    Reabrir
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleCancelOS(osId);
+                      setCalendarMenuPosition(null);
+                    }}
+                    className="group w-full px-4 py-2 text-left text-sm font-bold text-slate-700 rounded-xl hover:bg-slate-100 hover:text-slate-600 flex items-center gap-3 cursor-pointer"
+                  >
+                    <XOctagon
+                      size={16}
+                      className="text-slate-400 group-hover:text-slate-600"
+                    />
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleDeleteOS(osId);
+                      setCalendarMenuPosition(null);
+                    }}
+                    className="group w-full px-4 py-2 text-left text-sm font-bold rounded-xl bg-rose-50 hover:bg-rose-100 flex items-center gap-3 cursor-pointer"
+                    style={{ color: "rgb(219, 132, 153)" }}
+                  >
+                    <XOctagon
+                      size={16}
+                      style={{ color: "rgb(219, 132, 153)" }}
+                    />
+                    Excluir
+                  </button>
+                </div>
+              );
+            })()}
         </>
       )}
 
@@ -3239,9 +4440,19 @@ export default function OSOperationalPage() {
         <StandardModal
           onClose={resetMainModalState}
           disableBackdropClose
-          title={editingOSId ? 'Editar Atendimento' : 'Novo Atendimento'}
-          subtitle={editingOSId ? 'Atualização operacional Geolog' : 'Fluxo Operacional Geolog'}
-          icon={editingOSId ? <Pencil className="w-6 h-6 md:w-7 md:h-7" /> : <PlusCircle className="w-6 h-6 md:w-7 md:h-7" />}
+          title={editingOSId ? "Editar Atendimento" : "Novo Atendimento"}
+          subtitle={
+            editingOSId
+              ? "Atualização operacional Geolog"
+              : "Fluxo Operacional Geolog"
+          }
+          icon={
+            editingOSId ? (
+              <Pencil className="w-6 h-6 md:w-7 md:h-7" />
+            ) : (
+              <PlusCircle className="w-6 h-6 md:w-7 md:h-7" />
+            )
+          }
           maxWidthClassName="max-w-7xl"
           bodyClassName="p-6 md:p-10 pb-80 space-y-12"
           footer={
@@ -3258,438 +4469,645 @@ export default function OSOperationalPage() {
                 form="nova-os-form"
                 className="px-12 py-4 bg-[var(--color-geolog-blue)] text-white font-black rounded-xl shadow-xl shadow-blue-900/20 hover:scale-[1.02] active:scale-95 transition-all text-sm uppercase tracking-widest cursor-pointer"
               >
-                {editingOSId ? 'Salvar Alterações' : 'Confirmar OS'}
+                {editingOSId ? "Salvar Alterações" : "Confirmar OS"}
               </button>
             </div>
           }
         >
-            <form id="nova-os-form" onSubmit={handleAddOS} className="min-h-0 relative">
-               <div className="space-y-12" style={{ paddingTop: '0.5rem', paddingBottom: '2rem' }}>
-                  
-                  {/* 1. DETALHES DA EXECUÇÃO */}
-                  <div className="space-y-8">
-                     <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                        <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                          <Clock size={20} className="text-slate-500" /> Detalhes da Execução
-                        </h3>
-                     </div>
+          <form
+            id="nova-os-form"
+            onSubmit={handleAddOS}
+            className="min-h-0 relative"
+          >
+            <div
+              className="space-y-12"
+              style={{ paddingTop: "0.5rem", paddingBottom: "2rem" }}
+            >
+              {/* 1. DETALHES DA EXECUÇÃO */}
+              <div className="space-y-8">
+                <div
+                  className="flex items-center border-b-2 border-slate-100 pb-4"
+                  style={{ paddingBottom: "1.25rem" }}
+                >
+                  <h3
+                    className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3"
+                    style={{ lineHeight: "1.3" }}
+                  >
+                    <Clock size={20} className="text-slate-500" /> Detalhes da
+                    Execução
+                  </h3>
+                </div>
 
-                     <div className="flex flex-col md:flex-row gap-8">
-                       <div className="space-y-2.5 w-full md:w-[80%]">
-                          <GeologSearchableSelect 
-                             label="Empresa / Cliente Final" 
-                             options={clientes} 
-                             value={formData.clienteId} 
-                             onChange={handleClienteChange} 
-                             required
-                          />
-                       </div>
-                       <div className="space-y-2.5 w-full md:w-[20%]">
-                          <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">OS <span className="text-slate-400 text-xs font-normal normal-case tracking-normal">Opcional</span></label>
-                          <input 
-                            type="text" 
-                            name="os" 
-                            value={formData.os} 
-                            onChange={handleInputChange} 
-                            placeholder="Ex: 9988" 
-                            className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-lg text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all uppercase placeholder:text-slate-300 shadow-sm -mt-[6px]"
-                          />
-                       </div>
-                    </div>
-
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <GeologSearchableSelect 
-                           label="Solicitante Responsável" 
-                           options={availableSolicitantes.map(s => ({ id: s.id, nome: s.nome }))} 
-                           value={availableSolicitantes.find(s => s.nome === formData.solicitante)?.id || ''} 
-                           onChange={(id) => { 
-                             const opt = availableSolicitantes.find(s => s.id === id); 
-                             setFormData(prev => ({ ...prev, solicitante: opt?.nome || '' })); 
-                           }} 
-                           disabled={!formData.clienteId} 
-                           required
-                           onQuickAdd={handleQuickAddSolicitante}
-                        />
-                        <GeologSearchableSelect 
-                           label="Centro de Custo" 
-                           options={availableCentrosCusto.map(c => ({ id: c.id, nome: c.nome }))} 
-                           value={availableCentrosCusto.find(c => c.id === formData.centroCusto)?.id || ''} 
-                           onChange={(id) => { 
-                             setFormData(prev => ({ ...prev, centroCusto: id })); 
-                           }} 
-                           disabled={!formData.clienteId}
-                           required
-                           onQuickAdd={handleQuickAddCentroCusto}
-                        />
-                     </div>
-
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <GeologSearchableSelect 
-                           label="Motorista Alocado" 
-                           options={driverOptions} 
-                           value={formData.motorista || ''} 
-                           onChange={(id) => { 
-                             const opt = driverOptions.find(m => m.id === id); 
-                             setFormData(prev => ({ ...prev, motorista: opt?.nome || '', veiculoId: '' })); 
-                           }} 
-                           required
-                           onQuickAdd={handleQuickAddMotorista}
-                        />
-                        <GeologSearchableSelect
-                           label="Veículo de Uso"
-                           options={selectedDriverVehicleOptions}
-                           value={formData.veiculoId}
-                           onChange={(id) => setFormData(prev => ({ ...prev, veiculoId: id }))}
-                           required
-                           disabled={!formData.motorista}
-                           onQuickAdd={handleQuickAddVeiculo}
-                        />
-                     </div>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                     </div>
+                <div className="flex flex-col md:flex-row gap-8">
+                  <div className="space-y-2.5 w-full md:w-[80%]">
+                    <GeologSearchableSelect
+                      label="Empresa / Cliente Final"
+                      options={clientes}
+                      value={formData.clienteId}
+                      onChange={handleClienteChange}
+                      required
+                    />
                   </div>
-
-                  <div className="flex items-center gap-4">
-                    <div className="flex-1 border-t-2 border-dashed border-slate-300" />
-                    <div className="w-2 h-2 rounded-full bg-slate-300" />
-                    <div className="flex-1 border-t-2 border-dashed border-slate-300" />
+                  <div className="space-y-2.5 w-full md:w-[20%]">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">
+                      OS{" "}
+                      <span className="text-slate-400 text-xs font-normal normal-case tracking-normal">
+                        Opcional
+                      </span>
+                    </label>
+                    <input
+                      type="text"
+                      name="os"
+                      value={formData.os}
+                      onChange={handleInputChange}
+                      placeholder="Ex: 9988"
+                      className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-lg text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all uppercase placeholder:text-slate-300 shadow-sm -mt-[6px]"
+                    />
                   </div>
+                </div>
 
-                  {/* 2. ITINERÁRIO */}
-                  {/* 2. ITINERÁRIO DINÂMICO */}
-                  <div className="space-y-8">
-                     <div className="flex items-center justify-between border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                        <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-2" style={{ lineHeight: '1.3' }}>
-                          <MapPin size={20} className="text-blue-600" />
-                          {getItinerarySectionTitle()}
-                        </h3>
-                        <div className="flex gap-2">
-                           <button type="button" onClick={handleAddItinerary} className="flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-amber-200 transition-all shadow-sm cursor-pointer">
-                              <Plus size={16} /> ITINERÁRIO
-                           </button>
-                           <button type="button" onClick={handleAddReturn} className="flex items-center gap-2 px-4 py-2 bg-purple-100 text-purple-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-purple-200 transition-all shadow-sm cursor-pointer">
-                              <Plus size={16} /> RETORNO
-                           </button>
-                        </div>
-                     </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <GeologSearchableSelect
+                    label="Solicitante Responsável"
+                    options={availableSolicitantes.map((s) => ({
+                      id: s.id,
+                      nome: s.nome,
+                    }))}
+                    value={
+                      formData.solicitanteId ||
+                      availableSolicitantes.find(
+                        (s) => s.nome === formData.solicitante,
+                      )?.id ||
+                      ""
+                    }
+                    onChange={(id) => {
+                      const opt = availableSolicitantes.find(
+                        (s) => s.id === id,
+                      );
+                      setFormData((prev) => ({
+                        ...prev,
+                        solicitanteId: id,
+                        solicitante: opt?.nome || "",
+                      }));
+                    }}
+                    disabled={!formData.clienteId}
+                    required
+                    onQuickAdd={handleQuickAddSolicitante}
+                  />
+                  <GeologSearchableSelect
+                    label="Centro de Custo"
+                    options={availableCentrosCusto.map((c) => ({
+                      id: c.id,
+                      nome: c.nome,
+                    }))}
+                    value={
+                      availableCentrosCusto.find(
+                        (c) => c.id === formData.centroCusto,
+                      )?.id || ""
+                    }
+                    onChange={(id) => {
+                      setFormData((prev) => ({ ...prev, centroCusto: id }));
+                    }}
+                    disabled={!formData.clienteId}
+                    onQuickAdd={handleQuickAddCentroCusto}
+                  />
+                </div>
 
-                     <div className="relative pl-8 space-y-6">
-                        {formItineraries.map((it) => (
-                          <div key={it.index} className="space-y-6">
-                            {formItineraries.length > 1 && (
-                              <h4 className={`flex items-center gap-2 mb-6 ${it.index === 0 ? 'mt-6' : 'mt-20'}`}>
-                                {it.index < 0 ? (
-                                  <ArrowLeft size={18} className="text-purple-500" />
-                                ) : (
-                                  <ArrowRight size={18} className="text-amber-500" />
-                                )}
-                                <span className={`inline-flex items-center justify-center w-8 h-8 rounded-xl text-sm font-black shadow-sm ${it.index < 0 ? 'bg-purple-100 text-purple-700 ring-2 ring-purple-200' : 'bg-amber-100 text-amber-700 ring-2 ring-amber-200'}`}>
-                                  {it.index < 0 ? Math.abs(it.index) : (it.index + 1)}
-                                </span>
-                                <span className={`text-[13px] font-black uppercase tracking-[0.15em] ${it.index < 0 ? 'text-purple-700' : 'text-amber-700'}`}>
-                                  {getItineraryTitle(it.index)}
-                                </span>
-                              </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <GeologSearchableSelect
+                    label="Motorista Alocado"
+                    options={driverOptions}
+                    value={formData.driverId || ""}
+                    onChange={(id) => {
+                      const opt = driverOptions.find((m) => m.id === id);
+                      setFormData((prev) => ({
+                        ...prev,
+                        driverId: id,
+                        motorista: opt?.nome || "",
+                        veiculoId: "",
+                      }));
+                    }}
+                    required
+                    onQuickAdd={handleQuickAddMotorista}
+                  />
+                  <GeologSearchableSelect
+                    label="Veículo de Uso"
+                    options={selectedDriverVehicleOptions}
+                    value={formData.veiculoId}
+                    onChange={(id) =>
+                      setFormData((prev) => ({ ...prev, veiculoId: id }))
+                    }
+                    required
+                    disabled={!formData.motorista}
+                    onQuickAdd={handleQuickAddVeiculo}
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8"></div>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <div className="flex-1 border-t-2 border-dashed border-slate-300" />
+                <div className="w-2 h-2 rounded-full bg-slate-300" />
+                <div className="flex-1 border-t-2 border-dashed border-slate-300" />
+              </div>
+
+              {/* 2. ITINERÁRIO */}
+              {/* 2. ITINERÁRIO DINÂMICO */}
+              <div className="space-y-8">
+                <div
+                  className="flex items-center justify-between border-b-2 border-slate-100 pb-4"
+                  style={{ paddingBottom: "1.25rem" }}
+                >
+                  <h3
+                    className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-2"
+                    style={{ lineHeight: "1.3" }}
+                  >
+                    <MapPin size={20} className="text-blue-600" />
+                    {getItinerarySectionTitle()}
+                  </h3>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleAddItinerary}
+                      className="flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-amber-200 transition-all shadow-sm cursor-pointer"
+                    >
+                      <Plus size={16} /> ITINERÁRIO
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddReturn}
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-100 text-purple-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-purple-200 transition-all shadow-sm cursor-pointer"
+                    >
+                      <Plus size={16} /> RETORNO
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative pl-8 space-y-6">
+                  {formItineraries.map((it) => (
+                    <div key={it.index} className="space-y-6">
+                      {formItineraries.length > 1 && (
+                        <h4
+                          className={`flex items-center gap-2 mb-6 ${it.index === 0 ? "mt-6" : "mt-20"}`}
+                        >
+                          {it.index < 0 ? (
+                            <ArrowLeft size={18} className="text-purple-500" />
+                          ) : (
+                            <ArrowRight size={18} className="text-amber-500" />
+                          )}
+                          <span
+                            className={`inline-flex items-center justify-center w-8 h-8 rounded-xl text-sm font-black shadow-sm ${it.index < 0 ? "bg-purple-100 text-purple-700 ring-2 ring-purple-200" : "bg-amber-100 text-amber-700 ring-2 ring-amber-200"}`}
+                          >
+                            {it.index < 0 ? Math.abs(it.index) : it.index + 1}
+                          </span>
+                          <span
+                            className={`text-[13px] font-black uppercase tracking-[0.15em] ${it.index < 0 ? "text-purple-700" : "text-amber-700"}`}
+                          >
+                            {getItineraryTitle(it.index)}
+                          </span>
+                        </h4>
+                      )}
+                      {it.waypointIndices.map((index, relIdx) => {
+                        const waypoint = formData.waypoints[index];
+                        const isOrigin = relIdx === 0;
+                        const isDestination =
+                          relIdx === it.waypointIndices.length - 1;
+                        const hasPassengers =
+                          (waypoint.passengers?.length || 0) > 0;
+                        const destinationPassengerLineEnd =
+                          destinationPassengerLineEnds[index];
+                        const stopLabel = isOrigin
+                          ? "ORIGEM"
+                          : isDestination
+                            ? "DESTINO FINAL"
+                            : `${relIdx}ª PARADA`;
+
+                        return (
+                          <div
+                            key={index}
+                            ref={(el) => {
+                              waypointTimelineRefs.current[index] = el;
+                            }}
+                            className="relative group"
+                          >
+                            {!isDestination &&
+                              index < formData.waypoints.length - 1 && (
+                                <div className="absolute -left-[1.125rem] top-8 -bottom-6 w-0.5 bg-slate-300" />
+                              )}
+                            {isDestination && hasPassengers && (
+                              <div
+                                className="absolute -left-[1.125rem] top-8 w-0.5 bg-slate-300"
+                                style={{
+                                  height:
+                                    destinationPassengerLineEnd !== undefined
+                                      ? `${destinationPassengerLineEnd}px`
+                                      : `calc(100% - ${waypoint.passengers.length === 1 ? "94px" : waypoint.passengers.length === 2 ? "70px" : waypoint.passengers.length === 3 ? "82px" : "94px"})`,
+                                }}
+                              />
                             )}
-                            {it.waypointIndices.map((index, relIdx) => {
-                              const waypoint = formData.waypoints[index];
-                              const isOrigin = relIdx === 0;
-                              const isDestination = relIdx === it.waypointIndices.length - 1;
-                              const hasPassengers = (waypoint.passengers?.length || 0) > 0;
-                              const destinationPassengerLineEnd = destinationPassengerLineEnds[index];
-                              const stopLabel = isOrigin ? 'ORIGEM' : isDestination ? 'DESTINO FINAL' : `${relIdx}ª PARADA`;
+                            {/* Timeline Dot (Círculo) */}
+                            <div
+                              className={`absolute -left-[1.625rem] top-2 w-4 h-4 rounded-full border-4 border-white shadow-sm ring-2 z-10 ${isOrigin ? "bg-emerald-500 ring-emerald-100" : isDestination ? "bg-blue-600 ring-blue-100" : "bg-slate-400 ring-slate-100"}`}
+                            />
 
-                              return (
-                                <div
-                                  key={index}
-                                  ref={(el) => {
-                                    waypointTimelineRefs.current[index] = el;
-                                  }}
-                                  className="relative group"
-                                >
-                                  {!isDestination && index < formData.waypoints.length - 1 && (
-                                    <div className="absolute -left-[1.125rem] top-8 -bottom-6 w-0.5 bg-slate-300" />
-                                  )}
-                                  {isDestination && hasPassengers && (
-                                    <div
-                                      className="absolute -left-[1.125rem] top-8 w-0.5 bg-slate-300"
-                                      style={{
-                                        height: destinationPassengerLineEnd !== undefined
-                                          ? `${destinationPassengerLineEnd}px`
-                                          : `calc(100% - ${waypoint.passengers.length === 1 ? '94px' : waypoint.passengers.length === 2 ? '70px' : waypoint.passengers.length === 3 ? '82px' : '94px'})`
-                                      }}
-                                    />
-                                  )}
-                                  {/* Timeline Dot (Círculo) */}
-                                  <div className={`absolute -left-[1.625rem] top-2 w-4 h-4 rounded-full border-4 border-white shadow-sm ring-2 z-10 ${isOrigin ? 'bg-emerald-500 ring-emerald-100' : isDestination ? 'bg-blue-600 ring-blue-100' : 'bg-slate-400 ring-slate-100'}`} />
-
-                                  <div className="flex items-start gap-4">
-                                    <div className="flex-1 space-y-4">
-                                      <div className="space-y-4">
-                                        <div className="flex-1 space-y-3">
-                                          <div className="flex items-center justify-between ml-1 mb-2">
-                                            <label className="text-[10px] font-black uppercase tracking-[0.25em]">
-                                              <div className={`inline-flex items-stretch rounded-xl overflow-hidden shadow-sm border text-[10px] md:text-[11px] ${isOrigin ? 'bg-emerald-500 border-emerald-400 text-white' : isDestination ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
-                                                <span className={`px-3 py-1.5 flex items-center justify-center ${isOrigin ? 'bg-emerald-600' : isDestination ? 'bg-blue-700' : 'bg-slate-200 text-slate-700'}`}>
-                                                  {isOrigin ? <MapPin size={14} /> : isDestination ? <Flag size={14} /> : <Circle size={14} />}
-                                                </span>
-                                                <span className="px-4 py-1.5 font-black tracking-wide text-[11px]">
-                                                  {stopLabel}
-                                                </span>
-                                              </div>
-                                            </label>
-                                            {isOrigin && (
-                                              <div className="flex items-center gap-3">
-                                                <div className="flex items-center gap-1.5">
-                                                  <Calendar size={14} className="text-slate-400" />
-                                                  <input
-                                                    type="text"
-                                                    value={waypoint.data ?? ''}
-                                                    onChange={(e) => handleWaypointDataChange(index, e.target.value)}
-                                                    onBlur={() => handleWaypointDataBlur(index)}
-                                                    placeholder="DD/MM/AAAA"
-                                                    maxLength={10}
-                                                    required={it.index === 0}
-                                                    className="w-[9rem] px-2 py-[5px] bg-white border border-slate-200 rounded-lg text-base font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-all tracking-wider font-mono"
-                                                  />
-                                                </div>
-                                                <div className="flex items-center gap-1.5">
-                                                  <Clock size={16} className="text-slate-400" />
-                                                  <input
-                                                    type="text"
-                                                    value={waypoint.hora ? waypoint.hora.slice(0, 5) : ''}
-                                                    onChange={(e) => handleWaypointHoraChange(index, e.target.value)}
-                                                    placeholder="HH:MM"
-                                                    maxLength={5}
-                                                    required={it.index === 0}
-                                                    className="w-[6rem] px-2 py-[5px] bg-white border border-slate-200 rounded-lg text-base font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-all tracking-wider font-mono"
-                                                  />
-                                                </div>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleAddWaypoint(it.index)}
-                                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-xl text-sm font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer"
-                                                >
-                                                  <Plus size={16} /> Parada
-                                                </button>
-                                                {it.index !== 0 && (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => handleRemoveItinerary(it.index)}
-                                                    className="flex items-center justify-center px-2 py-1.5 bg-red-100 text-red-500 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-red-200 transition-all shadow-sm cursor-pointer"
-                                                    title="Remover itinerário/retorno"
-                                                  >
-                                                    <Minus size={16} />
-                                                  </button>
-                                                )}
-                                              </div>
+                            <div className="flex items-start gap-4">
+                              <div className="flex-1 space-y-4">
+                                <div className="space-y-4">
+                                  <div className="flex-1 space-y-3">
+                                    <div className="flex items-center justify-between ml-1 mb-2">
+                                      <label className="text-[10px] font-black uppercase tracking-[0.25em]">
+                                        <div
+                                          className={`inline-flex items-stretch rounded-xl overflow-hidden shadow-sm border text-[10px] md:text-[11px] ${isOrigin ? "bg-emerald-500 border-emerald-400 text-white" : isDestination ? "bg-blue-600 border-blue-500 text-white" : "bg-slate-100 border-slate-200 text-slate-600"}`}
+                                        >
+                                          <span
+                                            className={`px-3 py-1.5 flex items-center justify-center ${isOrigin ? "bg-emerald-600" : isDestination ? "bg-blue-700" : "bg-slate-200 text-slate-700"}`}
+                                          >
+                                            {isOrigin ? (
+                                              <MapPin size={14} />
+                                            ) : isDestination ? (
+                                              <Flag size={14} />
+                                            ) : (
+                                              <Circle size={14} />
                                             )}
-                                          </div>
-                                          <div className="relative">
+                                          </span>
+                                          <span className="px-4 py-1.5 font-black tracking-wide text-[11px]">
+                                            {stopLabel}
+                                          </span>
+                                        </div>
+                                      </label>
+                                      {isOrigin && (
+                                        <div className="flex items-center gap-3">
+                                          <div className="flex items-center gap-1.5">
+                                            <Calendar
+                                              size={14}
+                                              className="text-slate-400"
+                                            />
                                             <input
                                               type="text"
-                                              required
-                                              value={waypoint.label}
-                                              onChange={(e) => handleWaypointChange(index, e.target.value)}
-                                              placeholder={isOrigin ? 'Ex: Hotel H/Niterói' : 'Próximo destino...'}
-                                              className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm pr-36"
+                                              value={waypoint.data ?? ""}
+                                              onChange={(e) =>
+                                                handleWaypointDataChange(
+                                                  index,
+                                                  e.target.value,
+                                                )
+                                              }
+                                              onBlur={() =>
+                                                handleWaypointDataBlur(index)
+                                              }
+                                              placeholder="DD/MM/AAAA"
+                                              maxLength={10}
+                                              className="w-[9rem] px-2 py-[5px] bg-white border border-slate-200 rounded-lg text-base font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-all tracking-wider font-mono"
                                             />
-                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10">
-                                              <button
-                                                type="button"
-                                                onClick={() => toggleWaypointComment(index)}
-                                                className={`relative inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all cursor-pointer ${openWaypointComments[index] || waypoint.comment.trim() ? 'border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:scale-110 active:scale-95' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-600'}`}
-                                                title="Adicionar observação"
-                                              >
-                                                <MessageSquareMore size={16} />
-                                                {waypoint.comment.trim() && (
-                                                  <>
-                                                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white animate-ping"></span>
-                                                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white"></span>
-                                                  </>
-                                                )}
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => handleAddPassenger(index)}
-                                                className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all flex items-center justify-center shadow-sm border border-blue-100 cursor-pointer"
-                                                title="Adicionar Passageiro"
-                                              >
-                                                <Plus size={18} />
-                                              </button>
-                                              {formData.waypoints.length > 2 && !isOrigin && !isDestination && (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleRemoveWaypoint(index)}
-                                                  className="p-2 bg-red-50 text-red-400 rounded-lg hover:bg-red-100 transition-all flex items-center justify-center shadow-sm border border-red-100 cursor-pointer"
-                                                  title="Remover Parada"
-                                                >
-                                                  <X size={18} />
-                                                </button>
-                                              )}
-                                            </div>
                                           </div>
-                                          {openWaypointComments[index] && (
-                                            <div className="mt-3 ml-12">
-                                              <textarea
-                                                value={waypoint.comment}
-                                                onChange={(e) => handleWaypointCommentChange(index, e.target.value)}
-                                                rows={2}
-                                                placeholder="Ex: aguardar na portaria, desembarque pela lateral..."
-                                                className="waypoint-observation w-full resize-none rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 outline-none transition-all shadow-sm"
-                                              />
-                                            </div>
+                                          <div className="flex items-center gap-1.5">
+                                            <Clock
+                                              size={16}
+                                              className="text-slate-400"
+                                            />
+                                            <input
+                                              type="text"
+                                              value={
+                                                waypoint.hora
+                                                  ? waypoint.hora.slice(0, 5)
+                                                  : ""
+                                              }
+                                              onChange={(e) =>
+                                                handleWaypointHoraChange(
+                                                  index,
+                                                  e.target.value,
+                                                )
+                                              }
+                                              placeholder="HH:MM"
+                                              maxLength={5}
+                                              className="w-[6rem] px-2 py-[5px] bg-white border border-slate-200 rounded-lg text-base font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-all tracking-wider font-mono"
+                                            />
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleAddWaypoint(it.index)
+                                            }
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-xl text-sm font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer"
+                                          >
+                                            <Plus size={16} /> Parada
+                                          </button>
+                                          {it.index !== 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleRemoveItinerary(it.index)
+                                              }
+                                              className="flex items-center justify-center px-2 py-1.5 bg-red-100 text-red-500 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-red-200 transition-all shadow-sm cursor-pointer"
+                                              title="Remover itinerário/retorno"
+                                            >
+                                              <Minus size={16} />
+                                            </button>
                                           )}
-                                        </div>
-                                      </div>
-
-                                      {/* Linhas de Passageiros */}
-                                      {waypoint.passengers && waypoint.passengers.length > 0 && (
-                                        <div className="mt-4 border-t border-dashed border-slate-200">
-                                          {waypoint.passengers.map((passenger, passengerIndex) => (
-                                            <div key={passenger.id} className={`relative flex items-center gap-4 group/pass ${passengerIndex === 0 ? 'mt-6' : 'mt-5'} ${passengerIndex === waypoint.passengers.length - 1 ? 'mb-10' : 'mb-5'}`}>
-                                              {/* Linha horizontal da trilha - começa na linha vertical */}
-                                              <div data-passenger-line className="absolute -left-[1.125rem] top-1/2 -translate-y-1/2 w-12 h-0.5 bg-slate-300 z-10" />
-
-                                              {/* Trilhas de passageiro (quadrado) - no final da linha */}
-                                              <div className={`absolute left-[1.375rem] top-1/2 -translate-y-1/2 w-4 h-4 rounded-sm border-4 border-white shadow-sm ring-2 z-20 ${isOrigin ? 'bg-emerald-500 ring-emerald-100' : isDestination ? 'bg-blue-600 ring-blue-100' : 'bg-slate-400 ring-slate-100'}`} />
-
-                                              <div className="flex-1 flex items-center gap-3 ml-8">
-                                                <div className="w-3/5 ml-6">
-                                                  <div className="flex items-center gap-3">
-                                                    <div className="flex-1">
-                                                      <GeologSearchableSelect
-                                                        label=""
-                                                        placeholder="Selecione o passageiro..."
-                                                        options={passageiros.map(p => ({
-                                                          id: p.id,
-                                                          nome: p.nomeCompleto,
-                                                          sublabel: p.enderecos?.[0]?.rotulo || undefined
-                                                        }))}
-                                                        value={passenger.solicitanteId || ''}
-                                                        onChange={(val) => handlePassengerChange(index, passenger.id, val)}
-                                                      />
-                                                    </div>
-                                                    <div className="flex items-center justify-center h-[56px]">
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => openQuickPassengerModal(index, passenger.id)}
-                                                        className="p-3 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all opacity-0 group-hover/pass:opacity-100 flex items-center justify-center shadow-sm border border-blue-200 cursor-pointer"
-                                                        style={{ marginBottom: '-5px' }}
-                                                        title="Cadastrar passageiro"
-                                                      >
-                                                        <PlusCircle size={18} />
-                                                      </button>
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                                <div className="flex items-center justify-center h-[56px]">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => handleRemovePassenger(index, passenger.id)}
-                                                    className="p-3 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover/pass:opacity-100 cursor-pointer"
-                                                    style={{ marginBottom: '-5px' }}
-                                                    title="Remover Passageiro"
-                                                  >
-                                                    <X size={18} />
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            </div>
-                                          ))}
                                         </div>
                                       )}
                                     </div>
+                                    <div className="relative">
+                                      <input
+                                        type="text"
+                                        required
+                                        value={waypoint.label}
+                                        onChange={(e) =>
+                                          handleWaypointChange(
+                                            index,
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder={
+                                          isOrigin
+                                            ? "Ex: Hotel H/Niterói"
+                                            : "Próximo destino..."
+                                        }
+                                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm pr-36"
+                                      />
+                                      <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            toggleWaypointComment(index)
+                                          }
+                                          className={`relative inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all cursor-pointer ${openWaypointComments[index] || waypoint.comment.trim() ? "border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:scale-110 active:scale-95" : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-600"}`}
+                                          title="Adicionar observação"
+                                        >
+                                          <MessageSquareMore size={16} />
+                                          {waypoint.comment.trim() && (
+                                            <>
+                                              <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white animate-ping"></span>
+                                              <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white"></span>
+                                            </>
+                                          )}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleAddPassenger(index)
+                                          }
+                                          className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all flex items-center justify-center shadow-sm border border-blue-100 cursor-pointer"
+                                          title="Adicionar Passageiro"
+                                        >
+                                          <Plus size={18} />
+                                        </button>
+                                        {formData.waypoints.length > 2 &&
+                                          !isOrigin &&
+                                          !isDestination && (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleRemoveWaypoint(index)
+                                              }
+                                              className="p-2 bg-red-50 text-red-400 rounded-lg hover:bg-red-100 transition-all flex items-center justify-center shadow-sm border border-red-100 cursor-pointer"
+                                              title="Remover Parada"
+                                            >
+                                              <X size={18} />
+                                            </button>
+                                          )}
+                                      </div>
+                                    </div>
+                                    {openWaypointComments[index] && (
+                                      <div className="mt-3 ml-12">
+                                        <textarea
+                                          value={waypoint.comment}
+                                          onChange={(e) =>
+                                            handleWaypointCommentChange(
+                                              index,
+                                              e.target.value,
+                                            )
+                                          }
+                                          rows={2}
+                                          placeholder="Ex: aguardar na portaria, desembarque pela lateral..."
+                                          className="waypoint-observation w-full resize-none rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 outline-none transition-all shadow-sm"
+                                        />
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                              );
-                            })}
+
+                                {/* Linhas de Passageiros */}
+                                {waypoint.passengers &&
+                                  waypoint.passengers.length > 0 && (
+                                    <div className="mt-4 border-t border-dashed border-slate-200">
+                                      {waypoint.passengers.map(
+                                        (passenger, passengerIndex) => (
+                                          <div
+                                            key={passenger.id}
+                                            className={`relative flex items-center gap-4 group/pass ${passengerIndex === 0 ? "mt-6" : "mt-5"} ${passengerIndex === waypoint.passengers.length - 1 ? "mb-10" : "mb-5"}`}
+                                          >
+                                            {/* Linha horizontal da trilha - começa na linha vertical */}
+                                            <div
+                                              data-passenger-line
+                                              className="absolute -left-[1.125rem] top-1/2 -translate-y-1/2 w-12 h-0.5 bg-slate-300 z-10"
+                                            />
+
+                                            {/* Trilhas de passageiro (quadrado) - no final da linha */}
+                                            <div
+                                              className={`absolute left-[1.375rem] top-1/2 -translate-y-1/2 w-4 h-4 rounded-sm border-4 border-white shadow-sm ring-2 z-20 ${isOrigin ? "bg-emerald-500 ring-emerald-100" : isDestination ? "bg-blue-600 ring-blue-100" : "bg-slate-400 ring-slate-100"}`}
+                                            />
+
+                                            <div className="flex-1 flex items-center gap-3 ml-8">
+                                              <div className="w-3/5 ml-6">
+                                                <div className="flex items-center gap-3">
+                                                  <div className="flex-1">
+                                                    <GeologSearchableSelect
+                                                      label=""
+                                                      placeholder="Selecione o passageiro..."
+                                                      options={passageiros.map(
+                                                        (p) => ({
+                                                          id: p.id,
+                                                          nome: p.nomeCompleto,
+                                                          sublabel:
+                                                            p.enderecos?.[0]
+                                                              ?.rotulo ||
+                                                            undefined,
+                                                        }),
+                                                      )}
+                                                      value={
+                                                        passenger.solicitanteId ||
+                                                        ""
+                                                      }
+                                                      onChange={(val) =>
+                                                        handlePassengerChange(
+                                                          index,
+                                                          passenger.id,
+                                                          val,
+                                                        )
+                                                      }
+                                                    />
+                                                  </div>
+                                                  <div className="flex items-center justify-center h-[56px]">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() =>
+                                                        openQuickPassengerModal(
+                                                          index,
+                                                          passenger.id,
+                                                        )
+                                                      }
+                                                      className="p-3 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all opacity-0 group-hover/pass:opacity-100 flex items-center justify-center shadow-sm border border-blue-200 cursor-pointer"
+                                                      style={{
+                                                        marginBottom: "-5px",
+                                                      }}
+                                                      title="Cadastrar passageiro"
+                                                    >
+                                                      <PlusCircle size={18} />
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                              <div className="flex items-center justify-center h-[56px]">
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    handleRemovePassenger(
+                                                      index,
+                                                      passenger.id,
+                                                    )
+                                                  }
+                                                  className="p-3 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover/pass:opacity-100 cursor-pointer"
+                                                  style={{
+                                                    marginBottom: "-5px",
+                                                  }}
+                                                  title="Remover Passageiro"
+                                                >
+                                                  <X size={18} />
+                                                </button>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ),
+                                      )}
+                                    </div>
+                                  )}
+                              </div>
+                            </div>
                           </div>
-                        ))}
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
 
+                <div className="flex items-center gap-4 mt-12">
+                  <div className="flex-1 border-t-2 border-dashed border-slate-300" />
+                  <div className="w-2 h-2 rounded-full bg-slate-300" />
+                  <div className="flex-1 border-t-2 border-dashed border-slate-300" />
+                </div>
+
+                {/* 3. RESUMO FINANCEIRO */}
+                <div className="space-y-8 mt-8">
+                  <div className="flex items-center border-b-2 border-slate-100 pb-4">
+                    <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3">
+                      <FileText size={20} className="text-emerald-600" /> Resumo
+                      Financeiro
+                    </h3>
                   </div>
 
-                  <div className="flex items-center gap-4 mt-12">
-                    <div className="flex-1 border-t-2 border-dashed border-slate-300" />
-                    <div className="w-2 h-2 rounded-full bg-slate-300" />
-                    <div className="flex-1 border-t-2 border-dashed border-slate-300" />
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-sm font-bold text-slate-800 uppercase tracking-tight ml-1">
+                        Valor Bruto (R$)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          name="valorBruto"
+                          step="0.01"
+                          value={formData.valorBruto ?? ""}
+                          onChange={handleInputChange}
+                          className="w-full bg-slate-50 border-2 border-slate-200 px-6 h-[58px] rounded-xl font-bold text-lg text-blue-700 outline-none tabular-nums focus:bg-white focus:border-blue-600 transition-all shadow-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <label className="text-sm font-bold text-slate-800 uppercase tracking-tight ml-1">
+                        Custo Motorista (R$)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          name="custo"
+                          step="0.01"
+                          value={formData.custo ?? ""}
+                          onChange={handleInputChange}
+                          className="w-full bg-slate-50 border-2 border-slate-200 px-6 h-[58px] rounded-xl font-bold text-lg text-red-500 outline-none tabular-nums focus:bg-white focus:border-red-300 transition-all shadow-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        Hora Extra
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="time"
+                          name="horaExtra"
+                          value={formData.horaExtra}
+                          disabled
+                          placeholder="Aguardando"
+                          className="w-full lg:max-w-[10rem] px-6 h-[58px] bg-slate-100 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-400 outline-none cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  {/* 3. RESUMO FINANCEIRO */}
-                  <div className="space-y-8 mt-8">
-                     <div className="flex items-center border-b-2 border-slate-100 pb-4">
-                        <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3">
-                          <FileText size={20} className="text-emerald-600" /> Resumo Financeiro
-                        </h3>
-                     </div>
-
-                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
-                        <div className="flex flex-col gap-2">
-                           <label className="text-sm font-bold text-slate-800 uppercase tracking-tight ml-1">Valor Bruto (R$)</label>
-                           <div className="relative">
-                              <input 
-                                type="number" 
-                                name="valorBruto" 
-                                step="0.01" 
-                                value={formData.valorBruto ?? ''} 
-                                onChange={handleInputChange} 
-                                className="w-full bg-slate-50 border-2 border-slate-200 px-6 h-[58px] rounded-xl font-bold text-lg text-blue-700 outline-none tabular-nums focus:bg-white focus:border-blue-600 transition-all shadow-sm" 
-                              />
-                           </div>
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                           <label className="text-sm font-bold text-slate-800 uppercase tracking-tight ml-1">Custo Motorista (R$)</label>
-                           <div className="relative">
-                              <input 
-                                type="number" 
-                                name="custo" 
-                                step="0.01" 
-                                value={formData.custo ?? ''} 
-                                onChange={handleInputChange} 
-                                className="w-full bg-slate-50 border-2 border-slate-200 px-6 h-[58px] rounded-xl font-bold text-lg text-red-500 outline-none tabular-nums focus:bg-white focus:border-red-300 transition-all shadow-sm" 
-                              />
-                           </div>
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                           <label className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Hora Extra</label>
-                           <div className="relative">
-                              <input 
-                                type="time" 
-                                name="horaExtra" 
-                                value={formData.horaExtra} 
-                                disabled
-                                placeholder="Aguardando"
-                                className="w-full lg:max-w-[10rem] px-6 h-[58px] bg-slate-100 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-400 outline-none cursor-not-allowed" 
-                              />
-                           </div>
-                        </div>
-                     </div>
-
-                     <div className={`p-8 md:p-10 rounded-[2.5rem] ${currentLucro >= 0 ? 'bg-emerald-600 shadow-emerald-900/10' : 'bg-red-600 shadow-red-900/10'} text-white shadow-2xl transition-all duration-500`}>
-                        <div className="flex justify-between items-center">
-                           <div className="space-y-1">
-                              <div className="flex items-center gap-2">
-                                 <span className="text-xs font-bold uppercase opacity-80 tracking-[0.2em]">Lucro Líquido Estimado</span>
-                                 <div className="px-3 py-1.5 bg-white/20 rounded-full backdrop-blur-md">
-                                    <span className="text-[12px] font-black">-{impostoPercentual}% taxa</span>
-                                 </div>
-                              </div>
-                              <p className="text-4xl font-black tracking-tighter tabular-nums leading-none">{formatCurrency(currentLucro)}</p>
-                           </div>
-                           <div className="text-right space-y-2">
-                              <span className="text-[10px] font-black uppercase opacity-60 block tracking-widest">Margem de Lucro</span>
-                              <div className="px-5 py-2 bg-white/20 rounded-xl text-2xl font-black tabular-nums backdrop-blur-md">
-                                 {(formData.valorBruto ?? 0) > 0 ? ((currentLucro / (formData.valorBruto ?? 0)) * 100).toFixed(1) : 0}%
-                              </div>
-                           </div>
-                        </div>
-                     </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-bold text-slate-800 uppercase tracking-tight ml-1">
+                      Observações Financeiras
+                    </label>
+                    <textarea
+                      name="obsFinanceiras"
+                      value={formData.obsFinanceiras ?? ""}
+                      onChange={handleInputChange}
+                      rows={3}
+                      placeholder="Adicione observações de cunho financeiro..."
+                      className="w-full bg-slate-50 border-2 border-slate-200 px-6 py-4 rounded-xl font-medium text-base text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition-all shadow-sm resize-none"
+                    />
                   </div>
-               </div>
+
+                  <div
+                    className={`p-8 md:p-10 rounded-[2.5rem] ${currentLucro >= 0 ? "bg-emerald-600 shadow-emerald-900/10" : "bg-red-600 shadow-red-900/10"} text-white shadow-2xl transition-all duration-500`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold uppercase opacity-80 tracking-[0.2em]">
+                            Lucro Líquido Estimado
+                          </span>
+                          <div className="px-3 py-1.5 bg-white/20 rounded-full backdrop-blur-md">
+                            <span className="text-[12px] font-black">
+                              -{impostoPercentual}% taxa
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-4xl font-black tracking-tighter tabular-nums leading-none">
+                          {formatCurrency(currentLucro)}
+                        </p>
+                      </div>
+                      <div className="text-right space-y-2">
+                        <span className="text-[10px] font-black uppercase opacity-60 block tracking-widest">
+                          Margem de Lucro
+                        </span>
+                        <div className="px-5 py-2 bg-white/20 rounded-xl text-2xl font-black tabular-nums backdrop-blur-md">
+                          {(formData.valorBruto ?? 0) > 0
+                            ? (
+                                (currentLucro / (formData.valorBruto ?? 0)) *
+                                100
+                              ).toFixed(1)
+                            : 0}
+                          %
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            </form>
+          </form>
         </StandardModal>
       )}
 
@@ -3704,30 +5122,52 @@ export default function OSOperationalPage() {
           <form onSubmit={handleQuickPassengerSubmit} className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-25 gap-6">
               <div className="space-y-2 md:col-span-12">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Nome completo <span className="text-rose-300 text-base">*</span></label>
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">
+                  Nome completo{" "}
+                  <span className="text-rose-300 text-base">*</span>
+                </label>
                 <input
                   required
                   value={quickPassengerForm.nomeCompleto}
-                  onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, nomeCompleto: e.target.value }))}
-                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                  onChange={(e) =>
+                    setQuickPassengerForm((prev) => ({
+                      ...prev,
+                      nomeCompleto: forceUpperText(e.target.value),
+                    }))
+                  }
+                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm uppercase"
                   placeholder="Ex: Lucas Vieira"
                 />
+                <FormErrorMessage message={quickPassengerErrors.nomeCompleto} />
               </div>
               <div className="space-y-2 md:col-span-6">
                 <div className="flex justify-between items-center">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Celular <RequiredAsterisk /></label>
-                  <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1" style={{ marginTop: '-7px' }}>
+                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">
+                    Celular <RequiredAsterisk />
+                  </label>
+                  <div
+                    className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1"
+                    style={{ marginTop: "-7px" }}
+                  >
                     <input
                       type="checkbox"
                       id="isEstrangeiroQuick"
                       checked={isEstrangeiro}
                       onChange={(e) => {
                         setIsEstrangeiro(e.target.checked);
-                        setQuickPassengerForm(prev => ({ ...prev, celular: '' }));
+                        setQuickPassengerForm((prev) => ({
+                          ...prev,
+                          celular: "",
+                        }));
                       }}
                       className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                     />
-                    <label htmlFor="isEstrangeiroQuick" className="text-xs font-bold text-slate-700 cursor-pointer">Estrangeiro</label>
+                    <label
+                      htmlFor="isEstrangeiroQuick"
+                      className="text-xs font-bold text-slate-700 cursor-pointer"
+                    >
+                      Estrangeiro
+                    </label>
                   </div>
                 </div>
                 <input
@@ -3735,24 +5175,32 @@ export default function OSOperationalPage() {
                   value={quickPassengerForm.celular}
                   onChange={(e) => {
                     const formatted = formatPhone(e.target.value);
-                    setQuickPassengerForm(prev => ({ ...prev, celular: formatted }));
+                    setQuickPassengerForm((prev) => ({
+                      ...prev,
+                      celular: formatted,
+                    }));
                   }}
                   className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                  placeholder={isEstrangeiro ? "+00 123456789" : "(00) 00000-0000"}
+                  placeholder={
+                    isEstrangeiro ? "+00 123456789" : "(00) 00000-0000"
+                  }
                 />
-                {quickPassengerErrors.celular && (
-                  <p className="text-xs font-semibold text-rose-400 ml-1">{quickPassengerErrors.celular}</p>
-                )}
+                <FormErrorMessage message={quickPassengerErrors.celular} />
               </div>
               <div className="space-y-2 md:col-span-5">
                 <GeologSearchableSelect
                   label="Notificar"
                   options={[
-                    { id: 'Sim', nome: 'Sim' },
-                    { id: 'Não', nome: 'Não' }
+                    { id: "Sim", nome: "Sim" },
+                    { id: "Não", nome: "Não" },
                   ]}
                   value={quickPassengerForm.notificar}
-                  onChange={(value) => setQuickPassengerForm(prev => ({ ...prev, notificar: value }))}
+                  onChange={(value) =>
+                    setQuickPassengerForm((prev) => ({
+                      ...prev,
+                      notificar: value,
+                    }))
+                  }
                   required
                   disableSearch
                 />
@@ -3764,65 +5212,116 @@ export default function OSOperationalPage() {
                 type="button"
                 onClick={() => setIsAddressExpanded(!isAddressExpanded)}
                 className="absolute top-4 right-4 p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
-                title={isAddressExpanded ? "Recolher endereço" : "Expandir endereço"}
+                title={
+                  isAddressExpanded ? "Recolher endereço" : "Expandir endereço"
+                }
               >
-                <ChevronDown 
-                  size={20} 
-                  className={`transition-transform duration-200 ${isAddressExpanded ? 'rotate-180' : ''}`}
+                <ChevronDown
+                  size={20}
+                  className={`transition-transform duration-200 ${isAddressExpanded ? "rotate-180" : ""}`}
                 />
               </button>
-              
+
               <div className="flex items-center gap-3 mb-6">
-                <div className={`w-10 h-10 rounded-xl ${quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).bgColor : 'bg-blue-50'} ${quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).textColor : 'text-blue-600'} flex items-center justify-center`}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-map-pin" aria-hidden="true">
+                <div
+                  className={`w-10 h-10 rounded-xl ${quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).bgColor : "bg-blue-50"} ${quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).textColor : "text-blue-600"} flex items-center justify-center`}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="lucide lucide-map-pin"
+                    aria-hidden="true"
+                  >
                     <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path>
                     <circle cx="12" cy="10" r="3"></circle>
                   </svg>
                 </div>
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                    {isAddressExpanded 
-                      ? (quickPassengerTarget ? `${getWaypointInfo(quickPassengerTarget.waypointIndex).type} - Endereço` : "Endereço 1")
-                      : (quickPassengerForm.enderecoCompleto || (quickPassengerTarget ? `Endereço vinculado à ${getWaypointInfo(quickPassengerTarget.waypointIndex).type}` : "Endereço vinculado ao roteiro"))
-                    }
+                    {isAddressExpanded
+                      ? quickPassengerTarget
+                        ? `${getWaypointInfo(quickPassengerTarget.waypointIndex).type} - Endereço`
+                        : "Endereço 1"
+                      : quickPassengerForm.enderecoCompleto ||
+                        (quickPassengerTarget
+                          ? `Endereço vinculado à ${getWaypointInfo(quickPassengerTarget.waypointIndex).type}`
+                          : "Endereço vinculado ao roteiro")}
                   </p>
-                  <p className={`text-base font-black ${quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).textColor : 'text-slate-800'}`}>
-                    {isAddressExpanded 
-                      ? (quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).description : "Ponto de apoio / destino recorrente")
-                      : (quickPassengerForm.enderecoCompleto || (quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).type : "Origem, Parada ou Destino Final"))
-                    }
+                  <p
+                    className={`text-base font-black ${quickPassengerTarget ? getWaypointInfo(quickPassengerTarget.waypointIndex).textColor : "text-slate-800"}`}
+                  >
+                    {isAddressExpanded
+                      ? quickPassengerTarget
+                        ? getWaypointInfo(quickPassengerTarget.waypointIndex)
+                            .description
+                        : "Ponto de apoio / destino recorrente"
+                      : quickPassengerForm.enderecoCompleto ||
+                        (quickPassengerTarget
+                          ? getWaypointInfo(quickPassengerTarget.waypointIndex)
+                              .type
+                          : "Origem, Parada ou Destino Final")}
                   </p>
                 </div>
               </div>
-              
+
               {isAddressExpanded && (
                 <div className="space-y-6 animate-in slide-in-from-top-2 duration-200">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Rótulo <span className="text-rose-300 text-base">*</span></label>
-                      <input 
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">
+                        Rótulo{" "}
+                        <span className="text-rose-300 text-base">*</span>
+                      </label>
+                      <input
                         value={quickPassengerForm.rotulo}
-                        onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, rotulo: e.target.value }))}
-                        placeholder="RESIDENCIAL, BASE, HOTEL..." 
-                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
+                        onChange={(e) =>
+                          setQuickPassengerForm((prev) => ({
+                            ...prev,
+                            rotulo: e.target.value,
+                          }))
+                        }
+                        placeholder="RESIDENCIAL, BASE, HOTEL..."
+                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Referência</label>
-                      <input 
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        Referência
+                      </label>
+                      <input
                         value={quickPassengerForm.referencia}
-                        onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, referencia: e.target.value }))}
-                        placeholder="Portaria azul, torre B, etc" 
-                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm" 
+                        onChange={(e) =>
+                          setQuickPassengerForm((prev) => ({
+                            ...prev,
+                            referencia: e.target.value,
+                          }))
+                        }
+                        placeholder="Portaria azul, torre B, etc"
+                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                       />
                     </div>
                   </div>
                   <div className="space-y-2 mt-6">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">Endereço completo <span className="text-rose-300 text-base">*</span></label>
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-2">
+                      Endereço completo{" "}
+                      <span className="text-rose-300 text-base">*</span>
+                    </label>
                     <input
                       required
                       value={quickPassengerForm.enderecoCompleto}
-                      onChange={(e) => setQuickPassengerForm(prev => ({ ...prev, enderecoCompleto: e.target.value }))}
+                      onChange={(e) =>
+                        setQuickPassengerForm((prev) => ({
+                          ...prev,
+                          enderecoCompleto: e.target.value,
+                        }))
+                      }
                       className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                       placeholder="Rua, número, bairro, cidade - UF"
                     />
@@ -3856,7 +5355,7 @@ export default function OSOperationalPage() {
             setViewingOSId(null);
             void refreshData();
           }}
-          title={`Visão Operacional ${viewingOS.os || 'Sem OS'}`}
+          title={`Visão Operacional ${viewingOS.os || "Sem OS"}`}
           subtitle={`Protocolo ${viewingOS.protocolo}`}
           icon={<Eye size={24} />}
           maxWidthClassName="max-w-6xl min-[1360px]:max-w-[88vw]"
@@ -3870,8 +5369,13 @@ export default function OSOperationalPage() {
                 <div className="flex items-center gap-2 px-3">
                   <Building2 size={14} className="text-slate-400 shrink-0" />
                   <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Cliente</p>
-                    <p className="text-base font-bold text-slate-800 line-clamp-1">{clientes.find(c => c.id === viewingOS.clienteId)?.nome || 'N/A'}</p>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      Cliente
+                    </p>
+                    <p className="text-base font-bold text-slate-800 line-clamp-1">
+                      {clientes.find((c) => c.id === viewingOS.clienteId)
+                        ?.nome || "N/A"}
+                    </p>
                   </div>
                 </div>
                 <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block" />
@@ -3879,8 +5383,12 @@ export default function OSOperationalPage() {
                 <div className="flex items-center gap-2 px-3">
                   <User size={14} className="text-slate-400 shrink-0" />
                   <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Solicitante</p>
-                    <p className="text-base font-bold text-slate-800 line-clamp-1">{viewingOS.solicitante || 'N/A'}</p>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      Solicitante
+                    </p>
+                    <p className="text-base font-bold text-slate-800 line-clamp-1">
+                      {viewingOS.solicitante || "N/A"}
+                    </p>
                   </div>
                 </div>
                 <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block" />
@@ -3888,8 +5396,12 @@ export default function OSOperationalPage() {
                 <div className="flex items-center gap-2 px-3">
                   <Car size={14} className="text-slate-400 shrink-0" />
                   <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Motorista</p>
-                    <p className="text-base font-bold text-slate-800 line-clamp-1">{viewingOS.motorista || 'Não definido'}</p>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      Motorista
+                    </p>
+                    <p className="text-base font-bold text-slate-800 line-clamp-1">
+                      {viewingOS.motorista || "Não definido"}
+                    </p>
                   </div>
                 </div>
                 <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block" />
@@ -3897,9 +5409,15 @@ export default function OSOperationalPage() {
                 <div className="flex items-center gap-2 px-3">
                   <Building size={14} className="text-slate-400 shrink-0" />
                   <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">C. Custo</p>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      C. Custo
+                    </p>
                     <p className="text-base font-bold text-slate-800 line-clamp-1">
-                      {clientes.find(c => c.id === viewingOS.clienteId)?.centrosCusto.find(cc => cc.id === viewingOS.centroCustoId)?.nome || 'Padrão'}
+                      {clientes
+                        .find((c) => c.id === viewingOS.clienteId)
+                        ?.centrosCusto.find(
+                          (cc) => cc.id === viewingOS.centroCustoId,
+                        )?.nome || "Padrão"}
                     </p>
                   </div>
                 </div>
@@ -3908,41 +5426,74 @@ export default function OSOperationalPage() {
               {/* Coluna lateral — Status + Horário em cards */}
               <div className="flex items-stretch gap-3">
                 {/* Card de Status */}
-                <div className={`flex items-center gap-3 px-5 py-3 rounded-2xl border shadow-sm ${
-                  viewingOS.status.operacional === 'Pendente' ? 'bg-yellow-50 border-yellow-200' :
-                  viewingOS.status.operacional === 'Aguardando' ? 'bg-indigo-50 border-indigo-200' :
-                  viewingOS.status.operacional === 'Em Rota' ? 'bg-sky-50 border-sky-200' :
-                  viewingOS.status.operacional === 'Finalizado' ? 'bg-emerald-50 border-emerald-200' :
-                  viewingOS.status.operacional === 'Cancelado' ? 'bg-rose-50 border-rose-200' :
-                  'bg-slate-50 border-slate-200'
-                }`}>
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                    viewingOS.status.operacional === 'Pendente' ? 'bg-yellow-100' :
-                    viewingOS.status.operacional === 'Aguardando' ? 'bg-indigo-100' :
-                    viewingOS.status.operacional === 'Em Rota' ? 'bg-sky-100' :
-                    viewingOS.status.operacional === 'Finalizado' ? 'bg-emerald-100' :
-                    viewingOS.status.operacional === 'Cancelado' ? 'bg-rose-100' :
-                    'bg-slate-100'
-                  }`}>
-                    <CheckCircle2 size={18} className={
-                      viewingOS.status.operacional === 'Pendente' ? 'text-yellow-600' :
-                      viewingOS.status.operacional === 'Aguardando' ? 'text-indigo-600' :
-                      viewingOS.status.operacional === 'Em Rota' ? 'text-sky-600' :
-                      viewingOS.status.operacional === 'Finalizado' ? 'text-emerald-600' :
-                      viewingOS.status.operacional === 'Cancelado' ? 'text-rose-600' :
-                      'text-slate-600'
-                    } />
+                <div
+                  className={`flex items-center gap-3 px-5 py-3 rounded-2xl border shadow-sm ${
+                    effectiveOperationalStatus === "Pendente"
+                      ? "bg-yellow-50 border-yellow-200"
+                      : effectiveOperationalStatus === "Aguardando"
+                        ? "bg-indigo-50 border-indigo-200"
+                        : effectiveOperationalStatus === "Em Rota"
+                          ? "bg-sky-50 border-sky-200"
+                          : effectiveOperationalStatus === "Finalizado"
+                            ? "bg-emerald-50 border-emerald-200"
+                            : effectiveOperationalStatus === "Cancelado"
+                              ? "bg-rose-50 border-rose-200"
+                              : "bg-slate-50 border-slate-200"
+                  }`}
+                >
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                      effectiveOperationalStatus === "Pendente"
+                        ? "bg-yellow-100"
+                        : effectiveOperationalStatus === "Aguardando"
+                          ? "bg-indigo-100"
+                          : effectiveOperationalStatus === "Em Rota"
+                            ? "bg-sky-100"
+                            : effectiveOperationalStatus === "Finalizado"
+                              ? "bg-emerald-100"
+                              : effectiveOperationalStatus === "Cancelado"
+                                ? "bg-rose-100"
+                                : "bg-slate-100"
+                    }`}
+                  >
+                    <CheckCircle2
+                      size={18}
+                      className={
+                        effectiveOperationalStatus === "Pendente"
+                          ? "text-yellow-600"
+                          : effectiveOperationalStatus === "Aguardando"
+                            ? "text-indigo-600"
+                            : effectiveOperationalStatus === "Em Rota"
+                              ? "text-sky-600"
+                              : effectiveOperationalStatus === "Finalizado"
+                                ? "text-emerald-600"
+                                : effectiveOperationalStatus === "Cancelado"
+                                  ? "text-rose-600"
+                                  : "text-slate-600"
+                      }
+                    />
                   </div>
                   <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Status</p>
-                    <p className={`text-base font-black ${
-                      viewingOS.status.operacional === 'Pendente' ? 'text-yellow-700' :
-                      viewingOS.status.operacional === 'Aguardando' ? 'text-indigo-700' :
-                      viewingOS.status.operacional === 'Em Rota' ? 'text-sky-700' :
-                      viewingOS.status.operacional === 'Finalizado' ? 'text-emerald-700' :
-                      viewingOS.status.operacional === 'Cancelado' ? 'text-rose-700' :
-                      'text-slate-700'
-                    }`}>{getStatusConfig(viewingOS.status.operacional).label}</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      Status
+                    </p>
+                    <p
+                      className={`text-base font-black ${
+                        effectiveOperationalStatus === "Pendente"
+                          ? "text-yellow-700"
+                          : effectiveOperationalStatus === "Aguardando"
+                            ? "text-indigo-700"
+                            : effectiveOperationalStatus === "Em Rota"
+                              ? "text-sky-700"
+                              : effectiveOperationalStatus === "Finalizado"
+                                ? "text-emerald-700"
+                                : effectiveOperationalStatus === "Cancelado"
+                                  ? "text-rose-700"
+                                  : "text-slate-700"
+                      }`}
+                    >
+                      {getStatusConfig(effectiveOperationalStatus).label}
+                    </p>
                   </div>
                 </div>
 
@@ -3952,21 +5503,27 @@ export default function OSOperationalPage() {
                     <Clock size={18} className="text-blue-600" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Horário</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      Horário
+                    </p>
                     <p className="text-base font-black text-slate-800">
                       {(() => {
-                        const itineraries = getItineraries((viewingOS.rota?.waypoints || []) as FormWaypoint[]);
-                        const firstItinerary = itineraries.find(it => it.index === 0);
+                        const itineraries = getItineraries(
+                          (viewingOS.rota?.waypoints || []) as FormWaypoint[],
+                        );
+                        const firstItinerary = itineraries.find(
+                          (it) => it.index === 0,
+                        );
                         const firstWaypoint = firstItinerary?.waypoints[0];
                         const data = firstWaypoint?.data;
                         const hora = firstWaypoint?.hora;
                         if (data && hora) {
-                          return `${data.split('-').reverse().join('/')} - ${hora.slice(0, 5)}`;
+                          return `${data.split("-").reverse().join("/")} - ${hora.slice(0, 5)}`;
                         }
                         if (hora) {
                           return hora.slice(0, 5);
                         }
-                        return '--:--';
+                        return "--:--";
                       })()}
                     </p>
                   </div>
@@ -3979,8 +5536,12 @@ export default function OSOperationalPage() {
               <div className="rounded-[2rem] border border-slate-200 bg-white p-8 space-y-8 shadow-sm">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-6">
                   <div>
-                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-[0.1em]">Status da Operação</h3>
-                    <p className="text-sm font-semibold text-slate-400 mt-1">Acompanhamento em tempo real da jornada do motorista.</p>
+                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-[0.1em]">
+                      Status da Operação
+                    </h3>
+                    <p className="text-sm font-semibold text-slate-400 mt-1">
+                      Acompanhamento em tempo real da jornada do motorista.
+                    </p>
                   </div>
                   <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-blue-50 text-blue-700 text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">
                     <div className="w-2 h-2 rounded-full bg-blue-600"></div>
@@ -3988,212 +5549,379 @@ export default function OSOperationalPage() {
                   </div>
                 </div>
 
-                <div className="relative flex justify-between items-start px-4">
-                  {/* Linha de fundo da trilha */}
-                  <div className="absolute top-[26px] left-[60px] right-[60px] h-[3px] bg-slate-100 rounded-full -z-0">
-                    <div 
-                      className="h-full rounded-full transition-all duration-700 ease-out shadow-[0_0_10px_rgba(81,222,255,0.3)]"
-                      style={{ 
-                        width: driverFlow.finished ? '100%' : driverFlow.started ? '66%' : driverFlow.accepted ? '33%' : driverFlow.received ? '0%' : '0%',
-                        background: 'linear-gradient(to right, rgb(81, 222, 255), rgb(26, 238, 172), #2563eb, #10b981)'
-                      }}
-                    ></div>
-                  </div>
+                <div className="space-y-6">
+                  {cyclesToRender.map((cycle) => {
+                    const progressWidth =
+                      cycle.state === "completed"
+                        ? "100%"
+                        : cycle.state === "awaiting_finish" ||
+                            cycle.state === "awaiting_km_finish"
+                          ? "66%"
+                          : cycle.state === "awaiting_start"
+                            ? "33%"
+                            : "0%";
 
-                  {/* Steps */}
-                  {[
-                    {
-                      id: 'received',
-                      icon: <MessageCircle size={20} />,
-                      label: 'Mensagem',
-                      sublabel: 'Enviada',
-                      active: driverFlow.received,
-                      color: 'blue-light',
-                      timestamp: viewingOS?.driverMessageSentAt,
-                      km: undefined as number | undefined,
-                    },
-                    {
-                      id: 'accepted',
-                      icon: <Handshake size={20} />,
-                      label: 'Aceite',
-                      sublabel: driverFlow.accepted ? 'Confirmado' : 'Aguardando',
-                      active: driverFlow.accepted,
-                      color: 'emerald-light',
-                      timestamp: viewingOS?.driverAcceptedAt,
-                      km: undefined as number | undefined,
-                    },
-                    {
-                      id: 'started',
-                      icon: <Navigation size={20} />,
-                      label: 'Em Rota',
-                      sublabel: driverFlow.started ? 'Iniciado' : 'Pendente',
-                      active: driverFlow.started,
-                      color: 'blue',
-                      timestamp: viewingOS?.routeStartedAt,
-                      km: viewingOS?.routeStartedKm,
-                    },
-                    {
-                      id: 'finished',
-                      icon: <FileText size={20} />,
-                      label: 'Concluído',
-                      sublabel: driverFlow.finished ? 'Finalizado' : 'Em aberto',
-                      active: driverFlow.finished,
-                      color: 'emerald',
-                      timestamp: viewingOS?.routeFinishedAt,
-                      km: viewingOS?.routeFinishedKm,
-                    },
-                  ].map((step) => (
-                    <div key={step.id} className="relative z-10 flex flex-col items-center">
-                      {step.id === 'received' && viewingOS ? (
-                        <div className="relative">
-                          <button
-                            type="button"
-                            data-driver-notify-button
-                            className="flex flex-col items-center group cursor-pointer"
-                            onClick={(e) => {
-                              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                              setDriverNotifyMenuPos({ x: rect.left + rect.width / 2, y: rect.bottom });
-                              setOpenDriverNotifyMenu(!openDriverNotifyMenu);
-                            }}
-                            disabled={notifyLoadingKey === 'driver-whatsapp'}
-                          >
+                    const cycleSteps = [
+                      {
+                        id: "received",
+                        icon: <MessageCircle size={20} />,
+                        label: "Mensagem",
+                        sublabel: cycle.messageSentAt
+                          ? "Enviada"
+                          : "Aguardando",
+                        active: Boolean(
+                          cycle.messageSentAt ||
+                          cycle.acceptedAt ||
+                          cycle.startedAt ||
+                          cycle.finishedAt ||
+                          cycle.state !== "pending",
+                        ),
+                        timestamp: cycle.messageSentAt,
+                        km: undefined as number | undefined,
+                      },
+                      {
+                        id: "accepted",
+                        icon: <Handshake size={20} />,
+                        label: "Aceite",
+                        sublabel: cycle.acceptedAt
+                          ? "Confirmado"
+                          : "Aguardando",
+                        active: Boolean(
+                          cycle.acceptedAt ||
+                          cycle.startedAt ||
+                          cycle.finishedAt ||
+                          cycle.state === "awaiting_start" ||
+                          cycle.state === "awaiting_finish" ||
+                          cycle.state === "awaiting_km_finish" ||
+                          cycle.state === "completed",
+                        ),
+                        timestamp: cycle.acceptedAt,
+                        km: undefined as number | undefined,
+                      },
+                      {
+                        id: "started",
+                        icon: <Navigation size={20} />,
+                        label: "Em Rota",
+                        sublabel: cycle.startedAt ? "Iniciado" : "Pendente",
+                        active: Boolean(
+                          cycle.startedAt ||
+                          cycle.finishedAt ||
+                          cycle.state === "awaiting_finish" ||
+                          cycle.state === "awaiting_km_finish" ||
+                          cycle.state === "completed",
+                        ),
+                        timestamp: cycle.startedAt,
+                        km: cycle.kmInitial,
+                      },
+                      {
+                        id: "finished",
+                        icon: <FileText size={20} />,
+                        label: "Concluído",
+                        sublabel: cycle.finishedAt ? "Finalizado" : "Em aberto",
+                        active: Boolean(
+                          cycle.finishedAt || cycle.state === "completed",
+                        ),
+                        timestamp: cycle.finishedAt,
+                        km: cycle.kmFinal,
+                      },
+                    ];
+
+                    const cycleStatus = getCycleDisplayStatus(
+                      cycle.state as OperationalCycleState,
+                    );
+
+                    return (
+                      <div
+                        key={`${cycle.sequenceOrder}-${cycle.itineraryIndex}`}
+                        className="rounded-[1.75rem] border border-slate-200 bg-slate-50/70 p-6 space-y-6 shadow-sm"
+                      >
+                        <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">
+                              Ciclo Operacional {cycle.sequenceOrder + 1}
+                            </p>
+                            <h4 className="text-lg font-black text-slate-900 uppercase tracking-[0.1em]">
+                              {getOperationalCycleBannerTitle(cycle)}
+                            </h4>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
                             <div
-                              className={`
-                                w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-lg
-                                ${!step.active ? 'bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300' : 'text-white'}
-                                group-hover:scale-110 group-active:scale-95
-                                ${notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? 'animate-pulse' : ''}
-                              `}
-                              style={step.active ? {
-                                backgroundColor: 'rgb(81, 222, 255)',
-                                boxShadow: '0 10px 15px -3px rgba(81, 222, 255, 0.4)'
-                              } : {}}
+                              className={`px-3 py-2 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] border ${cycle.kind === "return" ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}
                             >
-                              {notifyLoadingKey === 'driver-whatsapp' && step.id === 'received' ? (
-                                <Loader2 size={24} className="animate-spin" />
-                              ) : step.icon}
+                              {cycle.kind === "return"
+                                ? "Retorno"
+                                : "Itinerário"}
                             </div>
-                            <div className="mt-4 text-center space-y-1">
-                              <p className={`text-[11px] font-black uppercase tracking-[0.15em] transition-colors ${step.active ? 'text-slate-900' : 'text-slate-400'}`}>
-                                {step.label}
-                              </p>
-                              <p className={`text-[10px] font-bold transition-colors ${step.active ? 'text-slate-500' : 'text-slate-300'}`}>
-                                {step.sublabel}
-                              </p>
-                              {step.timestamp && (
-                                <p className="text-[13px] font-medium text-slate-400">
-                                  {new Date(step.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                </p>
-                              )}
-                            </div>
-                            {step.active && (
-                              <div
-                                className="absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center"
-                                style={{ backgroundColor: 'rgb(81, 222, 255)' }}
-                              >
-                                <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></div>
-                              </div>
-                            )}
-                          </button>
-                          {openDriverNotifyMenu && driverNotifyMenuPos && (
                             <div
-                              data-driver-notify-menu
-                              style={{
-                                position: 'fixed',
-                                left: driverNotifyMenuPos.x,
-                                top: driverNotifyMenuPos.y + 8,
-                                transform: 'translateX(-50%)',
-                              }}
-                              className="z-[9999] min-w-[240px] bg-white rounded-2xl border border-slate-200 shadow-xl p-2 space-y-1"
+                              className={`px-3 py-2 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] border ${
+                                cycleStatus === "Pendente"
+                                  ? "bg-yellow-50 text-yellow-700 border-yellow-200"
+                                  : cycleStatus === "Aguardando"
+                                    ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                    : cycleStatus === "Em Rota"
+                                      ? "bg-sky-50 text-sky-700 border-sky-200"
+                                      : cycleStatus === "Finalizado"
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                        : "bg-rose-50 text-rose-700 border-rose-200"
+                              }`}
                             >
-                              <p className="px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                                <MessageCircle size={12} />
-                                Enviar WhatsApp
-                              </p>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (wppStatus !== 'open') {
-                                    toast.error("O WhatsApp da Geolog está offline. Verifique a conexão.");
-                                    setOpenDriverNotifyMenu(false);
-                                    return;
-                                  }
-                                  sendWhatsAppNotification(viewingOS);
-                                  setOpenDriverNotifyMenu(false);
-                                }}
-                                disabled={!!notifyLoadingKey}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
-                              >
-                                <Link size={14} />
-                                {notifyLoadingKey === 'driver-whatsapp' ? 'Enviando...' : 'Enviar link de aceite'}
-                              </button>
+                              {cycleStatus}
                             </div>
-                          )}
+                          </div>
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="flex flex-col items-center group cursor-pointer"
-                          onClick={() => {
-                            toast.info(`Etapa: ${step.label} - ${step.sublabel}`);
-                          }}
-                        >
-                          <div
-                            className={`
+
+                        <div className="relative flex justify-between items-start px-4">
+                          <div className="absolute top-[26px] left-[60px] right-[60px] h-[3px] bg-slate-100 rounded-full -z-0">
+                            <div
+                              className="h-full rounded-full transition-all duration-700 ease-out shadow-[0_0_10px_rgba(81,222,255,0.3)]"
+                              style={{
+                                width: progressWidth,
+                                background:
+                                  "linear-gradient(to right, rgb(81, 222, 255), rgb(26, 238, 172), #2563eb, #10b981)",
+                              }}
+                            ></div>
+                          </div>
+
+                          {cycleSteps.map((step) => (
+                            <div
+                              key={step.id}
+                              className="relative z-10 flex flex-col items-center"
+                            >
+                              {step.id === "received" ? (
+                                <div className="relative">
+                                  <button
+                                    type="button"
+                                    data-driver-notify-button
+                                    className="flex flex-col items-center group cursor-pointer"
+                                    onClick={(e) => {
+                                      const rect = (
+                                        e.currentTarget as HTMLElement
+                                      ).getBoundingClientRect();
+                                      setDriverNotifyMenuPos({
+                                        x: rect.left + rect.width / 2,
+                                        y: rect.bottom,
+                                      });
+                                      setDriverNotifyTargetCycleIndex(
+                                        cycle.itineraryIndex,
+                                      );
+                                      setOpenDriverNotifyMenu(true);
+                                    }}
+                                    disabled={
+                                      notifyLoadingKey === "driver-whatsapp"
+                                    }
+                                  >
+                                    <div
+                                      className={`
+                                w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-lg
+                                ${!step.active ? "bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300" : "text-white"}
+                                group-hover:scale-110 group-active:scale-95
+                                ${notifyLoadingKey === "driver-whatsapp" && step.id === "received" && driverNotifyTargetCycleIndex === cycle.itineraryIndex ? "animate-pulse" : ""}
+                              `}
+                                      style={
+                                        step.active
+                                          ? {
+                                              backgroundColor:
+                                                "rgb(81, 222, 255)",
+                                              boxShadow:
+                                                "0 10px 15px -3px rgba(81, 222, 255, 0.4)",
+                                            }
+                                          : {}
+                                      }
+                                    >
+                                      {notifyLoadingKey === "driver-whatsapp" &&
+                                      step.id === "received" &&
+                                      driverNotifyTargetCycleIndex ===
+                                        cycle.itineraryIndex ? (
+                                        <Loader2
+                                          size={24}
+                                          className="animate-spin"
+                                        />
+                                      ) : (
+                                        step.icon
+                                      )}
+                                    </div>
+                                    <div className="mt-4 text-center space-y-1">
+                                      <p
+                                        className={`text-[11px] font-black uppercase tracking-[0.15em] transition-colors ${step.active ? "text-slate-900" : "text-slate-400"}`}
+                                      >
+                                        {step.label}
+                                      </p>
+                                      <p
+                                        className={`text-[10px] font-bold transition-colors ${step.active ? "text-slate-500" : "text-slate-300"}`}
+                                      >
+                                        {step.sublabel}
+                                      </p>
+                                      {step.timestamp && (
+                                        <p className="text-[13px] font-medium text-slate-400">
+                                          {new Date(
+                                            step.timestamp,
+                                          ).toLocaleString("pt-BR", {
+                                            day: "2-digit",
+                                            month: "2-digit",
+                                            hour: "2-digit",
+                                            minute: "2-digit",
+                                          })}
+                                        </p>
+                                      )}
+                                    </div>
+                                    {step.active && (
+                                      <div
+                                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center"
+                                        style={{
+                                          backgroundColor: "rgb(81, 222, 255)",
+                                        }}
+                                      >
+                                        <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></div>
+                                      </div>
+                                    )}
+                                  </button>
+                                  {openDriverNotifyMenu &&
+                                    driverNotifyMenuPos &&
+                                    driverNotifyTargetCycleIndex ===
+                                      cycle.itineraryIndex && (
+                                      <div
+                                        data-driver-notify-menu
+                                        style={{
+                                          position: "fixed",
+                                          left: driverNotifyMenuPos.x,
+                                          top: driverNotifyMenuPos.y + 8,
+                                          transform: "translateX(-50%)",
+                                        }}
+                                        className="z-[9999] min-w-[240px] bg-white rounded-2xl border border-slate-200 shadow-xl p-2 space-y-1"
+                                      >
+                                        <p className="px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                                          <MessageCircle size={12} />
+                                          Enviar WhatsApp
+                                        </p>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            sendWhatsAppNotification(
+                                              viewingOS,
+                                              cycle.itineraryIndex,
+                                            );
+                                            setOpenDriverNotifyMenu(false);
+                                            setDriverNotifyMenuPos(null);
+                                            setDriverNotifyTargetCycleIndex(
+                                              null,
+                                            );
+                                          }}
+                                          disabled={!!notifyLoadingKey}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                                        >
+                                          <Link size={14} />
+                                          {notifyLoadingKey ===
+                                          "driver-whatsapp"
+                                            ? "Enviando..."
+                                            : "Enviar link de aceite"}
+                                        </button>
+                                      </div>
+                                    )}
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="flex flex-col items-center group cursor-pointer"
+                                  onClick={(e) => {
+                                    // Check if the step is "finished" to show finish confirmation modal
+                                    if (step.id === "finished") {
+                                      setSelectedCycleIndex(
+                                        cycle.itineraryIndex,
+                                      );
+                                      setShowFinishConfirm(true);
+                                    } else if (step.id === "accepted") {
+                                      setSelectedCycleIndex(
+                                        cycle.itineraryIndex,
+                                      );
+                                      setShowAcceptRevert(true);
+                                    } else if (step.id === "started") {
+                                      const rect =
+                                        e.currentTarget.getBoundingClientRect();
+                                      setRouteMenuPosition({
+                                        x: rect.left + rect.width / 2,
+                                        y: rect.bottom + 8,
+                                      });
+                                      setSelectedCycleIndex(
+                                        cycle.itineraryIndex,
+                                      );
+                                      setShowRouteMenu(true);
+                                    }
+                                  }}
+                                >
+                                  <div
+                                    className={`
                               w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-lg
-                              ${!step.active ? 'bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300' : 'text-white'}
+                              ${!step.active ? "bg-white border-2 border-slate-200 text-slate-400 group-hover:border-slate-300" : "text-white"}
                               group-hover:scale-110 group-active:scale-95
                             `}
-                            style={step.active ? {
-                              backgroundColor: step.color === 'blue-light' ? 'rgb(81, 222, 255)'
-                                : step.color === 'emerald-light' ? 'rgb(26, 238, 172)'
-                                : step.color === 'blue' ? '#2563eb'
-                                : '#10b981',
-                              boxShadow: `0 10px 15px -3px ${
-                                step.color === 'blue-light' ? 'rgba(81, 222, 255, 0.4)'
-                                : step.color === 'emerald-light' ? 'rgba(26, 238, 172, 0.4)'
-                                : step.color === 'blue' ? 'rgba(37, 99, 235, 0.4)'
-                                : 'rgba(16, 185, 129, 0.4)'
-                              }`
-                            } : {}}
-                          >
-                            {step.icon}
-                          </div>
-                          <div className="mt-4 text-center space-y-1">
-                            <p className={`text-[11px] font-black uppercase tracking-[0.15em] transition-colors ${step.active ? 'text-slate-900' : 'text-slate-400'}`}>
-                              {step.label}
-                            </p>
-                            <p className={`text-[10px] font-bold transition-colors ${step.active ? 'text-slate-500' : 'text-slate-300'}`}>
-                              {step.sublabel}
-                            </p>
-                            {step.timestamp && (
-                              <p className="text-[13px] font-medium text-slate-400">
-                                {new Date(step.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                              </p>
-                            )}
-                            {typeof step.km === 'number' && (
-                              <p className="text-[13px] font-black text-slate-600">
-                                KM: {step.km.toLocaleString('pt-BR')}
-                              </p>
-                            )}
-                          </div>
-                          {step.active && (
-                            <div
-                              className="absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center"
-                              style={{
-                                backgroundColor: step.color === 'blue-light' ? 'rgb(81, 222, 255)'
-                                  : step.color === 'emerald-light' ? 'rgb(26, 238, 172)'
-                                  : step.color === 'blue' ? '#2563eb'
-                                  : '#10b981'
-                              }}
-                            >
-                              <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></div>
+                                    style={
+                                      step.active
+                                        ? {
+                                            backgroundColor:
+                                              step.id === "accepted"
+                                                ? "rgb(26, 238, 172)"
+                                                : step.id === "started"
+                                                  ? "#2563eb"
+                                                  : "#10b981",
+                                            boxShadow: `0 10px 15px -3px ${step.id === "accepted" ? "rgba(26, 238, 172, 0.4)" : step.id === "started" ? "rgba(37, 99, 235, 0.4)" : "rgba(16, 185, 129, 0.4)"}`,
+                                          }
+                                        : {}
+                                    }
+                                  >
+                                    {step.icon}
+                                  </div>
+                                  <div className="mt-4 text-center space-y-1">
+                                    <p
+                                      className={`text-[11px] font-black uppercase tracking-[0.15em] transition-colors ${step.active ? "text-slate-900" : "text-slate-400"}`}
+                                    >
+                                      {step.label}
+                                    </p>
+                                    <p
+                                      className={`text-[10px] font-bold transition-colors ${step.active ? "text-slate-500" : "text-slate-300"}`}
+                                    >
+                                      {step.sublabel}
+                                    </p>
+                                    {step.timestamp && (
+                                      <p className="text-[13px] font-medium text-slate-400">
+                                        {new Date(
+                                          step.timestamp,
+                                        ).toLocaleString("pt-BR", {
+                                          day: "2-digit",
+                                          month: "2-digit",
+                                          hour: "2-digit",
+                                          minute: "2-digit",
+                                        })}
+                                      </p>
+                                    )}
+                                    {typeof step.km === "number" && (
+                                      <p className="text-[13px] font-black text-slate-600">
+                                        KM: {step.km.toLocaleString("pt-BR")}
+                                      </p>
+                                    )}
+                                  </div>
+                                  {step.active && (
+                                    <div
+                                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center"
+                                      style={{
+                                        backgroundColor:
+                                          step.id === "accepted"
+                                            ? "rgb(26, 238, 172)"
+                                            : step.id === "started"
+                                              ? "#2563eb"
+                                              : "#10b981",
+                                      }}
+                                    >
+                                      <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping"></div>
+                                    </div>
+                                  )}
+                                </button>
+                              )}
                             </div>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -4205,28 +5933,46 @@ export default function OSOperationalPage() {
                     <div className="flex items-center gap-3">
                       <MapPin className="text-blue-600" size={22} />
                       <div>
-                        <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.08em]">Trajeto do Atendimento</h3>
-                        <p className="text-sm font-semibold text-slate-400 mt-1">Pontos de parada e rota definida para esta OS.</p>
+                        <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.08em]">
+                          Trajeto do Atendimento
+                        </h3>
+                        <p className="text-sm font-semibold text-slate-400 mt-1">
+                          Pontos de parada e rota definida para esta OS.
+                        </p>
                       </div>
                     </div>
                   </div>
 
                   <div className="relative pl-8 space-y-8">
                     {(() => {
-                      const viewingItineraries = getItineraries((viewingOS.rota?.waypoints || []) as FormWaypoint[]);
+                      const viewingItineraries = getItineraries(
+                        (viewingOS.rota?.waypoints || []) as FormWaypoint[],
+                      );
                       return viewingItineraries.map((it) => (
                         <div key={it.index} className="space-y-6">
                           {viewingItineraries.length > 1 && (
                             <h4 className="flex items-center gap-2 mb-6">
                               {it.index < 0 ? (
-                                <ArrowLeft size={18} className="text-purple-500" />
+                                <ArrowLeft
+                                  size={18}
+                                  className="text-purple-500"
+                                />
                               ) : (
-                                <ArrowRight size={18} className="text-amber-500" />
+                                <ArrowRight
+                                  size={18}
+                                  className="text-amber-500"
+                                />
                               )}
-                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-xl text-sm font-black shadow-sm ${it.index < 0 ? 'bg-purple-100 text-purple-700 ring-2 ring-purple-200' : 'bg-amber-100 text-amber-700 ring-2 ring-amber-200'}`}>
-                                {it.index < 0 ? Math.abs(it.index) : (it.index + 1)}
+                              <span
+                                className={`inline-flex items-center justify-center w-8 h-8 rounded-xl text-sm font-black shadow-sm ${it.index < 0 ? "bg-purple-100 text-purple-700 ring-2 ring-purple-200" : "bg-amber-100 text-amber-700 ring-2 ring-amber-200"}`}
+                              >
+                                {it.index < 0
+                                  ? Math.abs(it.index)
+                                  : it.index + 1}
                               </span>
-                              <span className={`text-[13px] font-black uppercase tracking-[0.15em] ${it.index < 0 ? 'text-purple-700' : 'text-amber-700'}`}>
+                              <span
+                                className={`text-[13px] font-black uppercase tracking-[0.15em] ${it.index < 0 ? "text-purple-700" : "text-amber-700"}`}
+                              >
                                 {getItineraryTitle(it.index)}
                               </span>
                             </h4>
@@ -4237,23 +5983,35 @@ export default function OSOperationalPage() {
 
                             {it.waypoints.map((waypoint, relIdx) => {
                               const isOrigin = relIdx === 0;
-                              const isDestination = relIdx === it.waypoints.length - 1;
+                              const isDestination =
+                                relIdx === it.waypoints.length - 1;
                               const globalIdx = it.waypointIndices[relIdx];
-                              
+
                               return (
-                                <div key={globalIdx} className="relative flex items-center gap-6 group">
-                                  <div className={`
+                                <div
+                                  key={globalIdx}
+                                  className="relative flex items-center gap-6 group"
+                                >
+                                  <div
+                                    className={`
                                     relative z-10 w-6 h-6 rounded-full border-4 border-white shadow-md transition-all duration-300
-                                    ${isOrigin ? 'bg-emerald-500 scale-125' : isDestination ? 'bg-blue-600 scale-125' : 'bg-slate-300'}
+                                    ${isOrigin ? "bg-emerald-500 scale-125" : isDestination ? "bg-blue-600 scale-125" : "bg-slate-300"}
                                     group-hover:scale-150
-                                  `}></div>
-                                  <div className={`
+                                  `}
+                                  ></div>
+                                  <div
+                                    className={`
                                     flex-1 p-4 rounded-2xl border transition-all duration-300
-                                    ${isOrigin ? 'bg-emerald-50 border-emerald-100' : isDestination ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-100'}
+                                    ${isOrigin ? "bg-emerald-50 border-emerald-100" : isDestination ? "bg-blue-50 border-blue-100" : "bg-slate-50 border-slate-100"}
                                     group-hover:shadow-md group-hover:bg-white
-                                  `}>
+                                  `}
+                                  >
                                     <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                                      {isOrigin ? 'Origem' : isDestination ? 'Destino Final' : `${relIdx}ª Parada`}
+                                      {isOrigin
+                                        ? "Origem"
+                                        : isDestination
+                                          ? "Destino Final"
+                                          : `${relIdx}ª Parada`}
                                     </p>
                                     <p className="text-base font-black text-slate-800 uppercase tracking-tight">
                                       {waypoint.label}
@@ -4265,15 +6023,23 @@ export default function OSOperationalPage() {
                                     )}
                                     {(waypoint.passengers || []).length > 0 && (
                                       <div className="mt-3 flex flex-wrap gap-2">
-                                        {(waypoint.passengers || []).map((p, pi) => {
-                                          const pRec = passageiros.find(x => x.id === p.solicitanteId);
-                                          return (
-                                            <span key={pi} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-100 text-sm font-bold text-blue-700">
-                                              <User size={12} />
-                                              {pRec?.nomeCompleto || 'Passageiro'}
-                                            </span>
-                                          );
-                                        })}
+                                        {(waypoint.passengers || []).map(
+                                          (p, pi) => {
+                                            const pRec = passageiros.find(
+                                              (x) => x.id === p.solicitanteId,
+                                            );
+                                            return (
+                                              <span
+                                                key={pi}
+                                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-100 text-sm font-bold text-blue-700"
+                                              >
+                                                <User size={12} />
+                                                {pRec?.nomeCompleto ||
+                                                  "Passageiro"}
+                                              </span>
+                                            );
+                                          },
+                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -4287,14 +6053,163 @@ export default function OSOperationalPage() {
                   </div>
                 </div>
 
+                {/* Logs de Atendimento */}
+                <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm space-y-6 flex flex-col">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                    <div className="flex items-center gap-3">
+                      <History className="text-blue-600" size={22} />
+                      <div>
+                        <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.08em]">
+                          Logs de Atendimento
+                        </h3>
+                        <p className="text-sm font-semibold text-slate-400 mt-1">
+                          Histórico completo de ações e mudanças nesta OS.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-black uppercase tracking-[0.18em] text-slate-600">
+                      {osLogs.length > 0 ? osLogs.length : viewingOS ? 1 : 0}{" "}
+                      registro(s)
+                    </div>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto max-h-[500px] space-y-4 pr-2">
+                    {osLogs.length === 0 && viewingOS && (
+                      <div className="flex items-start gap-3 p-3 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-white transition-colors">
+                        <div className="mt-0.5 w-2.5 h-2.5 rounded-full shrink-0 bg-emerald-500" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider border bg-emerald-50 text-emerald-700 border-emerald-200">
+                              Criação
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-400 shrink-0">
+                              {viewingOS.createdAt
+                                ? new Date(viewingOS.createdAt).toLocaleString(
+                                    "pt-BR",
+                                    {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    },
+                                  )
+                                : viewingOS.data || "Não informada"}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm font-semibold text-slate-700 leading-snug">
+                            <span>
+                              <span className="text-slate-400 font-bold">
+                                Autor:
+                              </span>{" "}
+                              {viewingOS.createdByName || "Não registrado"}
+                            </span>
+                            <span>
+                              <span className="text-slate-400 font-bold">
+                                Protocolo:
+                              </span>{" "}
+                              {viewingOS.protocolo || "Não informado"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {osLogs.map((log) => {
+                      const date = new Date(log.created_at);
+                      const timeStr = date.toLocaleString("pt-BR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      });
+                      const typeColors: Record<string, string> = {
+                        create:
+                          "bg-emerald-50 text-emerald-700 border-emerald-200",
+                        update: "bg-blue-50 text-blue-700 border-blue-200",
+                        status_change:
+                          "bg-amber-50 text-amber-700 border-amber-200",
+                        archive: "bg-slate-50 text-slate-700 border-slate-200",
+                        driver_accept:
+                          "bg-indigo-50 text-indigo-700 border-indigo-200",
+                        driver_start: "bg-sky-50 text-sky-700 border-sky-200",
+                        driver_finish:
+                          "bg-emerald-50 text-emerald-700 border-emerald-200",
+                        passenger_notify:
+                          "bg-purple-50 text-purple-700 border-purple-200",
+                        passenger_confirm:
+                          "bg-green-50 text-green-700 border-green-200",
+                        comment: "bg-slate-50 text-slate-700 border-slate-200",
+                      };
+                      const typeLabels: Record<string, string> = {
+                        create: "Criação",
+                        update: "Atualização",
+                        status_change: "Status",
+                        archive: "Arquivamento",
+                        driver_accept: "Aceite Motorista",
+                        driver_start: "Início Rota",
+                        driver_finish: "Finalização Rota",
+                        passenger_notify: "Notificação Passageiro",
+                        passenger_confirm: "Confirmação Passageiro",
+                        comment: "Comentário",
+                      };
+                      return (
+                        <div
+                          key={log.id}
+                          className="flex items-start gap-3 p-3 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-white transition-colors"
+                        >
+                          <div
+                            className={`mt-0.5 w-2.5 h-2.5 rounded-full shrink-0 ${typeColors[log.type]?.split(" ")[0] || "bg-slate-100"}`}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider border ${typeColors[log.type] || "bg-slate-50 text-slate-700 border-slate-200"}`}
+                              >
+                                {typeLabels[log.type] || log.type}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-bold text-slate-400 shrink-0">
+                                  {timeStr}
+                                </span>
+                                <span className="text-[11px] font-medium text-slate-400">
+                                  por{" "}
+                                  <span className="font-bold">
+                                    {(() => {
+                                      const parts =
+                                        log.actor_name
+                                          ?.split(" ")
+                                          .filter(Boolean) || [];
+                                      if (parts.length <= 2)
+                                        return log.actor_name;
+                                      return `${parts[0]} ${parts[parts.length - 1]}`;
+                                    })()}
+                                  </span>
+                                </span>
+                              </div>
+                            </div>
+                            <p className="text-sm font-semibold text-slate-700 leading-snug">
+                              {log.description}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
 
             <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm space-y-5">
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div>
-                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.08em]">Passageiros monitorados</h3>
-                  <p className="text-sm font-semibold text-slate-400">Sempre que houver passageiro vinculado na rota, ele aparece aqui com visão de contato e engajamento do fluxo.</p>
+                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-[0.08em]">
+                    Passageiros monitorados
+                  </h3>
+                  <p className="text-sm font-semibold text-slate-400">
+                    Sempre que houver passageiro vinculado na rota, ele aparece
+                    aqui com visão de contato e engajamento do fluxo.
+                  </p>
                 </div>
                 <div className="px-4 py-2 rounded-2xl bg-slate-50 border border-slate-200 text-xs font-black uppercase tracking-[0.18em] text-slate-600">
                   {operationalPassengerList.length} passageiro(s)
@@ -4307,10 +6222,18 @@ export default function OSOperationalPage() {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-slate-50/80 border-b border-slate-200">
-                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[25%]">Passageiro</th>
-                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[20%]">Contato</th>
-                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[40%]">Endereço</th>
-                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[15%]">Status</th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[25%]">
+                            Passageiro
+                          </th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[20%]">
+                            Contato
+                          </th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[40%]">
+                            Endereço
+                          </th>
+                          <th className="px-6 py-4 text-left text-[12px] font-black uppercase tracking-widest text-slate-600 w-[15%]">
+                            Status
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 bg-white">
@@ -4325,38 +6248,63 @@ export default function OSOperationalPage() {
                                   <User size={18} className="text-blue-600" />
                                 </div>
                                 <div>
-                                  <p className="text-sm font-bold text-slate-800">{passenger.nome}</p>
-                                  <p className="text-xs font-semibold text-slate-400 mt-0.5">{passenger.email}</p>
+                                  <p className="text-sm font-bold text-slate-800">
+                                    {passenger.nome}
+                                  </p>
+                                  <p className="text-xs font-semibold text-slate-400 mt-0.5">
+                                    {passenger.email}
+                                  </p>
                                 </div>
                               </div>
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-2">
-                                <MessageCircle size={14} className="text-slate-400 shrink-0" />
-                                <p className="text-sm font-semibold text-slate-600">{passenger.celular}</p>
+                                <MessageCircle
+                                  size={14}
+                                  className="text-slate-400 shrink-0"
+                                />
+                                <p className="text-sm font-semibold text-slate-600">
+                                  {passenger.celular}
+                                </p>
                               </div>
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex items-start gap-2 max-w-[280px]">
-                                <MapPin size={14} className="text-slate-400 shrink-0 mt-0.5" />
-                                <p className="text-sm font-medium text-slate-600 line-clamp-2">{passenger.endereco}</p>
+                                <MapPin
+                                  size={14}
+                                  className="text-slate-400 shrink-0 mt-0.5"
+                                />
+                                <p className="text-sm font-medium text-slate-600 line-clamp-2">
+                                  {passenger.endereco}
+                                </p>
                               </div>
                             </td>
                             <td className="px-6 py-4">
-                              {passengerConfirmations[passenger.solicitanteId] ? (
+                              {passengerConfirmations[
+                                passenger.solicitanteId
+                              ] ? (
                                 <span className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] bg-green-50 border-green-200 text-green-700">
                                   <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
                                   Confirmado
                                 </span>
-                              ) : viewingOS.status.operacional === 'Pendente' ? (
+                              ) : effectiveOperationalStatus === "Pendente" ? (
                                 <div className="relative inline-block">
                                   <button
                                     type="button"
                                     data-notify-button
                                     onClick={(e) => {
-                                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                      setNotifyMenuPosition({ x: rect.left, y: rect.top });
-                                      setOpenNotifyMenuKey(openNotifyMenuKey === passenger.key ? null : passenger.key);
+                                      const rect = (
+                                        e.currentTarget as HTMLElement
+                                      ).getBoundingClientRect();
+                                      setNotifyMenuPosition({
+                                        x: rect.left,
+                                        y: rect.top,
+                                      });
+                                      setOpenNotifyMenuKey(
+                                        openNotifyMenuKey === passenger.key
+                                          ? null
+                                          : passenger.key,
+                                      );
                                     }}
                                     className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
                                     title="Abrir opções de notificação"
@@ -4365,56 +6313,88 @@ export default function OSOperationalPage() {
                                     Aguardando
                                     <ChevronDown size={12} />
                                   </button>
-                                  {openNotifyMenuKey === passenger.key && notifyMenuPosition && (
-                                    <div
-                                      data-notify-menu
-                                      style={{
-                                        position: 'fixed',
-                                        left: notifyMenuPosition.x,
-                                        bottom: typeof window !== 'undefined' ? window.innerHeight - notifyMenuPosition.y + 8 : 0,
-                                        transform: 'translateX(-25%)',
-                                      }}
-                                      className="z-[9999] min-w-[220px] bg-white rounded-2xl border border-slate-200 shadow-xl p-2 space-y-1"
-                                    >
-                                      <p className="px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                                        <Bell size={12} />
-                                        Notificar passageiro
-                                      </p>
-                                      {passenger.hasEmail && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleNotifyPassenger(passenger.key, 'email', passenger)}
-                                          disabled={!!notifyLoadingKey}
-                                          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
-                                        >
-                                          <Mail size={14} />
-                                          {notifyLoadingKey === passenger.key ? 'Enviando...' : 'Por e-mail'}
-                                        </button>
-                                      )}
-                                      {passenger.hasPhone && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleNotifyPassenger(passenger.key, 'whatsapp', passenger)}
-                                          disabled={!!notifyLoadingKey}
-                                          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-green-50 hover:text-green-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
-                                        >
-                                          <Smartphone size={14} />
-                                          {notifyLoadingKey === passenger.key ? 'Enviando...' : 'Por celular'}
-                                        </button>
-                                      )}
-                                      {passenger.hasEmail && passenger.hasPhone && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleNotifyPassenger(passenger.key, 'both', passenger)}
-                                          disabled={!!notifyLoadingKey}
-                                          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
-                                        >
-                                          <Send size={14} />
-                                          {notifyLoadingKey === passenger.key ? 'Enviando...' : 'Ambos'}
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
+                                  {openNotifyMenuKey === passenger.key &&
+                                    notifyMenuPosition && (
+                                      <div
+                                        data-notify-menu
+                                        style={{
+                                          position: "fixed",
+                                          left: notifyMenuPosition.x,
+                                          bottom:
+                                            typeof window !== "undefined"
+                                              ? window.innerHeight -
+                                                notifyMenuPosition.y +
+                                                8
+                                              : 0,
+                                          transform: "translateX(-25%)",
+                                        }}
+                                        className="z-[9999] min-w-[220px] bg-white rounded-2xl border border-slate-200 shadow-xl p-2 space-y-1"
+                                      >
+                                        <p className="px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                                          <Bell size={12} />
+                                          Notificar passageiro
+                                        </p>
+                                        {passenger.hasEmail && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleNotifyPassenger(
+                                                passenger.key,
+                                                "email",
+                                                passenger,
+                                              )
+                                            }
+                                            disabled={!!notifyLoadingKey}
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                                          >
+                                            <Mail size={14} />
+                                            {notifyLoadingKey === passenger.key
+                                              ? "Enviando..."
+                                              : "Por e-mail"}
+                                          </button>
+                                        )}
+                                        {passenger.hasPhone && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleNotifyPassenger(
+                                                passenger.key,
+                                                "whatsapp",
+                                                passenger,
+                                              )
+                                            }
+                                            disabled={!!notifyLoadingKey}
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-green-50 hover:text-green-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                                          >
+                                            <Smartphone size={14} />
+                                            {notifyLoadingKey === passenger.key
+                                              ? "Enviando..."
+                                              : "Por celular"}
+                                          </button>
+                                        )}
+                                        {passenger.hasEmail &&
+                                          passenger.hasPhone && (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleNotifyPassenger(
+                                                  passenger.key,
+                                                  "both",
+                                                  passenger,
+                                                )
+                                              }
+                                              disabled={!!notifyLoadingKey}
+                                              className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                                            >
+                                              <Send size={14} />
+                                              {notifyLoadingKey ===
+                                              passenger.key
+                                                ? "Enviando..."
+                                                : "Ambos"}
+                                            </button>
+                                          )}
+                                      </div>
+                                    )}
                                 </div>
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] bg-emerald-50 border-emerald-200 text-emerald-700">
@@ -4431,8 +6411,13 @@ export default function OSOperationalPage() {
                 </div>
               ) : (
                 <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
-                  <p className="text-base font-black text-slate-700">Nenhum passageiro vinculado visualmente à rota desta OS.</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-400">Assim que houver passageiros adicionados nos waypoints, o painel mostrará contatos e situação do fluxo.</p>
+                  <p className="text-base font-black text-slate-700">
+                    Nenhum passageiro vinculado visualmente à rota desta OS.
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-400">
+                    Assim que houver passageiros adicionados nos waypoints, o
+                    painel mostrará contatos e situação do fluxo.
+                  </p>
                 </div>
               )}
             </div>
@@ -4469,18 +6454,31 @@ export default function OSOperationalPage() {
         >
           <div className="space-y-5">
             <div className="rounded-3xl border border-rose-100 bg-rose-50 p-6">
-              <p className="text-base font-black text-rose-700">Tem certeza que deseja cancelar esta Ordem de Serviço?</p>
-              <p className="mt-2 text-sm font-semibold text-rose-600/80">Essa ação altera o status operacional para cancelado e sinaliza visualmente para toda a operação.</p>
+              <p className="text-base font-black text-rose-700">
+                Tem certeza que deseja cancelar esta Ordem de Serviço?
+              </p>
+              <p className="mt-2 text-sm font-semibold text-rose-600/80">
+                Essa ação altera o status operacional para cancelado e sinaliza
+                visualmente para toda a operação.
+              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Protocolo</p>
-                <p className="mt-2 text-base font-black text-slate-900">{cancelTargetOS.protocolo}</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                  Protocolo
+                </p>
+                <p className="mt-2 text-base font-black text-slate-900">
+                  {cancelTargetOS.protocolo}
+                </p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Motorista</p>
-                <p className="mt-2 text-base font-black text-slate-900">{cancelTargetOS.motorista || 'Não definido'}</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                  Motorista
+                </p>
+                <p className="mt-2 text-base font-black text-slate-900">
+                  {cancelTargetOS.motorista || "Não definido"}
+                </p>
               </div>
             </div>
           </div>
@@ -4491,31 +6489,66 @@ export default function OSOperationalPage() {
       {quickAddModal && (
         <StandardModal
           onClose={closeQuickAddModal}
-          title={`Novo ${quickAddModal === 'cliente' ? 'Empresa' : quickAddModal === 'motorista' ? 'Motorista' : quickAddModal === 'solicitante' ? 'Solicitante' : 'Centro de Custo'}`}
+          title={`Novo ${quickAddModal === "cliente" ? "Empresa" : quickAddModal === "motorista" ? "Motorista" : quickAddModal === "solicitante" ? "Solicitante" : "Centro de Custo"}`}
           subtitle="Cadastro rápido direto no atendimento"
-          icon={quickAddModal === 'motorista' ? <UserPlus size={24} /> : <Plus size={24} />}
-          maxWidthClassName={quickAddModal === 'motorista' ? 'max-w-6xl' : 'max-w-2xl'}
-          bodyClassName={quickAddModal === 'motorista' ? 'p-6 md:p-10 pb-16 space-y-12' : undefined}
+          icon={
+            quickAddModal === "motorista" ? (
+              <UserPlus size={24} />
+            ) : (
+              <Plus size={24} />
+            )
+          }
+          maxWidthClassName={
+            quickAddModal === "motorista" ? "max-w-7xl" : "max-w-2xl"
+          }
+          bodyClassName={
+            quickAddModal === "motorista"
+              ? "p-6 md:p-10 pb-16 space-y-12"
+              : undefined
+          }
         >
-          {quickAddModal === 'motorista' ? (
-            <form onSubmit={(e) => { e.preventDefault(); handleQuickAddSubmit(); }} className="space-y-12">
+          {quickAddModal === "motorista" ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleQuickAddSubmit();
+              }}
+              className="space-y-12"
+            >
               <section className="space-y-6">
-                <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                    <IdCard size={20} className="text-slate-500" /> Informações do Motorista
+                <div
+                  className="flex items-center border-b-2 border-slate-100 pb-4"
+                  style={{ paddingBottom: "1.25rem" }}
+                >
+                  <h3
+                    className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3"
+                    style={{ lineHeight: "1.3" }}
+                  >
+                    <IdCard size={20} className="text-slate-500" /> Informações
+                    do Motorista
                   </h3>
                 </div>
 
                 <div className="grid grid-cols-1 gap-6">
                   <div className="flex flex-col md:flex-row gap-6 items-start">
                     <div className="space-y-2 w-full md:w-[45%]">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Nome completo <span className="text-rose-300 text-base">*</span></label>
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        Nome completo{" "}
+                        <span className="text-rose-300 text-base">*</span>
+                      </label>
                       <input
                         required
+                        pattern=".*\s+\S.*"
+                        title="Nome completo deve conter pelo menos nome e sobrenome."
                         placeholder="Ex: João Silva da Rocha"
                         value={quickAddDriverForm.name}
-                        onChange={e => setQuickAddDriverForm(prev => ({ ...prev, name: e.target.value }))}
-                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
+                        onChange={(e) =>
+                          setQuickAddDriverForm((prev) => ({
+                            ...prev,
+                            name: forceUpperText(e.target.value),
+                          }))
+                        }
+                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm uppercase"
                       />
                     </div>
                     <div className="space-y-2 w-full md:w-48">
@@ -4523,85 +6556,177 @@ export default function OSOperationalPage() {
                         label="Tipo"
                         options={tipoDocumentoOptions}
                         value={quickAddDriverForm.tipo_documento}
-                        onChange={(value) => setQuickAddDriverForm(prev => ({ ...prev, tipo_documento: value as 'cpf' | 'passaporte', cpf: formatDriverDocument(prev.cpf, value as 'cpf' | 'passaporte') }))}
+                        onChange={(value) =>
+                          setQuickAddDriverForm((prev) => ({
+                            ...prev,
+                            tipo_documento: value as "cpf" | "passaporte",
+                            cpf: formatDriverDocument(
+                              prev.cpf,
+                              value as "cpf" | "passaporte",
+                            ),
+                          }))
+                        }
                         required
                       />
                     </div>
-                    <div className="space-y-2 w-full md:w-40">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">{getDriverDocumentLabel(quickAddDriverForm.tipo_documento)} <span className="text-rose-300 text-base">*</span></label>
+                    <div className="space-y-2 w-full md:w-48">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        {getDriverDocumentLabel(
+                          quickAddDriverForm.tipo_documento,
+                        )}{" "}
+                        <span className="text-rose-300 text-base">*</span>
+                      </label>
                       <input
                         required
-                        placeholder={getDriverDocumentPlaceholder(quickAddDriverForm.tipo_documento)}
+                        pattern={
+                          quickAddDriverForm.tipo_documento === "cpf"
+                            ? "\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2}"
+                            : undefined
+                        }
+                        title={
+                          quickAddDriverForm.tipo_documento === "cpf"
+                            ? "CPF incompleto. Use o formato 000.000.000-00"
+                            : undefined
+                        }
+                        placeholder={getDriverDocumentPlaceholder(
+                          quickAddDriverForm.tipo_documento,
+                        )}
                         value={quickAddDriverForm.cpf}
-                        onChange={e => setQuickAddDriverForm(prev => ({ ...prev, cpf: formatDriverDocument(e.target.value, prev.tipo_documento) }))}
+                        onChange={(e) =>
+                          setQuickAddDriverForm((prev) => ({
+                            ...prev,
+                            cpf: formatDriverDocument(
+                              e.target.value,
+                              prev.tipo_documento,
+                            ),
+                          }))
+                        }
                         className="w-full px-4 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                       />
                     </div>
-                    <div className="space-y-2 w-full md:w-44">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Celular <span className="text-rose-300 text-base">*</span></label>
+                    <div className="space-y-2 w-full md:w-52">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                        Celular{" "}
+                        <span className="text-rose-300 text-base">*</span>
+                      </label>
                       <input
                         required
+                        title="Celular incompleto. Use o formato (00) 00000-0000"
                         placeholder="(00) 9XXXX-XXXX"
                         value={formatDriverCelular(quickAddDriverForm.celular)}
-                        onChange={e => {
-                          const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 11);
-                          setQuickAddDriverForm(prev => ({ ...prev, celular: digitsOnly }));
+                        onChange={(e) => {
+                          const digitsOnly = e.target.value
+                            .replace(/\D/g, "")
+                            .slice(0, 11);
+                          setQuickAddDriverForm((prev) => ({
+                            ...prev,
+                            celular: digitsOnly,
+                          }));
                         }}
                         className={`w-full px-4 py-4 bg-slate-50 border-2 rounded-xl font-bold text-base text-slate-900 outline-none focus:bg-white transition-all shadow-sm ${
-                          quickAddDriverForm.celular && !validateDriverCelular(quickAddDriverForm.celular)
-                            ? 'border-red-500 focus:border-red-500'
-                            : 'border-slate-200 focus:border-blue-600'
+                          quickAddDriverForm.celular &&
+                          !validateDriverCelular(quickAddDriverForm.celular)
+                            ? "border-red-500 focus:border-red-500"
+                            : "border-slate-200 focus:border-blue-600"
                         }`}
                       />
                     </div>
                   </div>
-                  <div className="flex flex-col md:flex-row gap-6 items-start">
-                    {quickAddDriverForm.vinculo_tipo === 'parceiro' && (
-                      <div className="space-y-2 w-full md:w-[45%]">
-                        <GeologSearchableSelect
-                          label="Parceiro de serviço"
-                          options={parceiroOptions}
-                          value={quickAddDriverForm.parceiro_id}
-                          onChange={(value) => setQuickAddDriverForm(prev => ({ ...prev, parceiro_id: value, vehicle_ids: [] }))}
-                          placeholder="Selecione o parceiro..."
-                          required
-                          onQuickAdd={() => {
-                            setQuickParceiroForm({
-                              pessoaTipo: 'juridica',
-                              documento: '',
-                              razaoSocialOuNomeCompleto: '',
-                              contatos: [{ setor: '', celular: '', email: '', responsavel: '' }],
-                            });
-                            setIsQuickParceiroModalOpen(true);
-                          }}
-                        />
-                      </div>
-                    )}
-                    <div className="space-y-2 w-full md:w-auto">
-                      <div className="flex gap-3 mt-7">
-                        <button
-                          type="button"
-                          onClick={() => setQuickAddDriverForm(prev => ({ ...prev, vinculo_tipo: 'interno', parceiro_id: '', vehicle_ids: [], tipo_documento: 'cpf' }))}
-                          className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
-                            quickAddDriverForm.vinculo_tipo === 'interno'
-                              ? 'bg-blue-600 border-blue-600 text-white shadow-md'
-                              : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600'
-                          }`}
-                        >
-                          <Building2 size={16} /> Interno
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setQuickAddDriverForm(prev => ({ ...prev, vinculo_tipo: 'parceiro', parceiro_id: '', vehicle_ids: [], tipo_documento: 'cpf' }))}
-                          className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
-                            quickAddDriverForm.vinculo_tipo === 'parceiro'
-                              ? 'bg-teal-500 border-teal-500 text-white shadow-md'
-                              : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-teal-300 hover:text-teal-600'
-                          }`}
-                        >
-                          <Handshake size={16} /> Parceiro
-                        </button>
-                      </div>
+                  <div className="flex flex-col md:flex-row gap-6 items-start w-full">
+                    <div className="flex flex-wrap gap-3 w-full md:w-[45%]">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuickAddDriverForm((prev) => ({
+                            ...prev,
+                            vinculo_tipo: "interno",
+                            parceiro_id: "",
+                            vehicle_ids: [],
+                            tipo_documento: "cpf",
+                          }))
+                        }
+                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
+                          quickAddDriverForm.vinculo_tipo === "interno"
+                            ? "bg-blue-600 border-blue-600 text-white shadow-md"
+                            : "bg-slate-50 border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600"
+                        }`}
+                      >
+                        <Building2 size={16} /> Interno
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuickAddDriverForm((prev) => ({
+                            ...prev,
+                            vinculo_tipo: "autonomo",
+                            parceiro_id: "",
+                            vehicle_ids: [],
+                            tipo_documento: "cpf",
+                          }))
+                        }
+                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
+                          quickAddDriverForm.vinculo_tipo === "autonomo"
+                            ? "bg-amber-500 border-amber-500 text-white shadow-md"
+                            : "bg-slate-50 border-slate-200 text-slate-500 hover:border-amber-300 hover:text-amber-600"
+                        }`}
+                      >
+                        <User size={16} /> Autônomo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuickAddDriverForm((prev) => ({
+                            ...prev,
+                            vinculo_tipo: "parceiro",
+                            parceiro_id: "",
+                            vehicle_ids: [],
+                            tipo_documento: "cpf",
+                          }))
+                        }
+                        className={`cursor-pointer flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 font-black text-sm uppercase tracking-widest transition-all whitespace-nowrap ${
+                          quickAddDriverForm.vinculo_tipo === "parceiro"
+                            ? "bg-teal-500 border-teal-500 text-white shadow-md"
+                            : "bg-slate-50 border-slate-200 text-slate-500 hover:border-teal-300 hover:text-teal-600"
+                        }`}
+                      >
+                        <Handshake size={16} /> Parceiro
+                      </button>
+                    </div>
+
+                    <div className="flex-[1.5] w-full min-h-[84px]">
+                      {quickAddDriverForm.vinculo_tipo === "parceiro" && (
+                        <div className="w-full animate-in fade-in slide-in-from-left-2 duration-300">
+                          <GeologSearchableSelect
+                            label=""
+                            options={parceiroOptions}
+                            value={quickAddDriverForm.parceiro_id}
+                            onChange={(value) =>
+                              setQuickAddDriverForm((prev) => ({
+                                ...prev,
+                                parceiro_id: value,
+                                vehicle_ids: [],
+                              }))
+                            }
+                            placeholder="Selecione o parceiro de serviço..."
+                            onQuickAdd={() => {
+                              setQuickParceiroForm({
+                                pessoaTipo: "juridica",
+                                documento: "",
+                                razaoSocialOuNomeCompleto: "",
+                                contatos: [
+                                  {
+                                    setor: "",
+                                    celular: "",
+                                    email: "",
+                                    responsavel: "",
+                                  },
+                                ],
+                              });
+                              setIsQuickParceiroModalOpen(true);
+                            }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -4609,14 +6734,35 @@ export default function OSOperationalPage() {
 
               {/* Seção de Veículos Vinculados */}
               <section className="space-y-6">
-                <div className="flex items-center justify-between border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                    <Truck size={20} className="text-slate-500" /> Veículos Vinculados
+                <div
+                  className="flex items-center justify-between border-b-2 border-slate-100 pb-4"
+                  style={{ paddingBottom: "1.25rem" }}
+                >
+                  <h3
+                    className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3"
+                    style={{ lineHeight: "1.3" }}
+                  >
+                    <Truck size={20} className="text-slate-500" /> Veículos
+                    Vinculados
                   </h3>
                   <button
                     type="button"
-                    onClick={() => setQuickAddDriverForm(prev => ({ ...prev, vehicle_ids: [...prev.vehicle_ids, filteredQuickAddVehicles.find(v => !prev.vehicle_ids.includes(v.id))?.id || ''] }))}
-                    disabled={filteredQuickAddVehicles.filter(v => !quickAddDriverForm.vehicle_ids.includes(v.id)).length === 0}
+                    onClick={() =>
+                      setQuickAddDriverForm((prev) => ({
+                        ...prev,
+                        vehicle_ids: [
+                          ...prev.vehicle_ids,
+                          filteredQuickAddVehicles.find(
+                            (v) => !prev.vehicle_ids.includes(v.id),
+                          )?.id || "",
+                        ],
+                      }))
+                    }
+                    disabled={
+                      filteredQuickAddVehicles.filter(
+                        (v) => !quickAddDriverForm.vehicle_ids.includes(v.id),
+                      ).length === 0
+                    }
                     className="flex items-center gap-3 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <PlusCircle size={14} /> Adicionar veículo
@@ -4632,39 +6778,56 @@ export default function OSOperationalPage() {
                   <div className="divide-y divide-slate-100 max-h-[30vh] overflow-y-auto custom-scrollbar">
                     {quickAddDriverForm.vehicle_ids.length === 0 && (
                       <div className="px-6 py-8 text-center text-slate-400 text-sm">
-                        Nenhum veículo vinculado. Clique em &quot;Adicionar veículo&quot; acima.
+                        Nenhum veículo vinculado. Clique em &quot;Adicionar
+                        veículo&quot; acima.
                       </div>
                     )}
                     {quickAddDriverForm.vehicle_ids.map((vehicleId, index) => {
-                      const vehicle = vehicles.find(v => v.id === vehicleId);
-                      const availableVehiclesForThisRow = filteredQuickAddVehicles.filter(v =>
-                        v.id === vehicleId || !quickAddDriverForm.vehicle_ids.includes(v.id)
-                      );
+                      const vehicle = vehicles.find((v) => v.id === vehicleId);
+                      const availableVehiclesForThisRow =
+                        filteredQuickAddVehicles.filter(
+                          (v) =>
+                            v.id === vehicleId ||
+                            !quickAddDriverForm.vehicle_ids.includes(v.id),
+                        );
                       return (
-                        <div key={index} className="grid grid-cols-1 md:grid-cols-[2fr_2fr_auto] gap-4 items-center px-6 py-4">
+                        <div
+                          key={index}
+                          className="grid grid-cols-1 md:grid-cols-[2fr_2fr_auto] gap-4 items-center px-6 py-4"
+                        >
                           <div className="space-y-2">
-                            <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Veículo</label>
+                            <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                              Veículo
+                            </label>
                             <GeologSearchableSelect
                               label=""
-                              options={availableVehiclesForThisRow.map(v => ({
+                              options={availableVehiclesForThisRow.map((v) => ({
                                 id: v.id,
                                 nome: `${v.marca} ${v.modelo}`,
-                                sublabel: v.placa
+                                sublabel: v.placa,
                               }))}
                               value={vehicleId}
-                              onChange={(value) => setQuickAddDriverForm(prev => ({
-                                ...prev,
-                                vehicle_ids: prev.vehicle_ids.map((id, idx) => idx === index ? value : id)
-                              }))}
+                              onChange={(value) =>
+                                setQuickAddDriverForm((prev) => ({
+                                  ...prev,
+                                  vehicle_ids: prev.vehicle_ids.map(
+                                    (id, idx) => (idx === index ? value : id),
+                                  ),
+                                }))
+                              }
                               placeholder="Selecione o veículo..."
                             />
                           </div>
                           <div className="space-y-1 ml-5">
-                            <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Placa</label>
+                            <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                              Placa
+                            </label>
                             <div className="w-[120px] bg-white border-2 border-slate-400 rounded-md overflow-hidden shadow-sm flex flex-col items-center">
                               <div className="w-full bg-blue-600 h-1" />
                               <div className="py-3 px-4 flex items-center justify-center">
-                                <span className="text-[15px] font-black text-slate-900 uppercase tracking-widest leading-none">{vehicle?.placa || '—'}</span>
+                                <span className="text-[15px] font-black text-slate-900 uppercase tracking-widest leading-none">
+                                  {vehicle?.placa || "—"}
+                                </span>
                               </div>
                             </div>
                           </div>
@@ -4673,10 +6836,21 @@ export default function OSOperationalPage() {
                               type="button"
                               onClick={() => {
                                 if (!vehicleId) return;
-                                const v = vehicles.find(veh => veh.id === vehicleId);
+                                const v = vehicles.find(
+                                  (veh) => veh.id === vehicleId,
+                                );
                                 if (!v) return;
-                                setVehicleQuickForm({ placa: v.placa, modelo: v.modelo, marca: v.marca, tipo: 'carro' });
-                                setQuickVehicleModal({ mode: 'edit', rowIndex: index, vehicleId: v.id });
+                                setVehicleQuickForm({
+                                  placa: v.placa,
+                                  modelo: v.modelo,
+                                  marca: v.marca,
+                                  tipo: "carro",
+                                });
+                                setQuickVehicleModal({
+                                  mode: "edit",
+                                  rowIndex: index,
+                                  vehicleId: v.id,
+                                });
                               }}
                               disabled={!vehicleId}
                               className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
@@ -4688,8 +6862,16 @@ export default function OSOperationalPage() {
                             <button
                               type="button"
                               onClick={() => {
-                                setVehicleQuickForm({ placa: '', modelo: '', marca: '', tipo: 'carro' });
-                                setQuickVehicleModal({ mode: 'create', rowIndex: index });
+                                setVehicleQuickForm({
+                                  placa: "",
+                                  modelo: "",
+                                  marca: "",
+                                  tipo: "carro",
+                                });
+                                setQuickVehicleModal({
+                                  mode: "create",
+                                  rowIndex: index,
+                                });
                               }}
                               className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-xl transition-all cursor-pointer"
                               aria-label="Cadastrar novo veículo"
@@ -4699,10 +6881,14 @@ export default function OSOperationalPage() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => setQuickAddDriverForm(prev => ({
-                                ...prev,
-                                vehicle_ids: prev.vehicle_ids.filter((_, idx) => idx !== index)
-                              }))}
+                              onClick={() =>
+                                setQuickAddDriverForm((prev) => ({
+                                  ...prev,
+                                  vehicle_ids: prev.vehicle_ids.filter(
+                                    (_, idx) => idx !== index,
+                                  ),
+                                }))
+                              }
                               className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
                               aria-label="Remover veículo"
                               title="Remover veículo"
@@ -4734,7 +6920,14 @@ export default function OSOperationalPage() {
               </div>
             </form>
           ) : (
-            <form onSubmit={(e) => { e.preventDefault(); handleQuickAddSubmit(); }} className="space-y-6">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleQuickAddSubmit();
+              }}
+              noValidate
+              className="space-y-6"
+            >
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
@@ -4743,10 +6936,28 @@ export default function OSOperationalPage() {
                   <input
                     type="text"
                     required
-                    value={quickAddForm.nome}
-                    onChange={(e) => setQuickAddForm(prev => ({ ...prev, nome: e.target.value }))}
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
-                    placeholder={quickAddModal === 'cliente' ? 'Ex: Empresa ABC Ltda' : quickAddModal === 'solicitante' ? 'Ex: Maria Santos' : 'Ex: Departamento Comercial'}
+                    value={
+                      quickAddModal === "cliente"
+                        ? quickAddForm.nome
+                        : forceUpperText(quickAddForm.nome)
+                    }
+                    onChange={(e) =>
+                      setQuickAddForm((prev) => ({
+                        ...prev,
+                        nome:
+                          quickAddModal === "cliente"
+                            ? e.target.value
+                            : forceUpperText(e.target.value),
+                      }))
+                    }
+                    className={`w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm ${quickAddModal === "cliente" ? "" : "uppercase"}`}
+                    placeholder={
+                      quickAddModal === "cliente"
+                        ? "Ex: Empresa ABC Ltda"
+                        : quickAddModal === "solicitante"
+                          ? "Ex: Maria Santos"
+                          : "Ex: Departamento Comercial"
+                    }
                   />
                 </div>
               </div>
@@ -4771,60 +6982,176 @@ export default function OSOperationalPage() {
         </StandardModal>
       )}
 
-      {/* Modal Cadastro Rápido de Veículo */}
+      {/* Modal Gerenciar Veículos Vinculados */}
       {isOsVehicleQuickModalOpen && (
         <StandardModal
           onClose={() => setIsOsVehicleQuickModalOpen(false)}
-          title="Cadastrar Veículo"
-          subtitle="Cadastro rápido vinculado ao motorista selecionado"
-          icon={<Car size={24} />}
+          title="Gerenciar Veículos Vinculados"
+          subtitle="Vincule veículos existentes ou cadastre novos para o motorista"
+          icon={<Truck size={24} />}
           maxWidthClassName="max-w-5xl"
         >
-          <form onSubmit={handleOsVehicleQuickSave} className="space-y-6">
-            <div className="flex flex-wrap gap-3">
-              <div className="w-[140px] space-y-2 flex-shrink-0">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Placa <RequiredAsterisk /></label>
-                <input
-                  required
-                  value={osVehicleQuickForm.placa}
-                  onChange={e => setOsVehicleQuickForm(prev => ({ ...prev, placa: formatarPlacaOS(e.target.value) }))}
-                  className="max-w-[140px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
-                  placeholder="ABC-1234"
-                  maxLength={8}
-                />
+          <div className="space-y-6">
+            <section className="space-y-6">
+              <div
+                className="flex items-center justify-between border-b-2 border-slate-100 pb-4"
+                style={{ paddingBottom: "1.25rem" }}
+              >
+                <h3
+                  className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3"
+                  style={{ lineHeight: "1.3" }}
+                >
+                  <Truck size={20} className="text-slate-500" /> Veículos
+                  Vinculados
+                </h3>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOsVehicleManageIds((prev) => [
+                      ...prev,
+                      filteredQuickAddVehicles.find((v) => !prev.includes(v.id))
+                        ?.id || "",
+                    ])
+                  }
+                  disabled={
+                    filteredQuickAddVehicles.filter(
+                      (v) => !osVehicleManageIds.includes(v.id),
+                    ).length === 0
+                  }
+                  className="flex items-center gap-3 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <PlusCircle size={14} /> Adicionar veículo
+                </button>
               </div>
-              <div className="w-[220px] space-y-2 flex-shrink-0">
-                <GeologSearchableSelect
-                  label="Marca"
-                  options={MARCAS_VEICULOS}
-                  value={osVehicleQuickForm.marca}
-                  onChange={value => setOsVehicleQuickForm(prev => ({ ...prev, marca: value }))}
-                  required
-                  triggerClassName="mt-[9px] h-[60px]"
-                />
+
+              <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="hidden md:grid grid-cols-[2fr_2fr_auto] gap-4 bg-slate-50/80 border-b border-slate-200 px-6 py-4 text-[12px] font-black uppercase tracking-widest text-slate-600">
+                  <span>Veículo</span>
+                  <span className="ml-8">Placa</span>
+                  <span className="text-right">Ações</span>
+                </div>
+                <div className="divide-y divide-slate-100 max-h-[30vh] overflow-y-auto custom-scrollbar">
+                  {osVehicleManageIds.length === 0 && (
+                    <div className="px-6 py-8 text-center text-slate-400 text-sm">
+                      Nenhum veículo vinculado. Clique em &quot;Adicionar
+                      veículo&quot; acima.
+                    </div>
+                  )}
+                  {osVehicleManageIds.map((vehicleId, index) => {
+                    const vehicle = vehicles.find((v) => v.id === vehicleId);
+                    const availableVehiclesForThisRow =
+                      filteredQuickAddVehicles.filter(
+                        (v) =>
+                          v.id === vehicleId ||
+                          !osVehicleManageIds.includes(v.id),
+                      );
+                    return (
+                      <div
+                        key={index}
+                        className="grid grid-cols-1 md:grid-cols-[2fr_2fr_auto] gap-4 items-center px-6 py-4"
+                      >
+                        <div className="space-y-2">
+                          <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                            Veículo
+                          </label>
+                          <GeologSearchableSelect
+                            label=""
+                            options={availableVehiclesForThisRow.map((v) => ({
+                              id: v.id,
+                              nome: `${v.marca} ${v.modelo}`,
+                              sublabel: v.placa,
+                            }))}
+                            value={vehicleId}
+                            onChange={(value) =>
+                              setOsVehicleManageIds((prev) => {
+                                const next = [...prev];
+                                next[index] = value;
+                                return next;
+                              })
+                            }
+                            placeholder="Selecione o veículo..."
+                          />
+                        </div>
+                        <div className="space-y-1 ml-5">
+                          <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                            Placa
+                          </label>
+                          <div className="w-[120px] bg-white border-2 border-slate-400 rounded-md overflow-hidden shadow-sm flex flex-col items-center">
+                            <div className="w-full bg-blue-600 h-1" />
+                            <div className="py-3 px-4 flex items-center justify-center">
+                              <span className="text-[15px] font-black text-slate-900 uppercase tracking-widest leading-none">
+                                {vehicle?.placa || "—"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!vehicleId) return;
+                              const v = vehicles.find(
+                                (veh) => veh.id === vehicleId,
+                              );
+                              if (!v) return;
+                              setVehicleQuickForm({
+                                placa: v.placa,
+                                modelo: v.modelo,
+                                marca: v.marca,
+                                tipo: v.tipo || "carro",
+                              });
+                              setQuickVehicleModal({
+                                mode: "edit",
+                                rowIndex: index,
+                                vehicleId: v.id,
+                              });
+                            }}
+                            disabled={!vehicleId}
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                            aria-label="Editar veículo"
+                            title="Editar veículo"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVehicleQuickForm({
+                                placa: "",
+                                modelo: "",
+                                marca: "",
+                                tipo: "carro",
+                              });
+                              setQuickVehicleModal({
+                                mode: "create",
+                                rowIndex: index,
+                              });
+                            }}
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-xl transition-all cursor-pointer"
+                            aria-label="Cadastrar novo veículo"
+                            title="Cadastrar novo veículo"
+                          >
+                            <Car size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleRemoveVehicleFromManage(vehicleId, index)
+                            }
+                            className="inline-flex items-center justify-center p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                            aria-label="Remover veículo"
+                            title="Remover veículo"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="flex-1 space-y-2 min-w-[150px]">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Modelo <RequiredAsterisk /></label>
-                <input
-                  required
-                  value={osVehicleQuickForm.modelo}
-                  onChange={e => setOsVehicleQuickForm(prev => ({ ...prev, modelo: e.target.value }))}
-                  className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
-                  placeholder="Ex: Corolla"
-                />
-              </div>
-              <div className="w-[180px] space-y-2 flex-shrink-0">
-                <GeologSearchableSelect
-                  label="Tipo"
-                  options={TIPOS_VEICULO_OS}
-                  value={osVehicleQuickForm.tipo}
-                  onChange={value => setOsVehicleQuickForm(prev => ({ ...prev, tipo: value as typeof osVehicleQuickForm.tipo }))}
-                  required
-                  disableSearch
-                  triggerClassName="mt-[9px] h-[60px]"
-                />
-              </div>
-            </div>
+            </section>
+
             <div className="flex gap-4 pt-2">
               <button
                 type="button"
@@ -4834,14 +7161,19 @@ export default function OSOperationalPage() {
                 Cancelar
               </button>
               <button
-                type="submit"
+                type="button"
+                onClick={handleOsVehicleManageConfirm}
                 disabled={isSubmittingOsVehicle}
                 className="flex-1 py-4 bg-green-600 text-white font-black rounded-2xl hover:bg-green-500 shadow-lg shadow-green-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50 uppercase tracking-widest text-xs cursor-pointer"
               >
-                {isSubmittingOsVehicle ? <Loader2 className="animate-spin" size={18} /> : 'Cadastrar Veículo'}
+                {isSubmittingOsVehicle ? (
+                  <Loader2 className="animate-spin" size={18} />
+                ) : (
+                  "Concluído"
+                )}
               </button>
             </div>
-          </form>
+          </div>
         </StandardModal>
       )}
 
@@ -4849,19 +7181,34 @@ export default function OSOperationalPage() {
       {quickVehicleModal && (
         <StandardModal
           onClose={() => setQuickVehicleModal(null)}
-          title={quickVehicleModal.mode === 'create' ? 'Cadastrar Veículo' : 'Editar Veículo'}
-          subtitle={quickVehicleModal.mode === 'create' ? 'Cadastro rápido de novo veículo' : 'Editar informações do veículo'}
+          title={
+            quickVehicleModal.mode === "create"
+              ? "Cadastrar Veículo"
+              : "Editar Veículo"
+          }
+          subtitle={
+            quickVehicleModal.mode === "create"
+              ? "Cadastro rápido de novo veículo"
+              : "Editar informações do veículo"
+          }
           icon={<Car size={24} />}
           maxWidthClassName="max-w-6xl"
         >
           <form onSubmit={handleQuickVehicleSave} className="space-y-6">
             <div className="flex flex-wrap gap-3">
               <div className="w-[140px] space-y-2 flex-shrink-0">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Placa <RequiredAsterisk /></label>
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">
+                  Placa <RequiredAsterisk />
+                </label>
                 <input
                   required
                   value={vehicleQuickForm.placa}
-                  onChange={e => setVehicleQuickForm({ ...vehicleQuickForm, placa: formatarPlacaOS(e.target.value) })}
+                  onChange={(e) =>
+                    setVehicleQuickForm({
+                      ...vehicleQuickForm,
+                      placa: formatarPlacaOS(e.target.value),
+                    })
+                  }
                   className="max-w-[140px] px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
                   placeholder="ABC-1234"
                   maxLength={8}
@@ -4872,17 +7219,26 @@ export default function OSOperationalPage() {
                   label="Marca"
                   options={MARCAS_VEICULOS}
                   value={vehicleQuickForm.marca}
-                  onChange={value => setVehicleQuickForm({ ...vehicleQuickForm, marca: value })}
+                  onChange={(value) =>
+                    setVehicleQuickForm({ ...vehicleQuickForm, marca: value })
+                  }
                   required
                   triggerClassName="mt-[9px] h-[60px]"
                 />
               </div>
               <div className="flex-1 space-y-2 min-w-[150px]">
-                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">Modelo <RequiredAsterisk /></label>
+                <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1 flex items-center gap-1">
+                  Modelo <RequiredAsterisk />
+                </label>
                 <input
                   required
                   value={vehicleQuickForm.modelo}
-                  onChange={e => setVehicleQuickForm({ ...vehicleQuickForm, modelo: e.target.value })}
+                  onChange={(e) =>
+                    setVehicleQuickForm({
+                      ...vehicleQuickForm,
+                      modelo: e.target.value,
+                    })
+                  }
                   className="w-full px-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[4px] h-[60px]"
                   placeholder="Ex: Corolla"
                 />
@@ -4892,7 +7248,12 @@ export default function OSOperationalPage() {
                   label="Tipo"
                   options={TIPOS_VEICULO_OS}
                   value={vehicleQuickForm.tipo}
-                  onChange={value => setVehicleQuickForm({ ...vehicleQuickForm, tipo: value as typeof vehicleQuickForm.tipo })}
+                  onChange={(value) =>
+                    setVehicleQuickForm({
+                      ...vehicleQuickForm,
+                      tipo: value as typeof vehicleQuickForm.tipo,
+                    })
+                  }
                   required
                   disableSearch
                   triggerClassName="mt-[9px] h-[60px]"
@@ -4912,7 +7273,13 @@ export default function OSOperationalPage() {
                 disabled={isSubmittingQuickVehicle}
                 className="flex-1 py-4 bg-green-600 text-white font-black rounded-2xl hover:bg-green-500 shadow-lg shadow-green-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50 uppercase tracking-widest text-xs cursor-pointer"
               >
-                {isSubmittingQuickVehicle ? <Loader2 className="animate-spin" size={18} /> : (quickVehicleModal.mode === 'create' ? 'Cadastrar' : 'Salvar')}
+                {isSubmittingQuickVehicle ? (
+                  <Loader2 className="animate-spin" size={18} />
+                ) : quickVehicleModal.mode === "create" ? (
+                  "Cadastrar"
+                ) : (
+                  "Salvar"
+                )}
               </button>
             </div>
           </form>
@@ -4929,11 +7296,24 @@ export default function OSOperationalPage() {
           maxWidthClassName="max-w-6xl"
           bodyClassName="p-6 md:p-10 pb-16 space-y-8"
         >
-          <form onSubmit={(e) => { e.preventDefault(); void handleQuickParceiroSubmit(); }} className="space-y-8">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleQuickParceiroSubmit();
+            }}
+            className="space-y-8"
+          >
             <section className="space-y-6">
-              <div className="flex items-center border-b-2 border-slate-100 pb-4" style={{ paddingBottom: '1.25rem' }}>
-                <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                  <Building2 size={20} className="text-slate-500" /> Dados principais
+              <div
+                className="flex items-center border-b-2 border-slate-100 pb-4"
+                style={{ paddingBottom: "1.25rem" }}
+              >
+                <h3
+                  className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3"
+                  style={{ lineHeight: "1.3" }}
+                >
+                  <Building2 size={20} className="text-slate-500" /> Dados
+                  principais
                 </h3>
               </div>
 
@@ -4942,38 +7322,70 @@ export default function OSOperationalPage() {
                   <GeologSearchableSelect
                     label="Tipo de pessoa"
                     options={[
-                      { id: 'juridica', nome: 'Pessoa jurídica' },
-                      { id: 'fisica', nome: 'Pessoa física' },
+                      { id: "juridica", nome: "Pessoa jurídica" },
+                      { id: "fisica", nome: "Pessoa física" },
                     ]}
                     value={quickParceiroForm.pessoaTipo}
-                    onChange={(value) => setQuickParceiroForm(prev => ({
-                      ...prev,
-                      pessoaTipo: value as 'fisica' | 'juridica',
-                      documento: formatParceiroDocument(prev.documento, value as 'fisica' | 'juridica'),
-                      razaoSocialOuNomeCompleto: '',
-                    }))}
+                    onChange={(value) =>
+                      setQuickParceiroForm((prev) => ({
+                        ...prev,
+                        pessoaTipo: value as "fisica" | "juridica",
+                        documento: formatParceiroDocument(
+                          prev.documento,
+                          value as "fisica" | "juridica",
+                        ),
+                        razaoSocialOuNomeCompleto: "",
+                      }))
+                    }
                     triggerClassName="px-5 py-3.5 !bg-slate-50 border-2 !border-slate-200 mt-[5px]"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-                    {quickParceiroForm.pessoaTipo === 'juridica' ? 'Razão social' : 'Nome completo'}
+                    {quickParceiroForm.pessoaTipo === "juridica"
+                      ? "Razão social"
+                      : "Nome completo"}
                   </label>
                   <input
                     required
                     value={quickParceiroForm.razaoSocialOuNomeCompleto}
-                    onChange={(e) => setQuickParceiroForm(prev => ({ ...prev, razaoSocialOuNomeCompleto: e.target.value }))}
-                    placeholder={quickParceiroForm.pessoaTipo === 'juridica' ? 'Ex: Silva Logística LTDA' : 'Ex: João da Silva'}
+                    onChange={(e) =>
+                      setQuickParceiroForm((prev) => ({
+                        ...prev,
+                        razaoSocialOuNomeCompleto: e.target.value,
+                      }))
+                    }
+                    placeholder={
+                      quickParceiroForm.pessoaTipo === "juridica"
+                        ? "Ex: Silva Logística LTDA"
+                        : "Ex: João da Silva"
+                    }
                     className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm mt-[2px]"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">{quickParceiroForm.pessoaTipo === 'juridica' ? 'CNPJ' : 'CPF'}</label>
+                  <label className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                    {quickParceiroForm.pessoaTipo === "juridica"
+                      ? "CNPJ"
+                      : "CPF"}
+                  </label>
                   <input
                     required
                     value={quickParceiroForm.documento}
-                    onChange={(e) => setQuickParceiroForm(prev => ({ ...prev, documento: formatParceiroDocument(e.target.value, prev.pessoaTipo) }))}
-                    placeholder={quickParceiroForm.pessoaTipo === 'juridica' ? '00.000.000/0001-00' : '000.000.000-00'}
+                    onChange={(e) =>
+                      setQuickParceiroForm((prev) => ({
+                        ...prev,
+                        documento: formatParceiroDocument(
+                          e.target.value,
+                          prev.pessoaTipo,
+                        ),
+                      }))
+                    }
+                    placeholder={
+                      quickParceiroForm.pessoaTipo === "juridica"
+                        ? "00.000.000/0001-00"
+                        : "000.000.000-00"
+                    }
                     className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl font-bold text-base text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                   />
                 </div>
@@ -4985,16 +7397,25 @@ export default function OSOperationalPage() {
             <section className="space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <h3 className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3" style={{ lineHeight: '1.3' }}>
-                    <Users size={20} className="text-blue-600" /> Contatos por unidade
+                  <h3
+                    className="text-[17px] font-black text-slate-900 uppercase tracking-[0.1em] flex items-center gap-3"
+                    style={{ lineHeight: "1.3" }}
+                  >
+                    <Users size={20} className="text-blue-600" /> Contatos por
+                    unidade
                   </h3>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setQuickParceiroForm(prev => ({
-                    ...prev,
-                    contatos: [...prev.contatos, { setor: '', celular: '', email: '', responsavel: '' }],
-                  }))}
+                  onClick={() =>
+                    setQuickParceiroForm((prev) => ({
+                      ...prev,
+                      contatos: [
+                        ...prev.contatos,
+                        { setor: "", celular: "", email: "", responsavel: "" },
+                      ],
+                    }))
+                  }
                   className="flex items-center gap-3 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-all shadow-sm cursor-pointer"
                 >
                   <PlusCircle size={14} /> Novo cadastro
@@ -5011,56 +7432,105 @@ export default function OSOperationalPage() {
                 </div>
                 <div className="divide-y divide-slate-100 max-h-[40vh] overflow-y-auto custom-scrollbar">
                   {quickParceiroForm.contatos.map((contato, index) => (
-                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr_1.2fr_1.1fr_auto] gap-4 items-start px-6 py-5">
+                    <div
+                      key={index}
+                      className="grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr_1.2fr_1.1fr_auto] gap-4 items-start px-6 py-5"
+                    >
                       <div className="space-y-2 md:space-y-1">
-                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Setor</label>
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          Setor
+                        </label>
                         <input
                           required
                           placeholder="Financeiro, Operação, Compras..."
                           value={contato.setor}
-                          onChange={(e) => setQuickParceiroForm(prev => ({
-                            ...prev,
-                            contatos: prev.contatos.map((c, idx) => idx === index ? { ...c, setor: e.target.value.toUpperCase() } : c),
-                          }))}
+                          onChange={(e) =>
+                            setQuickParceiroForm((prev) => ({
+                              ...prev,
+                              contatos: prev.contatos.map((c, idx) =>
+                                idx === index
+                                  ? {
+                                      ...c,
+                                      setor: e.target.value.toUpperCase(),
+                                    }
+                                  : c,
+                              ),
+                            }))
+                          }
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
                       <div className="space-y-2 md:space-y-1">
-                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Celular</label>
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          Celular
+                        </label>
                         <input
                           required
                           placeholder="(00) 00000-0000"
                           value={contato.celular}
-                          onChange={(e) => setQuickParceiroForm(prev => ({
-                            ...prev,
-                            contatos: prev.contatos.map((c, idx) => idx === index ? { ...c, celular: formatParceiroPhone(e.target.value) } : c),
-                          }))}
+                          onChange={(e) =>
+                            setQuickParceiroForm((prev) => ({
+                              ...prev,
+                              contatos: prev.contatos.map((c, idx) =>
+                                idx === index
+                                  ? {
+                                      ...c,
+                                      celular: formatParceiroPhone(
+                                        e.target.value,
+                                      ),
+                                    }
+                                  : c,
+                              ),
+                            }))
+                          }
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
                       <div className="space-y-2 md:space-y-1">
-                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">E-mail</label>
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          E-mail
+                        </label>
                         <input
                           type="email"
                           placeholder="contato@empresa.com"
-                          value={contato.email || ''}
-                          onChange={(e) => setQuickParceiroForm(prev => ({
-                            ...prev,
-                            contatos: prev.contatos.map((c, idx) => idx === index ? { ...c, email: e.target.value.toLowerCase() } : c),
-                          }))}
+                          value={contato.email || ""}
+                          onChange={(e) =>
+                            setQuickParceiroForm((prev) => ({
+                              ...prev,
+                              contatos: prev.contatos.map((c, idx) =>
+                                idx === index
+                                  ? {
+                                      ...c,
+                                      email: e.target.value.toLowerCase(),
+                                    }
+                                  : c,
+                              ),
+                            }))
+                          }
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
                       <div className="space-y-2 md:space-y-1">
-                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Responsável</label>
+                        <label className="md:hidden text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          Responsável
+                        </label>
                         <input
                           required
                           placeholder="Nome do responsável"
                           value={contato.responsavel}
-                          onChange={(e) => setQuickParceiroForm(prev => ({
-                            ...prev,
-                            contatos: prev.contatos.map((c, idx) => idx === index ? { ...c, responsavel: e.target.value.toUpperCase() } : c),
-                          }))}
+                          onChange={(e) =>
+                            setQuickParceiroForm((prev) => ({
+                              ...prev,
+                              contatos: prev.contatos.map((c, idx) =>
+                                idx === index
+                                  ? {
+                                      ...c,
+                                      responsavel: e.target.value.toUpperCase(),
+                                    }
+                                  : c,
+                              ),
+                            }))
+                          }
                           className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 placeholder:text-slate-300 outline-none focus:border-blue-600 focus:bg-white transition-all shadow-sm"
                         />
                       </div>
@@ -5068,17 +7538,23 @@ export default function OSOperationalPage() {
                         {quickParceiroForm.contatos.length > 1 ? (
                           <button
                             type="button"
-                            onClick={() => setQuickParceiroForm(prev => ({
-                              ...prev,
-                              contatos: prev.contatos.filter((_, idx) => idx !== index),
-                            }))}
+                            onClick={() =>
+                              setQuickParceiroForm((prev) => ({
+                                ...prev,
+                                contatos: prev.contatos.filter(
+                                  (_, idx) => idx !== index,
+                                ),
+                              }))
+                            }
                             className="inline-flex items-center justify-center p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
                             aria-label="Remover contato"
                           >
                             <Trash2 size={16} />
                           </button>
                         ) : (
-                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 pt-3">Principal</span>
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 pt-3">
+                            Principal
+                          </span>
                         )}
                       </div>
                     </div>
@@ -5130,19 +7606,31 @@ export default function OSOperationalPage() {
             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h4 className="font-black text-slate-800 uppercase tracking-widest text-sm">Modo de Envio</h4>
-                  <p className="text-xs text-slate-500 font-bold mt-1">Como as notificações serão processadas?</p>
+                  <h4 className="font-black text-slate-800 uppercase tracking-widest text-sm">
+                    Modo de Envio
+                  </h4>
+                  <p className="text-xs text-slate-500 font-bold mt-1">
+                    Como as notificações serão processadas?
+                  </p>
                 </div>
                 <div className="flex bg-white p-1.5 rounded-xl border border-slate-200">
                   <button
-                    onClick={() => setNotificationConfig(prev => ({ ...prev, auto: true }))}
-                    className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${notificationConfig.auto ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                    disabled
+                    onClick={() =>
+                      setNotificationConfig((prev) => ({ ...prev, auto: true }))
+                    }
+                    className={`px-4 py-2 rounded-lg text-xs font-black transition-all disabled:opacity-50 disabled:cursor-not-allowed ${notificationConfig.auto ? "bg-blue-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600"}`}
                   >
                     AUTOMÁTICO
                   </button>
                   <button
-                    onClick={() => setNotificationConfig(prev => ({ ...prev, auto: false }))}
-                    className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${!notificationConfig.auto ? 'bg-slate-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                    onClick={() =>
+                      setNotificationConfig((prev) => ({
+                        ...prev,
+                        auto: false,
+                      }))
+                    }
+                    className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${!notificationConfig.auto ? "bg-slate-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600"}`}
                   >
                     MANUAL
                   </button>
@@ -5151,50 +7639,86 @@ export default function OSOperationalPage() {
 
               {notificationConfig.auto && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Destinatários automáticos</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+                    Destinatários automáticos
+                  </p>
 
                   <button
-                    onClick={() => setNotificationConfig(prev => ({ ...prev, motorista: !prev.motorista }))}
-                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${notificationConfig.motorista ? 'bg-blue-50/50 border-blue-200 text-blue-900' : 'bg-white border-slate-100 text-slate-400'}`}
+                    onClick={() =>
+                      setNotificationConfig((prev) => ({
+                        ...prev,
+                        motorista: !prev.motorista,
+                      }))
+                    }
+                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${notificationConfig.motorista ? "bg-blue-50/50 border-blue-200 text-blue-900" : "bg-white border-slate-100 text-slate-400"}`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${notificationConfig.motorista ? 'bg-blue-100 text-blue-600' : 'bg-slate-50 text-slate-300'}`}>
+                      <div
+                        className={`p-2 rounded-lg ${notificationConfig.motorista ? "bg-blue-100 text-blue-600" : "bg-slate-50 text-slate-300"}`}
+                      >
                         <Truck size={18} />
                       </div>
-                      <span className="font-bold text-sm">Motorista Alocado</span>
+                      <span className="font-bold text-sm">
+                        Motorista Alocado
+                      </span>
                     </div>
-                    <div className={`w-10 h-6 rounded-full relative transition-all ${notificationConfig.motorista ? 'bg-blue-600' : 'bg-slate-200'}`}>
-                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationConfig.motorista ? 'left-5' : 'left-1'}`} />
+                    <div
+                      className={`w-10 h-6 rounded-full relative transition-all ${notificationConfig.motorista ? "bg-blue-600" : "bg-slate-200"}`}
+                    >
+                      <div
+                        className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationConfig.motorista ? "left-5" : "left-1"}`}
+                      />
                     </div>
                   </button>
 
                   <button
-                    onClick={() => setNotificationConfig(prev => ({ ...prev, passageiros: !prev.passageiros }))}
-                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${notificationConfig.passageiros ? 'bg-blue-50/50 border-blue-200 text-blue-900' : 'bg-white border-slate-100 text-slate-400'}`}
+                    onClick={() =>
+                      setNotificationConfig((prev) => ({
+                        ...prev,
+                        passageiros: !prev.passageiros,
+                      }))
+                    }
+                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${notificationConfig.passageiros ? "bg-blue-50/50 border-blue-200 text-blue-900" : "bg-white border-slate-100 text-slate-400"}`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${notificationConfig.passageiros ? 'bg-blue-100 text-blue-600' : 'bg-slate-50 text-slate-300'}`}>
+                      <div
+                        className={`p-2 rounded-lg ${notificationConfig.passageiros ? "bg-blue-100 text-blue-600" : "bg-slate-50 text-slate-300"}`}
+                      >
                         <Users size={18} />
                       </div>
-                      <span className="font-bold text-sm">Passageiros da Rota</span>
+                      <span className="font-bold text-sm">
+                        Passageiros da Rota
+                      </span>
                     </div>
-                    <div className={`w-10 h-6 rounded-full relative transition-all ${notificationConfig.passageiros ? 'bg-blue-600' : 'bg-slate-200'}`}>
-                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationConfig.passageiros ? 'left-5' : 'left-1'}`} />
+                    <div
+                      className={`w-10 h-6 rounded-full relative transition-all ${notificationConfig.passageiros ? "bg-blue-600" : "bg-slate-200"}`}
+                    >
+                      <div
+                        className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationConfig.passageiros ? "left-5" : "left-1"}`}
+                      />
                     </div>
                   </button>
 
                   <button
                     disabled
-                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all cursor-not-allowed opacity-60 ${notificationConfig.solicitante ? 'bg-blue-50/50 border-blue-200 text-blue-900' : 'bg-white border-slate-100 text-slate-400'}`}
+                    className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all cursor-not-allowed opacity-60 ${notificationConfig.solicitante ? "bg-blue-50/50 border-blue-200 text-blue-900" : "bg-white border-slate-100 text-slate-400"}`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${notificationConfig.solicitante ? 'bg-blue-100 text-blue-600' : 'bg-slate-50 text-slate-300'}`}>
+                      <div
+                        className={`p-2 rounded-lg ${notificationConfig.solicitante ? "bg-blue-100 text-blue-600" : "bg-slate-50 text-slate-300"}`}
+                      >
                         <User size={18} />
                       </div>
-                      <span className="font-bold text-sm">Solicitante da Empresa</span>
+                      <span className="font-bold text-sm">
+                        Solicitante da Empresa
+                      </span>
                     </div>
-                    <div className={`w-10 h-6 rounded-full relative transition-all ${notificationConfig.solicitante ? 'bg-blue-600' : 'bg-slate-200'}`}>
-                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationConfig.solicitante ? 'left-5' : 'left-1'}`} />
+                    <div
+                      className={`w-10 h-6 rounded-full relative transition-all ${notificationConfig.solicitante ? "bg-blue-600" : "bg-slate-200"}`}
+                    >
+                      <div
+                        className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationConfig.solicitante ? "left-5" : "left-1"}`}
+                      />
                     </div>
                   </button>
                 </div>
@@ -5215,20 +7739,198 @@ export default function OSOperationalPage() {
                 className="flex-[2] px-6 py-4 bg-emerald-600 text-white font-black rounded-xl shadow-xl shadow-emerald-900/20 hover:bg-emerald-700 hover:scale-[1.02] active:scale-95 transition-all text-xs uppercase tracking-widest flex items-center justify-center gap-3"
               >
                 <CheckCircle2 size={18} />
-                Confirmar e {editingOSId ? 'Salvar' : 'Criar OS'}
+                Confirmar e {editingOSId ? "Salvar" : "Criar OS"}
               </button>
             </div>
           </div>
         </StandardModal>
       )}
 
+      {/* Finish Confirmation Modal */}
+      {showFinishConfirm && viewingOS && selectedCycleIndex !== null && (
+        <StandardModal
+          onClose={() => {
+            setShowFinishConfirm(false);
+            setSelectedCycleIndex(null);
+          }}
+          title="Finalizar Etapa"
+          subtitle="Confirme a finalização do ciclo"
+          icon={<FileText size={24} />}
+          maxWidthClassName="max-w-xl"
+        >
+          <div className="space-y-6">
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6">
+              <div className="flex items-start gap-4">
+                <AlertTriangle className="text-amber-600 shrink-0" size={24} />
+                <div>
+                  <h4 className="font-bold text-amber-900 mb-2">Atenção!</h4>
+                  <p className="text-sm text-amber-800 leading-relaxed">
+                    Você está prestes a finalizar esta etapa do ciclo
+                    operacional. Esta ação não pode ser desfeita facilmente. Tem
+                    certeza que deseja prosseguir?
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFinishConfirm(false);
+                  setSelectedCycleIndex(null);
+                }}
+                className="flex-1 px-6 py-4 bg-slate-100 text-slate-700 font-black rounded-xl hover:bg-slate-200 transition-all text-sm uppercase tracking-widest cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!viewingOS || selectedCycleIndex === null) return;
+                  await handleManualFinishCycle(
+                    viewingOS.id,
+                    selectedCycleIndex,
+                  );
+                  setShowFinishConfirm(false);
+                  setSelectedCycleIndex(null);
+                }}
+                className="flex-1 px-6 py-4 bg-emerald-600 text-white font-black rounded-xl shadow-lg hover:bg-emerald-700 transition-all text-sm uppercase tracking-widest cursor-pointer"
+              >
+                Confirmar Finalização
+              </button>
+            </div>
+          </div>
+        </StandardModal>
+      )}
+
+      {/* Accept Revert Modal */}
+      {showAcceptRevert && viewingOS && selectedCycleIndex !== null && (
+        <StandardModal
+          onClose={() => {
+            setShowAcceptRevert(false);
+            setSelectedCycleIndex(null);
+          }}
+          title="Retornar Aceite"
+          subtitle="Desfazer aceite do ciclo"
+          icon={<Handshake size={24} />}
+          maxWidthClassName="max-w-xl"
+        >
+          <div className="space-y-6">
+            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6">
+              <div className="flex items-start gap-4">
+                <AlertTriangle className="text-blue-600 shrink-0" size={24} />
+                <div>
+                  <h4 className="font-bold text-blue-900 mb-2">
+                    Confirmar Retorno
+                  </h4>
+                  <p className="text-sm text-blue-800 leading-relaxed">
+                    Deseja retornar o status para{" "}
+                    <span className="font-bold">Pendente</span>? O motorista
+                    poderá aceitar novamente.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAcceptRevert(false);
+                  setSelectedCycleIndex(null);
+                }}
+                className="flex-1 px-6 py-4 bg-slate-100 text-slate-700 font-black rounded-xl hover:bg-slate-200 transition-all text-sm uppercase tracking-widest cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!viewingOS || selectedCycleIndex === null) return;
+                  await handleManualRevertAccept(
+                    viewingOS.id,
+                    selectedCycleIndex,
+                  );
+                  setShowAcceptRevert(false);
+                  setSelectedCycleIndex(null);
+                }}
+                className="flex-1 px-6 py-4 bg-blue-600 text-white font-black rounded-xl shadow-lg hover:bg-blue-700 transition-all text-sm uppercase tracking-widest cursor-pointer"
+              >
+                Confirmar Retorno
+              </button>
+            </div>
+          </div>
+        </StandardModal>
+      )}
+
+      {/* Route Menu Modal */}
+      {showRouteMenu &&
+        viewingOS &&
+        selectedCycleIndex !== null &&
+        routeMenuPosition && (
+          <div
+            data-route-menu
+            style={{
+              position: "fixed",
+              left: routeMenuPosition.x,
+              top: routeMenuPosition.y + 8,
+              transform: "translateX(-50%)",
+            }}
+            className="z-[9999] min-w-[280px] bg-white rounded-2xl border border-slate-200 shadow-xl p-2 space-y-1"
+          >
+            <p className="px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+              <Navigation size={12} />
+              Opções de Rota
+            </p>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!viewingOS || selectedCycleIndex === null) return;
+                await handleManualRevertToAccept(
+                  viewingOS.id,
+                  selectedCycleIndex,
+                );
+                setShowRouteMenu(false);
+                setRouteMenuPosition(null);
+                setSelectedCycleIndex(null);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition-colors cursor-pointer"
+            >
+              <ArrowLeft size={14} />
+              Retornar para Aceite
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                // Send route message
+                if (viewingOS && selectedCycleIndex !== null) {
+                  sendWhatsAppNotification(viewingOS, selectedCycleIndex);
+                }
+                setShowRouteMenu(false);
+                setRouteMenuPosition(null);
+                setSelectedCycleIndex(null);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 rounded-xl transition-colors cursor-pointer"
+            >
+              <MessageCircle size={14} />
+              Enviar Mensagem da Rota
+            </button>
+          </div>
+        )}
+
       {/* Loader overlay durante salvamento de OS */}
       {isSubmittingOS && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-[#001C3A]/60 backdrop-blur-md">
           <div className="bg-white rounded-[2.5rem] p-10 flex flex-col items-center gap-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-300">
-            <Loader2 className="animate-spin text-[var(--color-geolog-blue)]" size={48} />
+            <Loader2
+              className="animate-spin text-[var(--color-geolog-blue)]"
+              size={48}
+            />
             <p className="text-sm font-black uppercase tracking-widest text-slate-600">
-              {editingOSId ? 'Salvando alterações...' : 'Criando atendimento...'}
+              {editingOSId
+                ? "Salvando alterações..."
+                : "Criando atendimento..."}
             </p>
           </div>
         </div>
@@ -5237,14 +7939,25 @@ export default function OSOperationalPage() {
   );
 }
 
-
-function OpStatCard({ label, value, icon }: { label: string, value: number, icon: React.ReactNode }) {
+function OpStatCard({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: number;
+  icon: React.ReactNode;
+}) {
   return (
     <div className="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm flex items-center gap-4">
       <div className="p-3 bg-slate-50 rounded-xl">{icon}</div>
       <div>
-        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">{label}</p>
-        <h3 className="text-2xl font-black text-slate-800 tabular-nums">{value}</h3>
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">
+          {label}
+        </p>
+        <h3 className="text-2xl font-black text-slate-800 tabular-nums">
+          {value}
+        </h3>
       </div>
     </div>
   );

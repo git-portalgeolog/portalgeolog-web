@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { ShieldCheck, TrendingUp, ChevronRight, LogIn } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { useState } from "react";
+import Link from "next/link";
+import { ShieldCheck, TrendingUp, ChevronRight, LogIn } from "lucide-react";
+import { motion } from "framer-motion";
 
 export default function Home() {
   const [isLoginHovered, setIsLoginHovered] = useState(false);
@@ -15,12 +15,16 @@ export default function Home() {
         <div className="flex items-center gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="Geolog Logo" className="h-10 w-auto" />
-          <span className="text-2xl font-bold tracking-tight text-[var(--color-geolog-blue)]">Portal Geolog</span>
-          <span className="px-2 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-sm uppercase tracking-widest animate-pulse">Teste</span>
+          <span className="text-2xl font-bold tracking-tight text-[var(--color-geolog-blue)]">
+            Portal Geolog
+          </span>
+          <span className="px-2 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-sm uppercase tracking-widest animate-pulse">
+            Teste
+          </span>
         </div>
-        
+
         <Link href="/login">
-          <button 
+          <button
             onMouseEnter={() => setIsLoginHovered(true)}
             onMouseLeave={() => setIsLoginHovered(false)}
             className="flex items-center gap-2 bg-[var(--color-geolog-blue)] hover:bg-[var(--color-geolog-dark)] text-white px-6 py-2.5 rounded-full font-medium transition-all duration-300 shadow-lg shadow-blue-900/10"
@@ -39,7 +43,7 @@ export default function Home() {
       {/* Hero Section */}
       <main className="max-w-7xl mx-auto px-8 pt-20 pb-24 flex flex-col md:flex-row items-center gap-16">
         <div className="flex-1 space-y-8 text-left">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
@@ -51,44 +55,47 @@ export default function Home() {
             </span>
             SaaS Logístico On-Demand
           </motion.div>
-          
-          <motion.h1 
+
+          <motion.h1
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.1 }}
             className="text-5xl md:text-7xl font-black leading-[1.1] tracking-tighter text-[var(--color-geolog-blue)]"
           >
-            Inteligência e <br/>
+            Inteligência e <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-sky-500">
               Controle Total
-            </span><br/>
+            </span>
+            <br />
             na sua Frota.
           </motion.h1>
-          
-          <motion.p 
+
+          <motion.p
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.2 }}
             className="text-lg md:text-xl text-slate-500 max-w-2xl leading-relaxed"
           >
-            Gira a chave da digitalização. Gerencie motoristas, acompanhe ordens de serviço em tempo real e reduza custos operacionais com IA e automação preditiva.
+            Gira a chave da digitalização. Gerencie motoristas, acompanhe ordens
+            de serviço em tempo real e reduza custos operacionais com IA e
+            automação preditiva.
           </motion.p>
-          
-          <motion.div 
+
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.3 }}
             className="flex items-center gap-4"
           >
-             <button className="flex items-center gap-2 bg-[var(--color-geolog-blue)] dark:bg-white text-white dark:text-[var(--color-geolog-blue)] px-8 py-4 rounded-full font-bold text-lg hover:scale-105 transition-transform duration-300">
-                Começar Agora
-                <ChevronRight className="w-5 h-5" />
-             </button>
+            <button className="flex items-center gap-2 bg-[var(--color-geolog-blue)] dark:bg-white text-white dark:text-[var(--color-geolog-blue)] px-8 py-4 rounded-full font-bold text-lg hover:scale-105 transition-transform duration-300">
+              Começar Agora
+              <ChevronRight className="w-5 h-5" />
+            </button>
           </motion.div>
         </div>
-        
+
         {/* Abstract 3D/Dashboard Mockup Graphic */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.7, delay: 0.2 }}
@@ -103,25 +110,28 @@ export default function Home() {
             <div className="h-2 w-full bg-white/10 rounded-full mb-2"></div>
             <div className="h-2 w-4/5 bg-white/10 rounded-full"></div>
           </div>
-          
+
           <div className="absolute top-1/2 left-20 right-10 h-40 bg-[var(--color-geolog-secondary)]/90 backdrop-blur-md rounded-2xl border border-blue-400/30 p-6 shadow-2xl transform rotate-3 z-10 flex flex-col justify-center">
-             <div className="flex items-center gap-4 text-white">
-                <div className="p-3 bg-white/20 rounded-xl"><TrendingUp className="w-8 h-8" /></div>
-                <div>
-                  <p className="text-sm text-cyan-200 font-medium">+24% de Lucro</p>
-                  <p className="text-2xl font-bold">Custos Otimizados</p>
-                </div>
-             </div>
+            <div className="flex items-center gap-4 text-white">
+              <div className="p-3 bg-white/20 rounded-xl">
+                <TrendingUp className="w-8 h-8" />
+              </div>
+              <div>
+                <p className="text-sm text-cyan-200 font-medium">
+                  +24% de Lucro
+                </p>
+                <p className="text-2xl font-bold">Custos Otimizados</p>
+              </div>
+            </div>
           </div>
 
           <div className="absolute bottom-1/4 right-5 left-32 h-24 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 shadow-xl transform -rotate-2 flex items-center gap-4 text-white">
-             <ShieldCheck className="w-8 h-8 text-blue-300" />
-             <div>
-                <p className="font-semibold">Docs Motoristas em Dia</p>
-                <p className="text-xs text-blue-200">Verificado há 2 mins</p>
-             </div>
+            <ShieldCheck className="w-8 h-8 text-blue-300" />
+            <div>
+              <p className="font-semibold">Docs Motoristas em Dia</p>
+              <p className="text-xs text-blue-200">Verificado há 2 mins</p>
+            </div>
           </div>
-          
         </motion.div>
       </main>
     </div>

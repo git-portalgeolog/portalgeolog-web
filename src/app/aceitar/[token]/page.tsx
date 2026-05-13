@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-export const runtime = 'edge';
+export const runtime = "edge";
 
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { CheckCircle2, AlertCircle, Loader2, Car } from 'lucide-react';
+import { useEffect, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { CheckCircle2, AlertCircle, Loader2, Car } from "lucide-react";
 
 interface PreviewData {
   os: {
@@ -14,6 +14,7 @@ interface PreviewData {
     data: string;
     hora: string;
   };
+  cycleTitle?: string;
   vehicle: {
     marca: string;
     modelo: string;
@@ -23,10 +24,14 @@ interface PreviewData {
 
 export default function AceitarViagemPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const token = params.token as string;
+  const cycleIndex = searchParams.get("cycle_index");
 
-  const [status, setStatus] = useState<'loading' | 'form' | 'submitting' | 'success' | 'already' | 'error'>('loading');
-  const [message, setMessage] = useState('Carregando dados da viagem...');
+  const [status, setStatus] = useState<
+    "loading" | "form" | "submitting" | "success" | "already" | "error"
+  >("loading");
+  const [message, setMessage] = useState("Carregando dados da viagem...");
   const [preview, setPreview] = useState<PreviewData | null>(null);
 
   useEffect(() => {
@@ -36,54 +41,72 @@ export default function AceitarViagemPage() {
 
     const loadToken = async () => {
       try {
-        const passengerRes = await fetch(`/api/passenger-accept?token=${encodeURIComponent(token)}`);
+        const passengerRes = await fetch(
+          `/api/passenger-accept?token=${encodeURIComponent(token)}`,
+        );
         const passengerData = await passengerRes.json().catch(() => null);
 
         if (passengerRes.ok) {
           if (!isActive) return;
 
           if (passengerData?.alreadyAccepted) {
-            setStatus('already');
-            setMessage(passengerData.message || 'Viagem já confirmada anteriormente.');
+            setStatus("already");
+            setMessage(
+              passengerData.message || "Viagem já confirmada anteriormente.",
+            );
           } else {
-            setStatus('success');
-            setMessage(passengerData?.message || 'Viagem confirmada com sucesso! O motorista será notificado.');
+            setStatus("success");
+            setMessage(
+              passengerData?.message ||
+                "Viagem confirmada com sucesso! O motorista será notificado.",
+            );
           }
           return;
         }
 
-        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token);
+        const isUUID =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            token,
+          );
 
         if (!isUUID || passengerRes.status === 404) {
-          const driverRes = await fetch(`/api/os-driver-accept?os_id=${encodeURIComponent(token)}&preview=1`);
+          const driverRes = await fetch(
+            `/api/os-driver-accept?os_id=${encodeURIComponent(token)}&preview=1${cycleIndex !== null ? `&cycle_index=${encodeURIComponent(cycleIndex)}` : ""}`,
+          );
           const driverData = await driverRes.json();
 
           if (!isActive) return;
 
           if (driverRes.ok && driverData.success) {
             if (driverData.alreadyAccepted) {
-              setStatus('already');
-              setMessage(driverData.message || 'Viagem já aceita anteriormente.');
+              setStatus("already");
+              setMessage(
+                driverData.message || "Viagem já aceita anteriormente.",
+              );
               return;
             }
             setPreview(driverData);
-            setStatus('form');
+            setStatus("form");
             return;
           }
 
           // Se ambos falharam (404 no passageiro e erro no motorista), mostrar mensagem genérica de não encontrado.
-          setStatus('error');
-          setMessage('Link de confirmação inválido, expirado ou ordem de serviço não encontrada.');
+          setStatus("error");
+          setMessage(
+            "Link de confirmação inválido, expirado ou ordem de serviço não encontrada.",
+          );
           return;
         }
 
         if (!isActive) return;
-        setStatus('error');
-        setMessage(passengerData?.error || 'Não foi possível confirmar a viagem.');
+        setStatus("error");
+        setMessage(
+          passengerData?.error || "Não foi possível confirmar a viagem.",
+        );
       } catch {
         if (!isActive) return;
-        setStatus('error');
-        setMessage('Erro de conexão. Tente novamente mais tarde.');
+        setStatus("error");
+        setMessage("Erro de conexão. Tente novamente mais tarde.");
       }
     };
 
@@ -92,51 +115,63 @@ export default function AceitarViagemPage() {
     return () => {
       isActive = false;
     };
-  }, [token]);
+  }, [token, cycleIndex]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    setStatus('submitting');
+    setStatus("submitting");
     try {
-      const res = await fetch('/api/os-driver-accept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ os_id: token }),
+      const res = await fetch("/api/os-driver-accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          os_id: token,
+          cycle_index: cycleIndex !== null ? Number(cycleIndex) : undefined,
+        }),
       });
       const data = await res.json();
       if (data.success) {
-        setStatus('success');
-        setMessage(data.message || 'Viagem aceita com sucesso!');
+        setStatus("success");
+        setMessage(data.message || "Viagem aceita com sucesso!");
       } else {
-        setStatus('error');
-        setMessage(data.error || 'Erro ao aceitar viagem.');
+        setStatus("error");
+        setMessage(data.error || "Erro ao aceitar viagem.");
       }
     } catch {
-      setStatus('error');
-      setMessage('Erro de conexão. Tente novamente mais tarde.');
+      setStatus("error");
+      setMessage("Erro de conexão. Tente novamente mais tarde.");
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-[2rem] border border-slate-200 shadow-xl shadow-slate-200/40 p-8 text-center space-y-6">
-        {status === 'loading' && (
+        {status === "loading" && (
           <>
             <Loader2 size={48} className="animate-spin text-blue-600 mx-auto" />
-            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Aguarde</h1>
+            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">
+              Aguarde
+            </h1>
             <p className="text-sm font-semibold text-slate-500">{message}</p>
           </>
         )}
 
-        {status === 'form' && preview && (
+        {status === "form" && preview && (
           <form onSubmit={handleSubmit} className="space-y-6 text-left">
             <div className="text-center space-y-2">
               <Car size={40} className="text-blue-600 mx-auto" />
-              <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Confirmar Aceite</h1>
-              <p className="text-sm font-semibold text-slate-500">Protocolo: {preview.os.protocolo || preview.os.os_number}</p>
+              <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">
+                {preview.cycleTitle || "Confirmar Aceite"}
+              </h1>
+              <p className="text-sm font-semibold text-slate-500">
+                Protocolo: {preview.os.protocolo || preview.os.os_number}
+              </p>
               <p className="text-xs text-slate-400">
-                {preview.os.data ? preview.os.data.split('-').reverse().join('/') : ''} {preview.os.hora || ''}
+                {preview.os.data
+                  ? preview.os.data.split("-").reverse().join("/")
+                  : ""}{" "}
+                {preview.os.hora || ""}
               </p>
             </div>
 
@@ -149,48 +184,60 @@ export default function AceitarViagemPage() {
           </form>
         )}
 
-        {status === 'submitting' && (
+        {status === "submitting" && (
           <>
             <Loader2 size={48} className="animate-spin text-blue-600 mx-auto" />
-            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Processando</h1>
-            <p className="text-sm font-semibold text-slate-500">Registrando aceite...</p>
+            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">
+              Processando
+            </h1>
+            <p className="text-sm font-semibold text-slate-500">
+              Registrando aceite...
+            </p>
           </>
         )}
 
-        {status === 'success' && (
+        {status === "success" && (
           <>
             <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
               <CheckCircle2 size={32} className="text-emerald-600" />
             </div>
-            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Viagem Confirmada</h1>
+            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">
+              Viagem Confirmada
+            </h1>
             <div className="space-y-2">
               <p className="text-sm font-semibold text-slate-500">{message}</p>
               <p className="text-xs font-medium text-slate-400">
-                Obrigado por confirmar! O motorista foi notificado e já está se preparando para o trajeto.
+                Obrigado por confirmar! O motorista foi notificado e já está se
+                preparando para o trajeto.
               </p>
               <p className="text-xs font-medium text-slate-400 pt-2">
-                Aguarde a chegada do veículo no local combinado. Qualquer alteração, entraremos em contato pelo WhatsApp.
+                Aguarde a chegada do veículo no local combinado. Qualquer
+                alteração, entraremos em contato pelo WhatsApp.
               </p>
             </div>
           </>
         )}
 
-        {status === 'already' && (
+        {status === "already" && (
           <>
             <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto">
               <CheckCircle2 size={32} className="text-blue-600" />
             </div>
-            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Já Confirmada</h1>
+            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">
+              Já Confirmada
+            </h1>
             <p className="text-sm font-semibold text-slate-500">{message}</p>
           </>
         )}
 
-        {status === 'error' && (
+        {status === "error" && (
           <>
             <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto">
               <AlertCircle size={32} className="text-red-600" />
             </div>
-            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">Erro</h1>
+            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wider">
+              Erro
+            </h1>
             <p className="text-sm font-semibold text-slate-500">{message}</p>
           </>
         )}

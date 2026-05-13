@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/client';
+import { createClient } from "@/lib/supabase/client";
 import type {
   Cliente,
   CentroCusto,
@@ -9,8 +9,13 @@ import type {
   NovoPassageiroInput,
   Waypoint,
   Driver,
-  Vehicle
-} from '@/context/DataContext';
+  Vehicle,
+} from "@/context/DataContext";
+import {
+  buildOperationalCyclesFromWaypoints,
+  normalizeOperationalCycles,
+  type OperationalCycle,
+} from "@/lib/os-messages";
 
 let _supabase: ReturnType<typeof createClient> | null = null;
 const getSupabase = () => {
@@ -18,7 +23,8 @@ const getSupabase = () => {
   return _supabase;
 };
 
-const trimText = (value?: string): string => value?.trim() ?? '';
+const trimText = (value?: string): string => value?.trim() ?? "";
+const upperText = (value?: string): string => trimText(value).toUpperCase();
 
 type PaginationParams = {
   page?: number;
@@ -42,21 +48,33 @@ const normalizePagination = (page = 1, pageSize = 10) => {
   };
 };
 
-const sanitizeSearchTerm = (term: string): string => term.trim().replace(/[%_]/g, '\\$&');
+const PASSAGEIRO_SELECT_COLUMNS =
+  "id, nome_completo, email, celular, cpf, notificar, genero, passageiro_enderecos(id, rotulo, endereco_completo, referencia)";
+const PASSAGEIRO_PAGE_SELECT_COLUMNS =
+  "id, nome_completo, email, celular, cpf, notificar, genero";
+const DRIVER_SELECT_COLUMNS =
+  "id, name, cpf, cnh, phone, status, created_at, vinculo_tipo, parceiro_id, driver_vehicles(id, vehicle_id, vehicle:veiculos(id, placa, modelo, marca, tipo)), driver_documents(id)";
+const DRIVER_PAGE_SELECT_COLUMNS =
+  "id, name, cpf, cnh, phone, status, created_at, vinculo_tipo, parceiro_id, driver_vehicles(id, vehicle_id, vehicle:veiculos(id, placa, modelo, marca, tipo)), driver_documents(id)";
+const VEICULO_PAGE_SELECT_COLUMNS =
+  "id, placa, renavam, modelo, marca, ano, cor, tipo, status, created_at";
+
+const sanitizeSearchTerm = (term: string): string =>
+  term.trim().replace(/[%_]/g, "\\$&");
 
 // Função para criar notificações
 export async function createNotification(
-  type: 'success' | 'info' | 'warning' | 'error',
+  type: "success" | "info" | "warning" | "error",
   title: string,
   message: string,
-  targetAudience: 'interno' | 'gestor' | 'all' = 'all',
-  targetUserId?: string
+  targetAudience: "interno" | "gestor" | "all" = "all",
+  targetUserId?: string,
 ): Promise<void> {
   try {
-    const response = await fetch('/api/app-notifications', {
-      method: 'POST',
+    const response = await fetch("/api/app-notifications", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         type,
@@ -68,17 +86,26 @@ export async function createNotification(
     });
 
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      console.error('Erro ao criar notificação:', payload?.error || `HTTP ${response.status}`);
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      console.error(
+        "Erro ao criar notificação:",
+        payload?.error || `HTTP ${response.status}`,
+      );
     }
   } catch (err) {
-    console.error('Erro ao criar notificação:', err);
+    console.error("Erro ao criar notificação:", err);
   }
 }
 
-
 type CentroCustoRow = { id: string; nome: string; cliente_id: string };
-type SolicitanteRow = { id: string; nome: string; cliente_id: string; centro_custo_id: string | null };
+type SolicitanteRow = {
+  id: string;
+  nome: string;
+  cliente_id: string;
+  centro_custo_id: string | null;
+};
 type PassageiroRow = {
   id: string;
   nome_completo: string;
@@ -107,13 +134,17 @@ type OSRow = {
   solicitante: string | null;
   tipo_servico: string | null;
   motorista: string | null;
+  driver_id?: string | null;
+  solicitante_id?: string | null;
+  centro_custo_id?: string | null;
   veiculo_id?: string | null;
   valor_bruto: number | string | null;
   imposto: number | string | null;
   custo: number | string | null;
   lucro: number | string | null;
-  status_operacional: OrderService['status']['operacional'];
-  status_financeiro: OrderService['status']['financeiro'];
+  obs_financeiras: string | null;
+  status_operacional: OrderService["status"]["operacional"];
+  status_financeiro: OrderService["status"]["financeiro"];
   distancia: string | null;
   arquivado: boolean;
   driver_message_sent_at: string | null;
@@ -123,6 +154,11 @@ type OSRow = {
   route_started_km: number | null;
   route_finished_at: string | null;
   route_finished_km: number | null;
+  driver_operation_cycles: OperationalCycle[] | null;
+  current_driver_cycle_index: number | null;
+  created_at: string | null;
+  created_by: string | null;
+  created_by_name: string | null;
 };
 type OSWaypointRow = {
   id: string;
@@ -142,12 +178,14 @@ type OSWaypointPassengerRow = {
   passageiro_id: string | null;
 };
 
-const formatWaypointDateForUi = (value: string | null | undefined): string | undefined => {
+const formatWaypointDateForUi = (
+  value: string | null | undefined,
+): string | undefined => {
   if (!value) return undefined;
 
-  if (value.includes('/')) return value;
+  if (value.includes("/")) return value;
 
-  const parts = value.split('-');
+  const parts = value.split("-");
   if (parts.length === 3) {
     const [year, month, day] = parts;
     if (year && month && day) return `${day}/${month}/${year}`;
@@ -156,21 +194,30 @@ const formatWaypointDateForUi = (value: string | null | undefined): string | und
   return value;
 };
 
-const normalizeWaypointDateForDb = (value: string | null | undefined): string | null => {
+const normalizeWaypointDateForDb = (
+  value: string | null | undefined,
+): string | null => {
   if (!value) return null;
 
   const trimmed = value.trim();
   if (!trimmed) return null;
 
-  if (trimmed.includes('-')) return trimmed;
+  if (trimmed.includes("-")) return trimmed;
 
-  const parts = trimmed.split('/');
+  const parts = trimmed.split("/");
   if (parts.length === 3) {
     const [day, month, year] = parts;
     if (day && month && year) return `${year}-${month}-${day}`;
   }
 
-  return trimmed;
+  if (parts.length === 2) {
+    const [day, month] = parts;
+    const year = new Date().getFullYear();
+    if (day && month)
+      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  return null;
 };
 
 type DriverRow = {
@@ -179,24 +226,35 @@ type DriverRow = {
   cpf?: string;
   cnh?: string | null;
   phone?: string | null;
-  status: 'active' | 'inactive';
+  status: "active" | "inactive";
   created_at?: string;
+  vinculo_tipo?: "interno" | "parceiro" | "autonomo";
+  parceiro_id?: string | null;
   driver_vehicles?: Array<{
     id: string;
     vehicle_id: string;
-    vehicle: {
-      id: string;
-      placa: string;
-      modelo: string;
-      marca: string;
-    };
+    vehicle:
+      | {
+          id: string;
+          placa: string;
+          modelo: string;
+          marca: string;
+          tipo?: string;
+        }
+      | {
+          id: string;
+          placa: string;
+          modelo: string;
+          marca: string;
+          tipo?: string;
+        }[];
   }>;
 };
 
 const mapOSRecord = (
   o: OSRow,
   wpRaw: OSWaypointRow[],
-  wpPassRaw: OSWaypointPassengerRow[]
+  wpPassRaw: OSWaypointPassengerRow[],
 ): OrderService => {
   const waypoints: Waypoint[] = wpRaw
     .filter((w) => w.ordem_servico_id === o.id)
@@ -212,30 +270,34 @@ const mapOSRecord = (
         .filter((p) => p.waypoint_id === w.id)
         .map((p) => ({
           id: p.id,
-          solicitanteId: p.passageiro_id || '',
-          nome: '',
+          solicitanteId: p.passageiro_id || "",
+          nome: "",
         })),
     }));
 
   return {
     id: o.id,
-    protocolo: o.protocolo || '',
-    os: o.os_number || '',
-    data: o.data || '',
+    protocolo: o.protocolo || "",
+    os: o.os_number || "",
+    data: o.data || "",
     hora: o.hora,
-    horaExtra: o.hora_extra || '',
-    clienteId: o.cliente_id || '',
-    solicitante: o.solicitante || '',
-    centroCustoId: o.centro_custo || '',
-    motorista: o.motorista || '',
+    horaExtra: o.hora_extra || "",
+    clienteId: o.cliente_id || "",
+    solicitante: o.solicitante || "",
+    solicitanteId: o.solicitante_id || undefined,
+    centroCustoId: o.centro_custo_id || o.centro_custo || "",
+    motorista: o.motorista || "",
+    driverId: o.driver_id || undefined,
     veiculoId: o.veiculo_id || undefined,
     valorBruto: o.valor_bruto !== null ? Number(o.valor_bruto) : null,
     imposto: o.imposto !== null ? Number(o.imposto) : null,
     custo: o.custo !== null ? Number(o.custo) : null,
     lucro: o.lucro !== null ? Number(o.lucro) : null,
+    obsFinanceiras: o.obs_financeiras || "",
     status: {
-      operacional: o.status_operacional as OrderService['status']['operacional'],
-      financeiro: o.status_financeiro as OrderService['status']['financeiro'],
+      operacional:
+        o.status_operacional as OrderService["status"]["operacional"],
+      financeiro: o.status_financeiro as OrderService["status"]["financeiro"],
     },
     distancia: o.distancia ? Number(o.distancia) : undefined,
     rota: waypoints.length > 0 ? { waypoints } : undefined,
@@ -246,6 +308,10 @@ const mapOSRecord = (
     routeStartedKm: o.route_started_km ?? undefined,
     routeFinishedAt: o.route_finished_at ?? undefined,
     routeFinishedKm: o.route_finished_km ?? undefined,
+    operationalCycles: normalizeOperationalCycles(o.driver_operation_cycles),
+    currentDriverCycleIndex: o.current_driver_cycle_index ?? undefined,
+    createdAt: o.created_at ?? undefined,
+    createdByName: o.created_by_name ?? undefined,
   };
 };
 
@@ -253,9 +319,10 @@ const mapOSRecord = (
 
 export async function fetchClientes(): Promise<Cliente[]> {
   const { data: clientesRaw, error } = await getSupabase()
-    .from('clientes')
-    .select('id, nome, contato, centros_custo(id, nome, cliente_id)')
-    .order('nome');
+    .from("clientes")
+    .select("id, nome, contato, centros_custo(id, nome, cliente_id, arquivado)")
+    .eq("arquivado", false)
+    .order("nome");
 
   if (error) throw error;
 
@@ -263,50 +330,70 @@ export async function fetchClientes(): Promise<Cliente[]> {
     id: String(c.id),
     nome: String(c.nome),
     contato: c.contato ? String(c.contato) : undefined,
-    centrosCusto: ((c.centros_custo || []) as Record<string, unknown>[]).map((cc) => ({
-      id: String(cc.id),
-      nome: String(cc.nome),
-      clienteId: String(cc.cliente_id),
-    })),
+    centrosCusto: ((c.centros_custo || []) as Record<string, unknown>[])
+      .filter((cc) => cc.arquivado === false)
+      .map((cc) => ({
+        id: String(cc.id),
+        nome: String(cc.nome),
+        clienteId: String(cc.cliente_id),
+      })),
   }));
 }
 
-export async function insertCentroCusto(nome: string, clienteId: string): Promise<CentroCusto> {
+export async function insertCentroCusto(
+  nome: string,
+  clienteId: string,
+): Promise<CentroCusto> {
   const { data, error } = await getSupabase()
-    .from('centros_custo')
-    .insert({ nome, cliente_id: clienteId })
-    .select('id, nome, cliente_id')
+    .from("centros_custo")
+    .insert({ nome: upperText(nome), cliente_id: clienteId })
+    .select("id, nome, cliente_id")
     .single();
 
   if (error) throw error;
   return { id: data.id, nome: data.nome, clienteId: data.cliente_id };
 }
 
-export async function updateCentroCustoInDB(id: string, updates: Partial<CentroCusto>): Promise<void> {
+export async function updateCentroCustoInDB(
+  id: string,
+  updates: Partial<CentroCusto>,
+): Promise<void> {
   const { error } = await getSupabase()
-    .from('centros_custo')
-    .update({ nome: updates.nome, cliente_id: updates.clienteId })
-    .eq('id', id);
+    .from("centros_custo")
+    .update({
+      nome: updates.nome ? upperText(updates.nome) : undefined,
+      cliente_id: updates.clienteId,
+    })
+    .eq("id", id);
   if (error) throw error;
 }
 
 export async function deleteCentroCustoFromDB(id: string): Promise<void> {
-  const { error } = await getSupabase().from('centros_custo').delete().eq('id', id);
+  const { error } = await getSupabase()
+    .from("centros_custo")
+    .update({ arquivado: true })
+    .eq("id", id);
   if (error) throw error;
 }
 
-export async function insertCliente(nome: string, contato?: string): Promise<Cliente> {
+export async function insertCliente(
+  nome: string,
+  contato?: string,
+): Promise<Cliente> {
   const { data, error } = await getSupabase()
-    .from('clientes')
+    .from("clientes")
     .insert({ nome: trimText(nome), contato: trimText(contato) || null })
-    .select('id, nome, contato')
+    .select("id, nome, contato")
     .single();
 
   if (error) throw error;
   return { ...data, contato: data.contato || undefined, centrosCusto: [] };
 }
 
-export async function updateClienteInDB(id: string, updates: Partial<Cliente>): Promise<void> {
+export async function updateClienteInDB(
+  id: string,
+  updates: Partial<Cliente>,
+): Promise<void> {
   const payload: { nome?: string; contato?: string | null } = {};
 
   if (updates.nome !== undefined) {
@@ -318,18 +405,18 @@ export async function updateClienteInDB(id: string, updates: Partial<Cliente>): 
   }
 
   const { error } = await getSupabase()
-    .from('clientes')
+    .from("clientes")
     .update(payload)
-    .eq('id', id);
+    .eq("id", id);
 
   if (error) throw error;
 }
 
 export async function deleteClienteFromDB(id: string): Promise<void> {
   const { error } = await getSupabase()
-    .from('clientes')
-    .delete()
-    .eq('id', id);
+    .from("clientes")
+    .update({ arquivado: true })
+    .eq("id", id);
 
   if (error) throw error;
 }
@@ -338,53 +425,65 @@ export async function deleteClienteFromDB(id: string): Promise<void> {
 
 export async function fetchSolicitantes(): Promise<Solicitante[]> {
   const { data, error } = await getSupabase()
-    .from('solicitantes')
-    .select('id, nome, cliente_id, centro_custo_id')
-    .order('nome');
+    .from("solicitantes")
+    .select("id, nome, cliente_id, centro_custo_id")
+    .eq("arquivado", false)
+    .order("nome");
 
   if (error) throw error;
-  return ((data || []) as SolicitanteRow[]).map((s) => ({ 
-    id: s.id, 
-    nome: s.nome, 
+  return ((data || []) as SolicitanteRow[]).map((s) => ({
+    id: s.id,
+    nome: s.nome,
     clienteId: s.cliente_id,
-    centroCustoId: s.centro_custo_id || undefined
+    centroCustoId: s.centro_custo_id || undefined,
   }));
 }
 
-export async function insertSolicitante(nome: string, clienteId: string, centroCustoId?: string): Promise<Solicitante> {
+export async function insertSolicitante(
+  nome: string,
+  clienteId: string,
+  centroCustoId?: string,
+): Promise<Solicitante> {
   const { data, error } = await getSupabase()
-    .from('solicitantes')
-    .insert({ nome, cliente_id: clienteId, centro_custo_id: centroCustoId })
-    .select('id, nome, cliente_id, centro_custo_id')
+    .from("solicitantes")
+    .insert({
+      nome: upperText(nome),
+      cliente_id: clienteId,
+      centro_custo_id: centroCustoId,
+    })
+    .select("id, nome, cliente_id, centro_custo_id")
     .single();
 
   if (error) throw error;
-  return { 
-    id: data.id, 
-    nome: data.nome, 
+  return {
+    id: data.id,
+    nome: data.nome,
     clienteId: data.cliente_id,
-    centroCustoId: data.centro_custo_id
+    centroCustoId: data.centro_custo_id,
   };
 }
 
-export async function updateSolicitanteInDB(id: string, updates: Partial<Solicitante>): Promise<void> {
+export async function updateSolicitanteInDB(
+  id: string,
+  updates: Partial<Solicitante>,
+): Promise<void> {
   const { error } = await getSupabase()
-    .from('solicitantes')
-    .update({ 
-      nome: updates.nome, 
+    .from("solicitantes")
+    .update({
+      nome: updates.nome ? upperText(updates.nome) : undefined,
       cliente_id: updates.clienteId,
-      centro_custo_id: updates.centroCustoId
+      centro_custo_id: updates.centroCustoId,
     })
-    .eq('id', id);
+    .eq("id", id);
 
   if (error) throw error;
 }
 
 export async function deleteSolicitanteFromDB(id: string): Promise<void> {
   const { error } = await getSupabase()
-    .from('solicitantes')
-    .delete()
-    .eq('id', id);
+    .from("solicitantes")
+    .update({ arquivado: true })
+    .eq("id", id);
 
   if (error) throw error;
 }
@@ -393,9 +492,10 @@ export async function deleteSolicitanteFromDB(id: string): Promise<void> {
 
 export async function fetchPassageiros(): Promise<Passageiro[]> {
   const { data: passRaw, error } = await getSupabase()
-    .from('passageiros')
-    .select('id, nome_completo, email, celular, cpf, notificar, genero, passageiro_enderecos(id, rotulo, endereco_completo, referencia)')
-    .order('nome_completo');
+    .from("passageiros")
+    .select(PASSAGEIRO_SELECT_COLUMNS)
+    .eq("arquivado", false)
+    .order("nome_completo");
 
   if (error) throw error;
 
@@ -403,11 +503,13 @@ export async function fetchPassageiros(): Promise<Passageiro[]> {
     id: String(p.id),
     nomeCompleto: String(p.nome_completo),
     email: p.email ? String(p.email) : undefined,
-    celular: p.celular ? String(p.celular) : '',
+    celular: p.celular ? String(p.celular) : "",
     cpf: p.cpf ? String(p.cpf) : undefined,
-    notificar: typeof p.notificar === 'boolean' ? p.notificar : undefined,
-    genero: typeof p.genero === 'string' ? p.genero : undefined,
-    enderecos: ((p.passageiro_enderecos || []) as Record<string, unknown>[]).map((e) => ({
+    notificar: typeof p.notificar === "boolean" ? p.notificar : undefined,
+    genero: typeof p.genero === "string" ? p.genero : undefined,
+    enderecos: (
+      (p.passageiro_enderecos || []) as Record<string, unknown>[]
+    ).map((e) => ({
       id: String(e.id),
       rotulo: String(e.rotulo),
       enderecoCompleto: String(e.endereco_completo),
@@ -416,18 +518,20 @@ export async function fetchPassageiros(): Promise<Passageiro[]> {
   }));
 }
 
-export async function insertPassageiro(input: NovoPassageiroInput): Promise<Passageiro> {
+export async function insertPassageiro(
+  input: NovoPassageiroInput,
+): Promise<Passageiro> {
   const { data: passRow, error: passError } = await getSupabase()
-    .from('passageiros')
+    .from("passageiros")
     .insert({
-      nome_completo: trimText(input.nomeCompleto),
+      nome_completo: upperText(input.nomeCompleto),
       email: input.email ? trimText(input.email) : null,
       celular: trimText(input.celular),
       cpf: input.cpf ? trimText(input.cpf) : null,
       notificar: input.notificar ?? false,
       genero: input.genero || null,
     })
-    .select('id, nome_completo, email, celular, cpf, notificar, genero')
+    .select("id, nome_completo, email, celular, cpf, notificar, genero")
     .single();
 
   if (passError) throw passError;
@@ -436,16 +540,16 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
 
   if (input.enderecos.length > 0) {
     const { data: endRows, error: endError } = await getSupabase()
-      .from('passageiro_enderecos')
+      .from("passageiro_enderecos")
       .insert(
         input.enderecos.map((e) => ({
           passageiro_id: passRow.id,
-          rotulo: trimText(e.rotulo) || 'Principal',
+          rotulo: trimText(e.rotulo) || "Principal",
           endereco_completo: trimText(e.enderecoCompleto),
           referencia: trimText(e.referencia) || null,
-        }))
+        })),
       )
-      .select('id, rotulo, endereco_completo, referencia');
+      .select("id, rotulo, endereco_completo, referencia");
 
     if (!endError && endRows) {
       (endRows as PassageiroEnderecoRow[]).forEach((e) =>
@@ -454,7 +558,7 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
           rotulo: e.rotulo,
           enderecoCompleto: e.endereco_completo,
           referencia: e.referencia || undefined,
-        })
+        }),
       );
     }
   }
@@ -463,7 +567,7 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
     id: passRow.id,
     nomeCompleto: passRow.nome_completo,
     email: passRow.email || undefined,
-    celular: passRow.celular || '',
+    celular: passRow.celular || "",
     cpf: passRow.cpf || undefined,
     notificar: passRow.notificar || undefined,
     genero: passRow.genero || undefined,
@@ -471,59 +575,59 @@ export async function insertPassageiro(input: NovoPassageiroInput): Promise<Pass
   };
 }
 
-export async function updatePassageiroInDB(id: string, input: NovoPassageiroInput): Promise<Passageiro> {
+export async function updatePassageiroInDB(
+  id: string,
+  input: NovoPassageiroInput,
+): Promise<Passageiro> {
+  const enderecosPayload = input.enderecos.map((e) => ({
+    rotulo: trimText(e.rotulo) || "Principal",
+    endereco_completo: trimText(e.enderecoCompleto),
+    referencia: trimText(e.referencia) || null,
+  }));
+
+  const { error: rpcError } = await getSupabase().rpc(
+    "update_passageiro_atomic",
+    {
+      p_passageiro_id: id,
+      p_nome_completo: upperText(input.nomeCompleto),
+      p_email: input.email ? trimText(input.email) : null,
+      p_celular: trimText(input.celular),
+      p_cpf: input.cpf ? trimText(input.cpf) : null,
+      p_notificar: input.notificar ?? false,
+      p_genero: input.genero || null,
+      p_enderecos: enderecosPayload,
+    },
+  );
+
+  if (rpcError) throw rpcError;
+
+  // Buscar dados atualizados
   const { data: passRow, error: passError } = await getSupabase()
-    .from('passageiros')
-    .update({
-      nome_completo: trimText(input.nomeCompleto),
-      email: input.email ? trimText(input.email) : null,
-      celular: trimText(input.celular),
-      cpf: input.cpf ? trimText(input.cpf) : null,
-      notificar: input.notificar ?? false,
-      genero: input.genero || null,
-    })
-    .eq('id', id)
-    .select('id, nome_completo, email, celular, cpf, notificar, genero')
+    .from("passageiros")
+    .select("id, nome_completo, email, celular, cpf, notificar, genero")
+    .eq("id", id)
     .single();
 
-  if (passError) throw passError;
+  if (passError || !passRow)
+    throw passError || new Error("Passageiro não encontrado após atualização.");
 
-  // Deletar endereços antigos
-  await getSupabase().from('passageiro_enderecos').delete().eq('passageiro_id', id);
+  const { data: endRows } = await getSupabase()
+    .from("passageiro_enderecos")
+    .select("id, rotulo, endereco_completo, referencia")
+    .eq("passageiro_id", id);
 
-  // Inserir novos endereços
-  const enderecos: PassageiroEndereco[] = [];
-
-  if (input.enderecos.length > 0) {
-    const { data: endRows, error: endError } = await getSupabase()
-      .from('passageiro_enderecos')
-      .insert(
-        input.enderecos.map((e) => ({
-          passageiro_id: id,
-          rotulo: trimText(e.rotulo) || 'Principal',
-          endereco_completo: trimText(e.enderecoCompleto),
-          referencia: trimText(e.referencia) || null,
-        }))
-      )
-      .select('id, rotulo, endereco_completo, referencia');
-
-    if (!endError && endRows) {
-      (endRows as PassageiroEnderecoRow[]).forEach((e) =>
-        enderecos.push({
-          id: e.id,
-          rotulo: e.rotulo,
-          enderecoCompleto: e.endereco_completo,
-          referencia: e.referencia || undefined,
-        })
-      );
-    }
-  }
+  const enderecos: PassageiroEndereco[] = (endRows || []).map((e) => ({
+    id: e.id,
+    rotulo: e.rotulo,
+    enderecoCompleto: e.endereco_completo,
+    referencia: e.referencia || undefined,
+  }));
 
   return {
     id: passRow.id,
     nomeCompleto: passRow.nome_completo,
     email: passRow.email || undefined,
-    celular: passRow.celular || '',
+    celular: passRow.celular || "",
     cpf: passRow.cpf || undefined,
     notificar: passRow.notificar || undefined,
     genero: passRow.genero || undefined,
@@ -532,7 +636,10 @@ export async function updatePassageiroInDB(id: string, input: NovoPassageiroInpu
 }
 
 export async function deletePassageiroFromDB(id: string): Promise<void> {
-  const { error } = await getSupabase().from('passageiros').delete().eq('id', id);
+  const { error } = await getSupabase()
+    .from("passageiros")
+    .update({ arquivado: true })
+    .eq("id", id);
 
   if (error) throw error;
 }
@@ -540,21 +647,22 @@ export async function deletePassageiroFromDB(id: string): Promise<void> {
 export async function fetchPassageirosPage({
   page = 1,
   pageSize = 10,
-  searchTerm = '',
+  searchTerm = "",
 }: PaginationParams = {}): Promise<PaginatedResult<Passageiro>> {
   const { from, to } = normalizePagination(page, pageSize);
   const term = searchTerm.trim();
-  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : "";
 
   let query = getSupabase()
-    .from('passageiros')
-    .select('*', { count: 'exact' })
-    .order('nome_completo', { ascending: true })
+    .from("passageiros")
+    .select(PASSAGEIRO_PAGE_SELECT_COLUMNS, { count: "exact" })
+    .eq("arquivado", false)
+    .order("nome_completo", { ascending: true })
     .range(from, to);
 
   if (likeTerm) {
     query = query.or(
-      `nome_completo.ilike.${likeTerm},email.ilike.${likeTerm},celular.ilike.${likeTerm},cpf.ilike.${likeTerm}`
+      `nome_completo.ilike.${likeTerm},email.ilike.${likeTerm},celular.ilike.${likeTerm},cpf.ilike.${likeTerm}`,
     );
   }
 
@@ -567,9 +675,9 @@ export async function fetchPassageirosPage({
   let endRaw: PassageiroEnderecoRow[] = [];
   if (passengerIds.length > 0) {
     const { data: endData } = await getSupabase()
-      .from('passageiro_enderecos')
-      .select('id, passageiro_id, rotulo, endereco_completo, referencia')
-      .in('passageiro_id', passengerIds);
+      .from("passageiro_enderecos")
+      .select("id, passageiro_id, rotulo, endereco_completo, referencia")
+      .in("passageiro_id", passengerIds);
 
     endRaw = (endData || []) as PassageiroEnderecoRow[];
   }
@@ -579,7 +687,7 @@ export async function fetchPassageirosPage({
       id: p.id,
       nomeCompleto: p.nome_completo,
       email: p.email || undefined,
-      celular: p.celular || '',
+      celular: p.celular || "",
       cpf: p.cpf || undefined,
       notificar: p.notificar ?? undefined,
       genero: p.genero ?? undefined,
@@ -598,9 +706,12 @@ export async function fetchPassageirosPage({
 
 // ── Veículos ───────────────────────────────────────────
 
-export async function updateVeiculoInDB(id: string, input: Partial<Vehicle>): Promise<Vehicle> {
+export async function updateVeiculoInDB(
+  id: string,
+  input: Partial<Vehicle>,
+): Promise<Vehicle> {
   const { data: vehRow, error: vehError } = await getSupabase()
-    .from('veiculos')
+    .from("veiculos")
     .update({
       placa: input.placa?.trim().toUpperCase(),
       renavam: input.renavam?.trim(),
@@ -611,8 +722,8 @@ export async function updateVeiculoInDB(id: string, input: Partial<Vehicle>): Pr
       tipo: input.tipo,
       status: input.status,
     })
-    .eq('id', id)
-    .select('*')
+    .eq("id", id)
+    .select("*")
     .single();
 
   if (vehError) throw vehError;
@@ -625,52 +736,93 @@ export async function updateVeiculoInDB(id: string, input: Partial<Vehicle>): Pr
     marca: vehRow.marca,
     ano: vehRow.ano,
     cor: vehRow.cor || undefined,
-    tipo: vehRow.tipo as Vehicle['tipo'],
-    status: vehRow.status as Vehicle['status'],
-    proprietario_tipo: vehRow.proprietario_tipo as Vehicle['proprietario_tipo'],
-    parceiro_id: vehRow.parceiro_id || undefined,
+    tipo: vehRow.tipo as Vehicle["tipo"],
+    status: vehRow.status as Vehicle["status"],
     created_at: vehRow.created_at,
   };
 }
 
 export async function deleteVeiculoFromDB(id: string): Promise<void> {
-  const { error } = await getSupabase().from('veiculos').delete().eq('id', id);
+  const { error } = await getSupabase()
+    .from("veiculos")
+    .update({ arquivado: true, status: "inativo" })
+    .eq("id", id);
 
   if (error) throw error;
 }
 
 // ── Ordens de Serviço ─────────────────────────────────────
 
+const OS_SELECT_COLUMNS = [
+  "id",
+  "protocolo",
+  "os_number",
+  "data",
+  "hora",
+  "hora_extra",
+  "cliente_id",
+  "centro_custo",
+  "centro_custo_id",
+  "solicitante",
+  "solicitante_id",
+  "motorista",
+  "driver_id",
+  "veiculo_id",
+  "valor_bruto",
+  "imposto",
+  "custo",
+  "lucro",
+  "obs_financeiras",
+  "status_operacional",
+  "status_financeiro",
+  "distancia",
+  "arquivado",
+  "driver_message_sent_at",
+  "driver_accepted_at",
+  "driver_km_initial",
+  "route_started_at",
+  "route_started_km",
+  "route_finished_at",
+  "route_finished_km",
+  "driver_operation_cycles",
+  "current_driver_cycle_index",
+  "created_at",
+  "created_by",
+  "created_by_name",
+].join(",");
+
 export async function fetchOSList(): Promise<OrderService[]> {
   const { data: osRaw, error } = await getSupabase()
-    .from('ordens_servico')
-    .select('*')
-    .eq('arquivado', false)
-    .order('created_at', { ascending: false })
+    .from("ordens_servico")
+    .select(OS_SELECT_COLUMNS)
+    .eq("arquivado", false)
+    .order("created_at", { ascending: false })
     .limit(100);
 
   if (error) throw error;
 
-  const typedOrders = (osRaw || []) as OSRow[];
+  const typedOrders = (osRaw || []) as unknown as OSRow[];
   const osIds = typedOrders.map((o) => o.id);
   let wpRaw: OSWaypointRow[] = [];
   let wpPassRaw: OSWaypointPassengerRow[] = [];
 
   if (osIds.length > 0) {
     const { data: wpData } = await getSupabase()
-      .from('os_waypoints')
-      .select('id, ordem_servico_id, position, label, lat, lng, comment, itinerary_index, hora, data')
-      .in('ordem_servico_id', osIds)
-      .order('position');
+      .from("os_waypoints")
+      .select(
+        "id, ordem_servico_id, position, label, lat, lng, comment, itinerary_index, hora, data",
+      )
+      .in("ordem_servico_id", osIds)
+      .order("position");
 
     wpRaw = (wpData || []) as OSWaypointRow[];
     const wpIds = wpRaw.map((w) => w.id);
 
     if (wpIds.length > 0) {
       const { data: passData } = await getSupabase()
-        .from('os_waypoint_passengers')
-        .select('id, waypoint_id, passageiro_id')
-        .in('waypoint_id', wpIds);
+        .from("os_waypoint_passengers")
+        .select("id, waypoint_id, passageiro_id")
+        .in("waypoint_id", wpIds);
 
       wpPassRaw = (passData || []) as OSWaypointPassengerRow[];
     }
@@ -681,84 +833,88 @@ export async function fetchOSList(): Promise<OrderService[]> {
 
 export async function fetchOSById(id: string): Promise<OrderService | null> {
   const { data: osRaw, error } = await getSupabase()
-    .from('ordens_servico')
-    .select('*')
-    .eq('id', id)
+    .from("ordens_servico")
+    .select(OS_SELECT_COLUMNS)
+    .eq("id", id)
     .maybeSingle();
 
   if (error) throw error;
   if (!osRaw) return null;
 
   const { data: wpData, error: wpError } = await getSupabase()
-    .from('os_waypoints')
-    .select('id, ordem_servico_id, position, label, lat, lng, comment, itinerary_index, hora, data')
-    .eq('ordem_servico_id', id)
-    .order('position');
+    .from("os_waypoints")
+    .select(
+      "id, ordem_servico_id, position, label, lat, lng, comment, itinerary_index, hora, data",
+    )
+    .eq("ordem_servico_id", id)
+    .order("position");
 
   if (wpError) throw wpError;
 
-  const wpRaw = (wpData || []) as OSWaypointRow[];
+  const wpRaw = (wpData || []) as unknown as OSWaypointRow[];
   const wpIds = wpRaw.map((w) => w.id);
   let wpPassRaw: OSWaypointPassengerRow[] = [];
 
   if (wpIds.length > 0) {
     const { data: passData, error: passError } = await getSupabase()
-      .from('os_waypoint_passengers')
-      .select('id, waypoint_id, passageiro_id')
-      .in('waypoint_id', wpIds);
+      .from("os_waypoint_passengers")
+      .select("id, waypoint_id, passageiro_id")
+      .in("waypoint_id", wpIds);
 
     if (passError) throw passError;
     wpPassRaw = (passData || []) as OSWaypointPassengerRow[];
   }
 
-  return mapOSRecord(osRaw as OSRow, wpRaw, wpPassRaw);
+  return mapOSRecord(osRaw as unknown as OSRow, wpRaw, wpPassRaw);
 }
 
 export async function fetchOSPage({
   page = 1,
   pageSize = 10,
-  searchTerm = '',
+  searchTerm = "",
 }: PaginationParams = {}): Promise<PaginatedResult<OrderService>> {
   const { from, to } = normalizePagination(page, pageSize);
   const term = searchTerm.trim();
-  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : "";
 
   let query = getSupabase()
-    .from('ordens_servico')
-    .select('*', { count: 'exact' })
-    .eq('arquivado', false)
-    .order('created_at', { ascending: false })
+    .from("ordens_servico")
+    .select(OS_SELECT_COLUMNS, { count: "exact" })
+    .eq("arquivado", false)
+    .order("created_at", { ascending: false })
     .range(from, to);
 
   if (likeTerm) {
     query = query.or(
-      `protocolo.ilike.${likeTerm},os_number.ilike.${likeTerm},motorista.ilike.${likeTerm}`
+      `protocolo.ilike.${likeTerm},os_number.ilike.${likeTerm},motorista.ilike.${likeTerm}`,
     );
   }
 
   const { data: osRaw, error, count } = await query;
   if (error) throw error;
 
-  const typedOrders = (osRaw || []) as OSRow[];
+  const typedOrders = (osRaw || []) as unknown as OSRow[];
   const osIds = typedOrders.map((o) => o.id);
   let wpRaw: OSWaypointRow[] = [];
   let wpPassRaw: OSWaypointPassengerRow[] = [];
 
   if (osIds.length > 0) {
     const { data: wpData } = await getSupabase()
-      .from('os_waypoints')
-      .select('id, ordem_servico_id, position, label, lat, lng, comment, itinerary_index, hora, data')
-      .in('ordem_servico_id', osIds)
-      .order('position');
+      .from("os_waypoints")
+      .select(
+        "id, ordem_servico_id, position, label, lat, lng, comment, itinerary_index, hora, data",
+      )
+      .in("ordem_servico_id", osIds)
+      .order("position");
 
     wpRaw = (wpData || []) as OSWaypointRow[];
     const wpIds = wpRaw.map((w) => w.id);
 
     if (wpIds.length > 0) {
       const { data: passData } = await getSupabase()
-        .from('os_waypoint_passengers')
-        .select('id, waypoint_id, passageiro_id')
-        .in('waypoint_id', wpIds);
+        .from("os_waypoint_passengers")
+        .select("id, waypoint_id, passageiro_id")
+        .in("waypoint_id", wpIds);
 
       wpPassRaw = (passData || []) as OSWaypointPassengerRow[];
     }
@@ -780,30 +936,35 @@ export async function fetchOSPage({
             .filter((p) => p.waypoint_id === w.id)
             .map((p) => ({
               id: p.id,
-              solicitanteId: p.passageiro_id || '',
-              nome: '',
+              solicitanteId: p.passageiro_id || "",
+              nome: "",
             })),
         }));
 
       return {
         id: o.id,
-        protocolo: o.protocolo || '',
-        os: o.os_number || '',
-        data: o.data || '',
-        hora: o.hora || '',
-        horaExtra: o.hora_extra || '',
-        clienteId: o.cliente_id || '',
-        solicitante: o.solicitante || '',
-        centroCustoId: o.centro_custo || '',
-        motorista: o.motorista || '',
+        protocolo: o.protocolo || "",
+        os: o.os_number || "",
+        data: o.data || "",
+        hora: o.hora || "",
+        horaExtra: o.hora_extra || "",
+        clienteId: o.cliente_id || "",
+        solicitante: o.solicitante || "",
+        solicitanteId: o.solicitante_id || undefined,
+        centroCustoId: o.centro_custo_id || o.centro_custo || "",
+        motorista: o.motorista || "",
+        driverId: o.driver_id || undefined,
         veiculoId: o.veiculo_id || undefined,
         valorBruto: Number(o.valor_bruto),
         imposto: Number(o.imposto),
         custo: Number(o.custo),
         lucro: Number(o.lucro),
+        obsFinanceiras: o.obs_financeiras || "",
         status: {
-          operacional: o.status_operacional as OrderService['status']['operacional'],
-          financeiro: o.status_financeiro as OrderService['status']['financeiro'],
+          operacional:
+            o.status_operacional as OrderService["status"]["operacional"],
+          financeiro:
+            o.status_financeiro as OrderService["status"]["financeiro"],
         },
         distancia: o.distancia ? Number(o.distancia) : undefined,
         rota: waypoints.length > 0 ? { waypoints } : undefined,
@@ -814,6 +975,10 @@ export async function fetchOSPage({
         routeStartedKm: o.route_started_km ?? undefined,
         routeFinishedAt: o.route_finished_at ?? undefined,
         routeFinishedKm: o.route_finished_km ?? undefined,
+        operationalCycles: normalizeOperationalCycles(
+          o.driver_operation_cycles,
+        ),
+        currentDriverCycleIndex: o.current_driver_cycle_index ?? undefined,
       };
     }),
     totalCount: count ?? typedOrders.length,
@@ -823,55 +988,61 @@ export async function fetchOSPage({
 export async function fetchOSFinancePage({
   page = 1,
   pageSize = 10,
-  searchTerm = '',
-  month = '',
-}: PaginationParams & { month?: string } = {}): Promise<PaginatedResult<OrderService>> {
+  searchTerm = "",
+  month = "",
+}: PaginationParams & { month?: string } = {}): Promise<
+  PaginatedResult<OrderService>
+> {
   const { from, to } = normalizePagination(page, pageSize);
   const term = searchTerm.trim();
-  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : "";
 
   let query = getSupabase()
-    .from('ordens_servico')
-    .select('*', { count: 'exact' })
-    .eq('arquivado', false)
-    .order('created_at', { ascending: false })
+    .from("ordens_servico")
+    .select(OS_SELECT_COLUMNS, { count: "exact" })
+    .eq("arquivado", false)
+    .order("created_at", { ascending: false })
     .range(from, to);
 
   if (month) {
-    query = query.gte('data', `${month}-01`).lt('data', getNextMonthFirstDay(month));
+    query = query
+      .gte("data", `${month}-01`)
+      .lt("data", getNextMonthFirstDay(month));
   }
 
   if (likeTerm) {
     query = query.or(
-      `protocolo.ilike.${likeTerm},os_number.ilike.${likeTerm},motorista.ilike.${likeTerm}`
+      `protocolo.ilike.${likeTerm},os_number.ilike.${likeTerm},motorista.ilike.${likeTerm}`,
     );
   }
 
   const { data: osRaw, error, count } = await query;
   if (error) throw error;
 
-  const typedOrders = (osRaw || []) as OSRow[];
+  const typedOrders = (osRaw || []) as unknown as OSRow[];
 
   return {
     items: typedOrders.map((o) => ({
       id: o.id,
-      protocolo: o.protocolo || '',
-      os: o.os_number || '',
-      data: o.data || '',
-      hora: o.hora || '',
-      horaExtra: o.hora_extra || '',
-      clienteId: o.cliente_id || '',
-      solicitante: o.solicitante || '',
-      centroCustoId: o.centro_custo || '',
-      motorista: o.motorista || '',
+      protocolo: o.protocolo || "",
+      os: o.os_number || "",
+      data: o.data || "",
+      hora: o.hora || "",
+      horaExtra: o.hora_extra || "",
+      clienteId: o.cliente_id || "",
+      solicitante: o.solicitante || "",
+      centroCustoId: o.centro_custo || "",
+      motorista: o.motorista || "",
       veiculoId: o.veiculo_id || undefined,
       valorBruto: o.valor_bruto !== null ? Number(o.valor_bruto) : null,
       imposto: o.imposto !== null ? Number(o.imposto) : null,
       custo: o.custo !== null ? Number(o.custo) : null,
       lucro: o.lucro !== null ? Number(o.lucro) : null,
+      obsFinanceiras: o.obs_financeiras || "",
       status: {
-        operacional: o.status_operacional as OrderService['status']['operacional'],
-        financeiro: o.status_financeiro as OrderService['status']['financeiro'],
+        operacional:
+          o.status_operacional as OrderService["status"]["operacional"],
+        financeiro: o.status_financeiro as OrderService["status"]["financeiro"],
       },
       distancia: o.distancia ? Number(o.distancia) : undefined,
       driverMessageSentAt: o.driver_message_sent_at ?? undefined,
@@ -881,72 +1052,92 @@ export async function fetchOSFinancePage({
       routeStartedKm: o.route_started_km ?? undefined,
       routeFinishedAt: o.route_finished_at ?? undefined,
       routeFinishedKm: o.route_finished_km ?? undefined,
+      operationalCycles: normalizeOperationalCycles(o.driver_operation_cycles),
+      currentDriverCycleIndex: o.current_driver_cycle_index ?? undefined,
     })),
     totalCount: count ?? typedOrders.length,
   };
 }
 
 function getNextMonthFirstDay(month: string): string {
-  const [year, monthNum] = month.split('-').map(Number);
+  const [year, monthNum] = month.split("-").map(Number);
   if (monthNum === 12) return `${year + 1}-01-01`;
-  return `${year}-${String(monthNum + 1).padStart(2, '0')}-01`;
+  return `${year}-${String(monthNum + 1).padStart(2, "0")}-01`;
 }
 
-type OSInput = Omit<OrderService, 'id' | 'lucro' | 'imposto' | 'status' | 'protocolo'>;
+type OSInput = Omit<
+  OrderService,
+  "id" | "lucro" | "imposto" | "status" | "protocolo"
+>;
 
-export async function insertOS(osData: OSInput): Promise<OrderService> {
+export async function insertOS(
+  osData: OSInput,
+  actorName?: string,
+): Promise<OrderService> {
   const impostoPercentual = await getImpostoPercentualForDate(osData.data);
   const vBruto = osData.valorBruto ?? 0;
   const vCusto = osData.custo ?? 0;
   const imposto = vBruto * (impostoPercentual / 100);
   const lucro = vBruto - imposto - vCusto;
-  const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
+  const centroCusto =
+    (osData as OSInput & { centroCusto?: string }).centroCusto ??
+    osData.centroCustoId ??
+    "";
 
   const { data: osRow, error: osError } = await getSupabase()
-    .from('ordens_servico')
+    .from("ordens_servico")
     .insert({
-      protocolo: '', // trigger will generate
+      protocolo: "", // trigger will generate
       data: osData.data,
       hora: osData.hora || null,
-      hora_extra: osData.horaExtra || '',
-      os_number: osData.os || '',
+      hora_extra: osData.horaExtra || "",
+      os_number: osData.os || "",
       cliente_id: osData.clienteId || null,
-      solicitante: osData.solicitante || '',
+      solicitante: upperText(osData.solicitante),
+      solicitante_id:
+        (osData as OSInput & { solicitanteId?: string }).solicitanteId || null,
       centro_custo: centroCusto,
-      motorista: osData.motorista || '',
-      veiculo_id: (osData as OSInput & { veiculoId?: string }).veiculoId || null,
+      centro_custo_id: centroCusto || null,
+      motorista: upperText(osData.motorista),
+      driver_id: (osData as OSInput & { driverId?: string }).driverId || null,
+      veiculo_id:
+        (osData as OSInput & { veiculoId?: string }).veiculoId || null,
       valor_bruto: osData.valorBruto ?? 0,
+      obs_financeiras:
+        (osData as OSInput & { obsFinanceiras?: string }).obsFinanceiras || "",
       imposto,
       custo: osData.custo ?? 0,
       lucro,
-      status_operacional: 'Pendente',
-      status_financeiro: 'Pendente',
+      status_operacional: "Pendente",
+      status_financeiro: "Pendente",
+      created_by_name: actorName || null,
     })
-    .select('*')
+    .select("*")
     .single();
 
   if (osError) throw osError;
 
   // Insert waypoints
   const waypoints = osData.rota?.waypoints || [];
+  const operationalCycles = buildOperationalCyclesFromWaypoints(waypoints);
   const insertedWaypoints: Waypoint[] = [];
 
   for (let i = 0; i < waypoints.length; i++) {
     const wp = waypoints[i];
     const { data: wpRow, error: wpError } = await getSupabase()
-      .from('os_waypoints')
+      .from("os_waypoints")
       .insert({
         ordem_servico_id: osRow.id,
         position: i,
         label: wp.label,
         lat: wp.lat || null,
         lng: wp.lng || null,
-        comment: wp.comment?.trim() || '',
+        comment: wp.comment?.trim() || "",
         itinerary_index: wp.itineraryIndex ?? null,
         hora: wp.hora?.trim() || null,
         data: normalizeWaypointDateForDb(wp.data),
       })
-      .select('id')
+      .select("id")
       .single();
 
     if (wpError) {
@@ -954,33 +1145,37 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
     }
 
     const passengers = wp.passengers || [];
-    const insertedPassengers: { id: string; solicitanteId: string; nome: string }[] = [];
+    const insertedPassengers: {
+      id: string;
+      solicitanteId: string;
+      nome: string;
+    }[] = [];
 
     if (passengers.length > 0) {
       const { data: passRows } = await getSupabase()
-        .from('os_waypoint_passengers')
+        .from("os_waypoint_passengers")
         .insert(
           passengers.map((p) => ({
             waypoint_id: wpRow.id,
             passageiro_id: p.solicitanteId || null,
-          }))
+          })),
         )
-        .select('id, passageiro_id');
+        .select("id, passageiro_id");
 
       if (passRows) {
         (passRows as OSWaypointPassengerRow[]).forEach((pr) =>
           insertedPassengers.push({
             id: pr.id,
-            solicitanteId: pr.passageiro_id || '',
-            nome: '',
-          })
+            solicitanteId: pr.passageiro_id || "",
+            nome: "",
+          }),
         );
       }
     }
 
-    const cleanComment = wp.comment?.trim() || '';
+    const cleanComment = wp.comment?.trim() || "";
     if (cleanComment) {
-      await getSupabase().from('os_waypoint_comments').insert({
+      await getSupabase().from("os_waypoint_comments").insert({
         ordem_servico_id: osRow.id,
         waypoint_position: i,
         waypoint_label: wp.label,
@@ -1000,205 +1195,284 @@ export async function insertOS(osData: OSInput): Promise<OrderService> {
     });
   }
 
+  if (operationalCycles.length > 0) {
+    await getSupabase()
+      .from("ordens_servico")
+      .update({
+        driver_operation_cycles: operationalCycles,
+        current_driver_cycle_index: 0,
+      })
+      .eq("id", osRow.id);
+  }
+
+  void insertOSLog(
+    osRow.id,
+    "create",
+    "Dados de cadastro do atendimento",
+    actorName || "Sistema",
+  );
+
+  void createNotification(
+    "info",
+    "Nova Ordem de Serviço",
+    `Protocolo #${osRow.protocolo} foi gerado.`,
+    "all",
+  );
+
   return {
     id: osRow.id,
     protocolo: osRow.protocolo,
     data: osRow.data,
     hora: osRow.hora,
-    horaExtra: osRow.hora_extra || '',
-    os: osRow.os_number || '',
-    clienteId: osRow.cliente_id || '',
-    solicitante: osRow.solicitante || '',
-    centroCustoId: osRow.centro_custo || '',
-    motorista: osRow.motorista || '',
+    horaExtra: osRow.hora_extra || "",
+    os: osRow.os_number || "",
+    clienteId: osRow.cliente_id || "",
+    solicitante: osRow.solicitante || "",
+    centroCustoId: osRow.centro_custo || "",
+    motorista: osRow.motorista || "",
     veiculoId: osRow.veiculo_id || undefined,
     valorBruto: Number(osRow.valor_bruto),
     imposto: Number(osRow.imposto),
     custo: Number(osRow.custo),
     lucro: Number(osRow.lucro),
+    obsFinanceiras: osRow.obs_financeiras || "",
     status: {
-      operacional: osRow.status_operacional as OrderService['status']['operacional'],
-      financeiro: osRow.status_financeiro as OrderService['status']['financeiro'],
+      operacional:
+        osRow.status_operacional as OrderService["status"]["operacional"],
+      financeiro:
+        osRow.status_financeiro as OrderService["status"]["financeiro"],
     },
-    rota: insertedWaypoints.length > 0 ? { waypoints: insertedWaypoints } : undefined,
+    rota:
+      insertedWaypoints.length > 0
+        ? { waypoints: insertedWaypoints }
+        : undefined,
+    operationalCycles:
+      operationalCycles.length > 0 ? operationalCycles : undefined,
+    currentDriverCycleIndex: operationalCycles.length > 0 ? 0 : undefined,
   };
 }
 
 export async function updateOSInDB(
   id: string,
-  osData: OSInput
+  osData: OSInput,
+  actorName?: string,
 ): Promise<void> {
   const impostoPercentual = await getImpostoPercentualForDate(osData.data);
   const vBruto = osData.valorBruto ?? 0;
   const vCusto = osData.custo ?? 0;
   const imposto = vBruto * (impostoPercentual / 100);
   const lucro = vBruto - imposto - vCusto;
-  const centroCusto = (osData as OSInput & { centroCusto?: string }).centroCusto ?? osData.centroCustoId ?? '';
+  const centroCusto =
+    (osData as OSInput & { centroCusto?: string }).centroCusto ??
+    osData.centroCustoId ??
+    "";
 
-  const { error: osError } = await getSupabase()
-    .from('ordens_servico')
-    .update({
-      data: osData.data,
-      hora: osData.hora || null,
-      hora_extra: osData.horaExtra || '',
-      os_number: osData.os || '',
-      cliente_id: osData.clienteId || null,
-      solicitante: osData.solicitante || '',
-      centro_custo: centroCusto,
-      motorista: osData.motorista || '',
-      veiculo_id: (osData as OSInput & { veiculoId?: string }).veiculoId || null,
-      valor_bruto: osData.valorBruto ?? 0,
-      imposto,
-      custo: osData.custo ?? 0,
-      lucro,
-    })
-    .eq('id', id);
-
-  if (osError) throw osError;
-
-  // Delete old waypoints (cascade deletes passengers too)
-  await getSupabase().from('os_waypoints').delete().eq('ordem_servico_id', id);
-
-  // Re-insert waypoints
   const waypoints = osData.rota?.waypoints || [];
-  for (let i = 0; i < waypoints.length; i++) {
-    const wp = waypoints[i];
-    const { data: wpRow } = await getSupabase()
-      .from('os_waypoints')
-      .insert({
-        ordem_servico_id: id,
-        position: i,
-        label: wp.label,
-        lat: wp.lat || null,
-        lng: wp.lng || null,
-        comment: wp.comment?.trim() || '',
-        itinerary_index: wp.itineraryIndex ?? null,
-        hora: wp.hora?.trim() || null,
-        data: normalizeWaypointDateForDb(wp.data),
-      })
-      .select('id')
-      .single();
+  const operationalCycles = buildOperationalCyclesFromWaypoints(waypoints);
 
-    if (!wpRow) {
-      throw new Error('Falha ao recriar waypoint da ordem de serviço.');
-    }
+  const osPayload = {
+    data: osData.data,
+    hora: osData.hora || null,
+    hora_extra: osData.horaExtra || "",
+    os_number: osData.os || "",
+    cliente_id: osData.clienteId || null,
+    solicitante: upperText(osData.solicitante),
+    solicitante_id:
+      (osData as OSInput & { solicitanteId?: string }).solicitanteId || null,
+    centro_custo: centroCusto,
+    centro_custo_id: centroCusto || null,
+    motorista: upperText(osData.motorista),
+    driver_id: (osData as OSInput & { driverId?: string }).driverId || null,
+    veiculo_id: (osData as OSInput & { veiculoId?: string }).veiculoId || null,
+    valor_bruto: osData.valorBruto ?? 0,
+    obs_financeiras:
+      (osData as OSInput & { obsFinanceiras?: string }).obsFinanceiras || "",
+    imposto,
+    custo: osData.custo ?? 0,
+    lucro,
+  };
 
-    if (wpRow && wp.passengers && wp.passengers.length > 0) {
-      await getSupabase().from('os_waypoint_passengers').insert(
-        wp.passengers.map((p) => ({
-          waypoint_id: wpRow.id,
-          passageiro_id: p.solicitanteId || null,
-        }))
-      );
-    }
+  const waypointsPayload = waypoints.map((wp) => ({
+    label: wp.label,
+    lat: wp.lat ?? null,
+    lng: wp.lng ?? null,
+    comment: wp.comment?.trim() || "",
+    itinerary_index: wp.itineraryIndex ?? null,
+    hora: wp.hora?.trim() || null,
+    data: normalizeWaypointDateForDb(wp.data),
+    passengers: (wp.passengers || []).map((p) => ({
+      solicitante_id: p.solicitanteId || null,
+    })),
+  }));
 
-    const cleanComment = wp.comment?.trim() || '';
-    if (cleanComment) {
-      await getSupabase().from('os_waypoint_comments').insert({
-        ordem_servico_id: id,
-        waypoint_position: i,
-        waypoint_label: wp.label,
-        comment: cleanComment,
-      });
-    }
-  }
+  const { error } = await getSupabase().rpc("update_os_atomic", {
+    p_os_id: id,
+    p_os_data: osPayload,
+    p_waypoints: waypointsPayload,
+    p_driver_operation_cycles: operationalCycles,
+    p_current_driver_cycle_index: operationalCycles.length > 0 ? 0 : null,
+  });
+
+  if (error) throw error;
+
+  void insertOSLog(
+    id,
+    "update",
+    `OS atualizada${osData.os ? ` (nº ${osData.os})` : ""}${osData.motorista ? ` — Motorista: ${osData.motorista}` : ""}`,
+    actorName || "Sistema",
+  );
 }
 
 export async function updateOSStatusInDB(
   id: string,
-  updates: { operacional?: string; financeiro?: string }
+  updates: { operacional?: string; financeiro?: string },
+  actorName?: string,
 ): Promise<void> {
   const updatePayload: Record<string, string> = {};
-  if (updates.operacional) updatePayload.status_operacional = updates.operacional;
+  if (updates.operacional)
+    updatePayload.status_operacional = updates.operacional;
   if (updates.financeiro) updatePayload.status_financeiro = updates.financeiro;
 
   const { error } = await getSupabase()
-    .from('ordens_servico')
+    .from("ordens_servico")
     .update(updatePayload)
-    .eq('id', id);
+    .eq("id", id);
 
   if (error) throw error;
+
+  const parts: string[] = [];
+  if (updates.operacional)
+    parts.push(`Status operacional alterado para "${updates.operacional}"`);
+  if (updates.financeiro)
+    parts.push(`Status financeiro alterado para "${updates.financeiro}"`);
+
+  if (parts.length > 0) {
+    void insertOSLog(
+      id,
+      "status_change",
+      parts.join(" | "),
+      actorName || "Sistema",
+    );
+  }
 }
 
-export async function archiveOSFromDB(id: string): Promise<void> {
+export async function archiveOSFromDB(
+  id: string,
+  actorName?: string,
+): Promise<void> {
   const { error } = await getSupabase()
-    .from('ordens_servico')
+    .from("ordens_servico")
     .update({ arquivado: true })
-    .eq('id', id);
+    .eq("id", id);
 
   if (error) throw error;
+
+  void insertOSLog(id, "archive", "OS arquivada", actorName || "Sistema");
 }
 
 // ── Centros de Custo ──────────────────────────────────────
 
-export async function fetchCentrosCustoByCliente(clienteId: string): Promise<CentroCusto[]> {
+export async function fetchCentrosCustoByCliente(
+  clienteId: string,
+): Promise<CentroCusto[]> {
   const { data, error } = await getSupabase()
-    .from('centros_custo')
-    .select('id, nome')
-    .eq('cliente_id', clienteId)
-    .order('nome');
+    .from("centros_custo")
+    .select("id, nome")
+    .eq("cliente_id", clienteId)
+    .eq("arquivado", false)
+    .order("nome");
 
   if (error) throw error;
-  return ((data || []) as Array<Pick<CentroCustoRow, 'id' | 'nome'>>).map((cc) => ({ id: cc.id, nome: cc.nome, clienteId: clienteId }));
+  return ((data || []) as Array<Pick<CentroCustoRow, "id" | "nome">>).map(
+    (cc) => ({ id: cc.id, nome: cc.nome, clienteId: clienteId }),
+  );
 }
 
 // ── Motoristas ────────────────────────────────────────────
 
 export async function fetchDrivers(): Promise<Driver[]> {
   const { data, error } = await getSupabase()
-    .from('drivers')
-    .select('*')
-    .order('name');
+    .from("drivers")
+    .select(DRIVER_SELECT_COLUMNS)
+    .eq("arquivado", false)
+    .order("name");
 
   if (error) throw error;
-  return ((data || []) as DriverRow[]).map((d) => ({
+  return ((data || []) as unknown as DriverRow[]).map((d) => ({
     id: d.id,
     name: d.name,
-    cpf: d.cpf || '',
-    cnh: d.cnh || '',
-    phone: d.phone || '',
-    status: d.status as 'active' | 'inactive',
-    created_at: d.created_at
+    cpf: d.cpf || "",
+    cnh: d.cnh || "",
+    phone: d.phone || "",
+    status: d.status as "active" | "inactive",
+    created_at: d.created_at,
+    vinculo_tipo: d.vinculo_tipo,
+    parceiro_id: d.parceiro_id ?? undefined,
+    driver_vehicles:
+      d.driver_vehicles?.map((dv) => ({
+        id: dv.id,
+        driver_id: d.id,
+        vehicle_id: dv.vehicle_id,
+        vehicle: Array.isArray(dv.vehicle) ? dv.vehicle[0] : dv.vehicle,
+      })) || [],
+    docsCount:
+      (
+        (d as unknown as Record<string, unknown>).driver_documents as
+          | unknown[]
+          | undefined
+      )?.length || 0,
   }));
 }
 
 export async function fetchDriversPage({
   page = 1,
   pageSize = 10,
-  searchTerm = '',
+  searchTerm = "",
 }: PaginationParams = {}): Promise<PaginatedResult<Driver>> {
   const { from, to } = normalizePagination(page, pageSize);
   const term = searchTerm.trim();
-  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : "";
 
   let query = getSupabase()
-    .from('drivers')
-    .select(`*, driver_vehicles(id, vehicle_id, vehicle:veiculos(id, placa, modelo, marca))`, { count: 'exact' })
-    .order('name', { ascending: true })
+    .from("drivers")
+    .select(DRIVER_PAGE_SELECT_COLUMNS, { count: "exact" })
+    .eq("arquivado", false)
+    .order("name", { ascending: true })
     .range(from, to);
 
   if (likeTerm) {
-    query = query.or(`name.ilike.${likeTerm},cpf.ilike.${likeTerm},cnh.ilike.${likeTerm},phone.ilike.${likeTerm}`);
+    query = query.or(
+      `name.ilike.${likeTerm},cpf.ilike.${likeTerm},cnh.ilike.${likeTerm},phone.ilike.${likeTerm}`,
+    );
   }
 
   const { data, error, count } = await query;
   if (error) throw error;
 
   return {
-    items: ((data || []) as DriverRow[]).map((d) => ({
+    items: ((data || []) as unknown as DriverRow[]).map((d) => ({
       id: d.id,
       name: d.name,
-      cpf: d.cpf || '',
-      cnh: d.cnh || '',
-      phone: d.phone || '',
-      status: d.status as 'active' | 'inactive',
+      cpf: d.cpf || "",
+      cnh: d.cnh || "",
+      phone: d.phone || "",
+      status: d.status as "active" | "inactive",
       created_at: d.created_at,
-      driver_vehicles: d.driver_vehicles?.map((dv) => ({
-        id: dv.id,
-        driver_id: d.id,
-        vehicle_id: dv.vehicle_id,
-        vehicle: dv.vehicle,
-      })) || [],
+      vinculo_tipo: d.vinculo_tipo,
+      parceiro_id: d.parceiro_id ?? undefined,
+      driver_vehicles:
+        d.driver_vehicles?.map((dv) => ({
+          id: dv.id,
+          driver_id: d.id,
+          vehicle_id: dv.vehicle_id,
+          vehicle: Array.isArray(dv.vehicle) ? dv.vehicle[0] : dv.vehicle,
+        })) || [],
+      docsCount:
+        (
+          (d as unknown as Record<string, unknown>).driver_documents as
+            | unknown[]
+            | undefined
+        )?.length || 0,
     })),
     totalCount: count ?? (data || []).length,
   };
@@ -1209,21 +1483,23 @@ export async function fetchDriversPage({
 export async function fetchVeiculosPage({
   page = 1,
   pageSize = 10,
-  searchTerm = '',
+  searchTerm = "",
 }: PaginationParams = {}): Promise<PaginatedResult<Vehicle>> {
   const { from, to } = normalizePagination(page, pageSize);
   const term = searchTerm.trim();
-  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : "";
 
   let query = getSupabase()
-    .from('veiculos')
-    .select('*', { count: 'exact' })
-    .order('marca', { ascending: true })
-    .order('modelo', { ascending: true })
+    .from("veiculos")
+    .select(VEICULO_PAGE_SELECT_COLUMNS, { count: "exact" })
+    .eq("arquivado", false)
+    .order("created_at", { ascending: false })
     .range(from, to);
 
   if (likeTerm) {
-    query = query.or(`placa.ilike.${likeTerm},modelo.ilike.${likeTerm},marca.ilike.${likeTerm},renavam.ilike.${likeTerm}`);
+    query = query.or(
+      `placa.ilike.${likeTerm},modelo.ilike.${likeTerm},marca.ilike.${likeTerm},renavam.ilike.${likeTerm}`,
+    );
   }
 
   const { data, error, count } = await query;
@@ -1235,32 +1511,42 @@ export async function fetchVeiculosPage({
   };
 }
 
-export async function insertDriver(driver: Omit<Driver, 'id' | 'created_at'>): Promise<Driver> {
+export async function insertDriver(
+  driver: Omit<Driver, "id" | "created_at">,
+): Promise<Driver> {
   const { data, error } = await getSupabase()
-    .from('drivers')
-    .insert(driver)
-    .select('*')
+    .from("drivers")
+    .insert({
+      ...driver,
+      name: upperText(driver.name),
+    })
+    .select(DRIVER_SELECT_COLUMNS)
     .single();
 
   if (error) throw error;
-  return data as Driver;
+  return data as unknown as Driver;
 }
 
-export async function updateDriverInDB(id: string, driver: Partial<Driver>): Promise<void> {
+export async function updateDriverInDB(
+  id: string,
+  driver: Partial<Driver>,
+): Promise<void> {
   const { error } = await getSupabase()
-    .from('drivers')
-    .update(driver)
-    .eq('id', id);
+    .from("drivers")
+    .update({
+      ...driver,
+      name: driver.name ? upperText(driver.name) : undefined,
+    })
+    .eq("id", id);
 
   if (error) throw error;
 }
 
 export async function deleteDriverFromDB(id: string): Promise<void> {
   const { error } = await getSupabase()
-    .from('drivers')
-    .delete()
-    .eq('id', id);
-
+    .from("drivers")
+    .update({ arquivado: true, status: "inactive" })
+    .eq("id", id);
   if (error) throw error;
 }
 
@@ -1268,10 +1554,10 @@ export async function deleteDriverFromDB(id: string): Promise<void> {
 
 export interface ParceiroServico {
   id: string;
-  pessoaTipo: 'fisica' | 'juridica';
+  pessoaTipo: "fisica" | "juridica";
   documento: string;
   razaoSocialOuNomeCompleto: string;
-  status: 'ativo' | 'inativo';
+  status: "ativo" | "inativo";
   contatos: ParceiroContato[];
   filiais: ParceiroFilial[];
   searchIndex: string;
@@ -1293,7 +1579,7 @@ export interface ParceiroFilial {
 }
 
 export interface NovoParceiroInput {
-  pessoaTipo: 'fisica' | 'juridica';
+  pessoaTipo: "fisica" | "juridica";
   documento: string;
   razaoSocialOuNomeCompleto: string;
   contatos: {
@@ -1313,11 +1599,11 @@ type ParceiroRow = {
   id: string;
   nome: string;
   tipo: string;
-  pessoa_tipo: 'fisica' | 'juridica';
+  pessoa_tipo: "fisica" | "juridica";
   documento: string | null;
   razao_social_ou_nome_completo: string | null;
   telefone: string | null;
-  status: 'ativo' | 'inativo';
+  status: "ativo" | "inativo";
   search_index: string;
 };
 
@@ -1339,25 +1625,34 @@ type ParceiroFilialRow = {
 };
 
 const buildParceiroSearchIndex = (
-  parceiro: Omit<ParceiroServico, 'searchIndex'>,
+  parceiro: Omit<ParceiroServico, "searchIndex">,
   contatos: ParceiroContato[],
-  filiais: ParceiroFilial[]
+  filiais: ParceiroFilial[],
 ): string => {
   const tokens = [
     parceiro.pessoaTipo,
     parceiro.documento,
     parceiro.razaoSocialOuNomeCompleto,
-    ...contatos.flatMap((contato) => [contato.setor, contato.celular, contato.email || '', contato.responsavel]),
-    ...filiais.flatMap((filial) => [filial.rotulo, filial.enderecoCompleto, filial.referencia || '']),
+    ...contatos.flatMap((contato) => [
+      contato.setor,
+      contato.celular,
+      contato.email || "",
+      contato.responsavel,
+    ]),
+    ...filiais.flatMap((filial) => [
+      filial.rotulo,
+      filial.enderecoCompleto,
+      filial.referencia || "",
+    ]),
   ];
 
-  return tokens.join(' ').toLowerCase();
+  return tokens.join(" ").toLowerCase();
 };
 
 const mapParceiroPayload = (
   parceiro: ParceiroRow,
   contatos: ParceiroContatoRow[],
-  filiais: ParceiroFilialRow[]
+  filiais: ParceiroFilialRow[],
 ): ParceiroServico => {
   const mappedContatos = contatos.map((contato) => ({
     id: contato.id,
@@ -1369,7 +1664,7 @@ const mapParceiroPayload = (
 
   const mappedFiliais = filiais.map((filial) => ({
     id: filial.id,
-    rotulo: filial.rotulo || 'Filial',
+    rotulo: filial.rotulo || "Filial",
     enderecoCompleto: filial.endereco_completo,
     referencia: filial.referencia || undefined,
   }));
@@ -1377,9 +1672,10 @@ const mapParceiroPayload = (
   const base = {
     id: parceiro.id,
     pessoaTipo: parceiro.pessoa_tipo,
-    documento: parceiro.documento || '',
-    razaoSocialOuNomeCompleto: parceiro.razao_social_ou_nome_completo || parceiro.nome || '',
-    status: parceiro.status || 'ativo',
+    documento: parceiro.documento || "",
+    razaoSocialOuNomeCompleto:
+      parceiro.razao_social_ou_nome_completo || parceiro.nome || "",
+    status: parceiro.status || "ativo",
     contatos: mappedContatos,
     filiais: mappedFiliais,
   };
@@ -1391,42 +1687,47 @@ const mapParceiroPayload = (
 };
 
 export async function fetchParceiros(): Promise<ParceiroServico[]> {
-  const { data: parceirosData, error: parceirosError } = await getSupabase()
-    .from('parceiros_servico')
-    .select('*')
-    .order('nome');
+  const { data, error } = await getSupabase()
+    .from("parceiros_servico")
+    .select("*")
+    .eq("arquivado", false)
+    .order("razao_social_ou_nome_completo");
 
-  if (parceirosError) throw parceirosError;
-  const parceiros = parceirosData as ParceiroRow[];
+  if (error) throw error;
+  const parceiros = data as ParceiroRow[];
 
   // Buscar contatos e filiais para todos os parceiros
-  const parceirosIds = parceiros.map(p => p.id);
-  
+  const parceirosIds = parceiros.map((p) => p.id);
+
   let contatos: ParceiroContatoRow[] = [];
   let filiais: ParceiroFilialRow[] = [];
-  
+
   if (parceirosIds.length > 0) {
     const { data: contatosData, error: contatosError } = await getSupabase()
-      .from('parceiros_contatos')
-      .select('*')
-      .in('parceiro_id', parceirosIds);
-      
+      .from("parceiros_contatos")
+      .select("*")
+      .in("parceiro_id", parceirosIds);
+
     if (contatosError) throw contatosError;
     contatos = contatosData as ParceiroContatoRow[];
-    
+
     const { data: filiaisData, error: filiaisError } = await getSupabase()
-      .from('parceiros_filiais')
-      .select('*')
-      .in('parceiro_id', parceirosIds);
-      
+      .from("parceiros_filiais")
+      .select("*")
+      .in("parceiro_id", parceirosIds);
+
     if (filiaisError) throw filiaisError;
     filiais = filiaisData as ParceiroFilialRow[];
   }
 
   // Mapear dados completos
-  return parceiros.map(parceiro => {
-    const parceiroContatos = contatos.filter(c => c.parceiro_id === parceiro.id);
-    const parceiroFiliais = filiais.filter(f => f.parceiro_id === parceiro.id);
+  return parceiros.map((parceiro) => {
+    const parceiroContatos = contatos.filter(
+      (c) => c.parceiro_id === parceiro.id,
+    );
+    const parceiroFiliais = filiais.filter(
+      (f) => f.parceiro_id === parceiro.id,
+    );
     return mapParceiroPayload(parceiro, parceiroContatos, parceiroFiliais);
   });
 }
@@ -1434,16 +1735,17 @@ export async function fetchParceiros(): Promise<ParceiroServico[]> {
 export async function fetchParceirosPage({
   page = 1,
   pageSize = 10,
-  searchTerm = '',
+  searchTerm = "",
 }: PaginationParams = {}): Promise<PaginatedResult<ParceiroServico>> {
   const { from, to } = normalizePagination(page, pageSize);
   const term = searchTerm.trim();
-  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : '';
+  const likeTerm = term ? `%${sanitizeSearchTerm(term)}%` : "";
 
   let query = getSupabase()
-    .from('parceiros_servico')
-    .select('*', { count: 'exact' })
-    .order('nome', { ascending: true })
+    .from("parceiros_servico")
+    .select("*", { count: "exact" })
+    .eq("arquivado", false)
+    .order("razao_social_ou_nome_completo", { ascending: true })
     .range(from, to);
 
   if (likeTerm) {
@@ -1460,17 +1762,17 @@ export async function fetchParceirosPage({
 
   if (parceirosIds.length > 0) {
     const { data: contatosData, error: contatosError } = await getSupabase()
-      .from('parceiros_contatos')
-      .select('*')
-      .in('parceiro_id', parceirosIds);
+      .from("parceiros_contatos")
+      .select("*")
+      .in("parceiro_id", parceirosIds);
 
     if (contatosError) throw contatosError;
     contatos = contatosData as ParceiroContatoRow[];
 
     const { data: filiaisData, error: filiaisError } = await getSupabase()
-      .from('parceiros_filiais')
-      .select('*')
-      .in('parceiro_id', parceirosIds);
+      .from("parceiros_filiais")
+      .select("*")
+      .in("parceiro_id", parceirosIds);
 
     if (filiaisError) throw filiaisError;
     filiais = filiaisData as ParceiroFilialRow[];
@@ -1478,8 +1780,12 @@ export async function fetchParceirosPage({
 
   return {
     items: parceiros.map((parceiro) => {
-      const parceiroContatos = contatos.filter((c) => c.parceiro_id === parceiro.id);
-      const parceiroFiliais = filiais.filter((f) => f.parceiro_id === parceiro.id);
+      const parceiroContatos = contatos.filter(
+        (c) => c.parceiro_id === parceiro.id,
+      );
+      const parceiroFiliais = filiais.filter(
+        (f) => f.parceiro_id === parceiro.id,
+      );
       return mapParceiroPayload(parceiro, parceiroContatos, parceiroFiliais);
     }),
     totalCount: count ?? parceiros.length,
@@ -1488,9 +1794,9 @@ export async function fetchParceirosPage({
 
 export async function fetchParceiroById(id: string): Promise<ParceiroServico> {
   const { data: parceiroData, error: parceiroError } = await getSupabase()
-    .from('parceiros_servico')
-    .select('*')
-    .eq('id', id)
+    .from("parceiros_servico")
+    .select("*")
+    .eq("id", id)
     .single();
 
   if (parceiroError) throw parceiroError;
@@ -1498,37 +1804,39 @@ export async function fetchParceiroById(id: string): Promise<ParceiroServico> {
 
   // Buscar contatos
   const { data: contatosData, error: contatosError } = await getSupabase()
-    .from('parceiros_contatos')
-    .select('*')
-    .eq('parceiro_id', id);
-    
+    .from("parceiros_contatos")
+    .select("*")
+    .eq("parceiro_id", id);
+
   if (contatosError) throw contatosError;
   const contatos = contatosData as ParceiroContatoRow[];
-  
+
   // Buscar filiais
   const { data: filiaisData, error: filiaisError } = await getSupabase()
-    .from('parceiros_filiais')
-    .select('*')
-    .eq('parceiro_id', id);
-    
+    .from("parceiros_filiais")
+    .select("*")
+    .eq("parceiro_id", id);
+
   if (filiaisError) throw filiaisError;
   const filiais = filiaisData as ParceiroFilialRow[];
 
   return mapParceiroPayload(parceiro, contatos, filiais);
 }
 
-export async function insertParceiro(input: NovoParceiroInput): Promise<ParceiroServico> {
+export async function insertParceiro(
+  input: NovoParceiroInput,
+): Promise<ParceiroServico> {
   // Inserir parceiro principal
   const { data: parceiroData, error: parceiroError } = await getSupabase()
-    .from('parceiros_servico')
+    .from("parceiros_servico")
     .insert({
       nome: trimText(input.razaoSocialOuNomeCompleto),
-      tipo: 'Parceiro',
+      tipo: "Parceiro",
       pessoa_tipo: input.pessoaTipo,
       documento: trimText(input.documento),
       razao_social_ou_nome_completo: trimText(input.razaoSocialOuNomeCompleto),
     })
-    .select('*')
+    .select("*")
     .single();
 
   if (parceiroError) throw parceiroError;
@@ -1545,7 +1853,7 @@ export async function insertParceiro(input: NovoParceiroInput): Promise<Parceiro
 
   if (contatosToInsert.length > 0) {
     const { error: contatosError } = await getSupabase()
-      .from('parceiros_contatos')
+      .from("parceiros_contatos")
       .insert(contatosToInsert);
 
     if (contatosError) throw contatosError;
@@ -1561,7 +1869,7 @@ export async function insertParceiro(input: NovoParceiroInput): Promise<Parceiro
 
   if (filiaisToInsert.length > 0) {
     const { error: filiaisError } = await getSupabase()
-      .from('parceiros_filiais')
+      .from("parceiros_filiais")
       .insert(filiaisToInsert);
 
     if (filiaisError) throw filiaisError;
@@ -1571,57 +1879,39 @@ export async function insertParceiro(input: NovoParceiroInput): Promise<Parceiro
   return fetchParceiroById(parceiro.id);
 }
 
-export async function updateParceiroInDB(id: string, input: NovoParceiroInput): Promise<ParceiroServico> {
-  // Atualizar parceiro principal
-  const { error: parceiroError } = await getSupabase()
-    .from('parceiros_servico')
-    .update({
-      nome: trimText(input.razaoSocialOuNomeCompleto),
-      tipo: 'Parceiro',
-      pessoa_tipo: input.pessoaTipo,
-      documento: trimText(input.documento),
-      razao_social_ou_nome_completo: trimText(input.razaoSocialOuNomeCompleto),
-    })
-    .eq('id', id);
-
-  if (parceiroError) throw parceiroError;
-
-  // Remover contatos e filiais existentes
-  await getSupabase().from('parceiros_contatos').delete().eq('parceiro_id', id);
-  await getSupabase().from('parceiros_filiais').delete().eq('parceiro_id', id);
-
-  // Inserir novos contatos
-  const contatosToInsert = input.contatos.map((contato) => ({
-    parceiro_id: id,
-    setor: trimText(contato.setor),
-    celular: trimText(contato.celular),
-    email: trimText(contato.email) || null,
-    responsavel: trimText(contato.responsavel),
+export async function updateParceiroInDB(
+  id: string,
+  input: NovoParceiroInput,
+): Promise<ParceiroServico> {
+  const contatosPayload = input.contatos.map((c) => ({
+    setor: trimText(c.setor),
+    celular: trimText(c.celular),
+    email: trimText(c.email) || null,
+    responsavel: trimText(c.responsavel),
   }));
 
-  if (contatosToInsert.length > 0) {
-    const { error: contatosError } = await getSupabase()
-      .from('parceiros_contatos')
-      .insert(contatosToInsert);
-
-    if (contatosError) throw contatosError;
-  }
-
-  // Inserir novas filiais
-  const filiaisToInsert = input.filiais.map((filial) => ({
-    parceiro_id: id,
-    rotulo: trimText(filial.rotulo),
-    endereco_completo: trimText(filial.enderecoCompleto),
-    referencia: trimText(filial.referencia) || null,
+  const filiaisPayload = input.filiais.map((f) => ({
+    rotulo: trimText(f.rotulo),
+    endereco_completo: trimText(f.enderecoCompleto),
+    referencia: trimText(f.referencia) || null,
   }));
 
-  if (filiaisToInsert.length > 0) {
-    const { error: filiaisError } = await getSupabase()
-      .from('parceiros_filiais')
-      .insert(filiaisToInsert);
+  const { error: rpcError } = await getSupabase().rpc(
+    "update_parceiro_atomic",
+    {
+      p_parceiro_id: id,
+      p_nome: trimText(input.razaoSocialOuNomeCompleto),
+      p_pessoa_tipo: input.pessoaTipo,
+      p_documento: trimText(input.documento),
+      p_razao_social_ou_nome_completo: trimText(
+        input.razaoSocialOuNomeCompleto,
+      ),
+      p_contatos: contatosPayload,
+      p_filiais: filiaisPayload,
+    },
+  );
 
-    if (filiaisError) throw filiaisError;
-  }
+  if (rpcError) throw rpcError;
 
   // Buscar dados completos para retornar
   return fetchParceiroById(id);
@@ -1633,20 +1923,22 @@ export interface ParceiroVinculo {
   registros: { id: string; nome: string }[];
 }
 
-export async function checkParceiroVinculos(parceiroId: string): Promise<ParceiroVinculo[]> {
+export async function checkParceiroVinculos(
+  parceiroId: string,
+): Promise<ParceiroVinculo[]> {
   const vinculos: ParceiroVinculo[] = [];
 
   const { data: driversData, error: driversError } = await getSupabase()
-    .from('drivers')
-    .select('id, name')
-    .eq('parceiro_id', parceiroId);
+    .from("drivers")
+    .select("id, name")
+    .eq("parceiro_id", parceiroId);
 
   if (driversError) throw driversError;
 
   if (driversData && driversData.length > 0) {
     vinculos.push({
-      tabela: 'Motoristas',
-      campo: 'parceiro_id',
+      tabela: "Motoristas",
+      campo: "parceiro_id",
       registros: driversData.map((d) => ({ id: d.id, nome: d.name })),
     });
   }
@@ -1654,32 +1946,45 @@ export async function checkParceiroVinculos(parceiroId: string): Promise<Parceir
   return vinculos;
 }
 
-export async function toggleParceiroStatus(id: string, currentStatus: 'ativo' | 'inativo'): Promise<void> {
-  const novoStatus = currentStatus === 'ativo' ? 'inativo' : 'ativo';
+export async function toggleParceiroStatus(
+  id: string,
+  currentStatus: "ativo" | "inativo",
+): Promise<void> {
+  const novoStatus = currentStatus === "ativo" ? "inativo" : "ativo";
   const { error } = await getSupabase()
-    .from('parceiros_servico')
+    .from("parceiros_servico")
     .update({ status: novoStatus })
-    .eq('id', id);
+    .eq("id", id);
 
   if (error) throw error;
 }
 
 export async function deleteParceiroFromDB(id: string): Promise<void> {
   const { error } = await getSupabase()
-    .from('parceiros_servico')
-    .delete()
-    .eq('id', id);
+    .from("parceiros_servico")
+    .update({ arquivado: true, status: "inativo" })
+    .eq("id", id);
 
   if (error) throw error;
 }
 
 // ── App Settings ────────────────────────────────────────
 
+function getReadableErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}
+
 export async function getAppSetting(key: string): Promise<string | null> {
   const { data, error } = await getSupabase()
-    .from('app_settings')
-    .select('value')
-    .eq('key', key)
+    .from("app_settings")
+    .select("value")
+    .eq("key", key)
     .single();
 
   if (error || !data) return null;
@@ -1688,25 +1993,31 @@ export async function getAppSetting(key: string): Promise<string | null> {
 
 export async function setAppSetting(key: string, value: string): Promise<void> {
   const { error } = await getSupabase()
-    .from('app_settings')
+    .from("app_settings")
     .upsert({ key, value, updated_at: new Date().toISOString() });
 
-  if (error) throw error;
+  if (error) {
+    throw new Error(
+      getReadableErrorMessage(error, "Falha ao salvar configuração atual."),
+    );
+  }
 }
 
 export async function getImpostoPercentual(): Promise<number> {
-  const raw = await getAppSetting('imposto_percentual');
-  const parsed = parseFloat(raw || '');
+  const raw = await getAppSetting("imposto_percentual");
+  const parsed = parseFloat(raw || "");
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 12;
 }
 
-export async function getImpostoPercentualForDate(date: string): Promise<number> {
+export async function getImpostoPercentualForDate(
+  date: string,
+): Promise<number> {
   const { data, error } = await getSupabase()
-    .from('financial_config_history')
-    .select('value')
-    .eq('config_key', 'imposto_percentual')
-    .lte('effective_from', date)
-    .order('effective_from', { ascending: false })
+    .from("financial_config_history")
+    .select("value")
+    .eq("config_key", "imposto_percentual")
+    .lte("effective_from", date)
+    .order("effective_from", { ascending: false })
     .limit(1)
     .single();
 
@@ -1715,25 +2026,122 @@ export async function getImpostoPercentualForDate(date: string): Promise<number>
     return getImpostoPercentual();
   }
 
-  const parsed = parseFloat(data.value || '');
+  const parsed = parseFloat(data.value || "");
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 12;
 }
 
 export async function setFinancialConfig(
   key: string,
   value: string,
-  effectiveFrom: string
+  effectiveFrom: string,
 ): Promise<void> {
-  // Insere no histórico
-  const { error: histError } = await getSupabase()
-    .from('financial_config_history')
-    .upsert(
-      { config_key: key, value, effective_from: effectiveFrom },
-      { onConflict: 'config_key,effective_from' }
-    );
+  const supabase = getSupabase();
 
-  if (histError) throw histError;
+  const { data: existingConfig, error: findError } = await supabase
+    .from("financial_config_history")
+    .select("id")
+    .eq("config_key", key)
+    .eq("effective_from", effectiveFrom)
+    .maybeSingle();
+
+  if (findError) {
+    throw new Error(
+      getReadableErrorMessage(
+        findError,
+        "Falha ao consultar o histórico financeiro.",
+      ),
+    );
+  }
+
+  if (existingConfig?.id) {
+    const { error: updateError } = await supabase
+      .from("financial_config_history")
+      .update({ value })
+      .eq("id", existingConfig.id);
+
+    if (updateError) {
+      throw new Error(
+        getReadableErrorMessage(
+          updateError,
+          "Falha ao atualizar o histórico financeiro.",
+        ),
+      );
+    }
+  } else {
+    const { error: insertError } = await supabase
+      .from("financial_config_history")
+      .insert({ config_key: key, value, effective_from: effectiveFrom });
+
+    if (insertError) {
+      throw new Error(
+        getReadableErrorMessage(
+          insertError,
+          "Falha ao salvar o histórico financeiro.",
+        ),
+      );
+    }
+  }
 
   // Atualiza o valor atual em app_settings para compatibilidade
   await setAppSetting(key, value);
+}
+
+// ── OS Logs ──────────────────────────────────────────────
+
+export interface OSLog {
+  id: string;
+  os_id: string;
+  type: string;
+  actor_name: string;
+  actor_id: string | null;
+  description: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export async function insertOSLog(
+  osId: string,
+  type: OSLog["type"],
+  description: string,
+  actorName: string,
+  actorId?: string | null,
+  metadata?: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await getSupabase()
+    .from("os_logs")
+    .insert({
+      os_id: osId,
+      type,
+      description,
+      actor_name: actorName,
+      actor_id: actorId || null,
+      metadata: metadata || {},
+    });
+
+  if (error) {
+    console.error("Erro ao inserir log de OS:", error);
+  }
+}
+
+export async function fetchOSLogs(osId: string): Promise<OSLog[]> {
+  const { data, error } = await getSupabase()
+    .from("os_logs")
+    .select(
+      "id, os_id, type, actor_name, actor_id, description, metadata, created_at",
+    )
+    .eq("os_id", osId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  return (data || []).map((row) => ({
+    id: row.id,
+    os_id: row.os_id,
+    type: row.type,
+    actor_name: row.actor_name,
+    actor_id: row.actor_id,
+    description: row.description,
+    metadata: (row.metadata as Record<string, unknown>) || {},
+    created_at: row.created_at,
+  }));
 }

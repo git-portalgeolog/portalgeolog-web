@@ -7,6 +7,10 @@
     {
       "name": "smartmode",
       "model": "qwen/qwen3-coder-480b-a35b-instruct"
+    },
+    {
+      "name": "language-pt-br",
+      "description": "Todas as respostas do agente devem ser em português do Brasil (pt-BR)."
     }
   ]
 }
