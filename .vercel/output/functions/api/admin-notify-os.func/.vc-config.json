@@ -1,0 +1,18 @@
+{
+  "runtime": "edge",
+  "name": "api/admin-notify-os",
+  "deploymentTarget": "v8-worker",
+  "entrypoint": "index.js",
+  "assets": [],
+  "framework": {
+    "slug": "nextjs",
+    "version": "15.5.18"
+  },
+  "environment": {
+    "__NEXT_BUILD_ID": "cuEYbyCRf4CDWsY68PrjD",
+    "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": "8adnXFis9tHleo1JFaaAjBeZMtOVOwwHhxuvPzfPp7Y=",
+    "__NEXT_PREVIEW_MODE_ID": "aca3d2820b81d001d8eb11b283bd9a68",
+    "__NEXT_PREVIEW_MODE_SIGNING_KEY": "006ce88ba5d0b438fed91995e9b479c74203997c41343c7f812b428f4c87f561",
+    "__NEXT_PREVIEW_MODE_ENCRYPTION_KEY": "8e0f44b78517d4d88cc88ba3f72742e1769d266dcc7174dc06d0b4209f3fabda"
+  }
+}

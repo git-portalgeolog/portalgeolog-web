@@ -17,23 +17,7 @@
       "config": {
         "zeroConfig": true,
         "framework": "nextjs"
-      },
-      "error": {
-        "name": "Error",
-        "stack": "Error: The file \"/home/geolog/Documents/geolog/web/.next/routes-manifest.json\" couldn't be found. This is usually caused by one of the following:\n\n1. The \"Output Directory\" setting in your project is misconfigured. Ensure it matches your Next.js \"distDir\" configuration (defaults to \".next\").\n\n2. If using Turborepo, ensure your task outputs include the Next.js build directory. Add \".next/**\" (or your custom distDir) to the \"outputs\" array in turbo.json for the build task.\n\n3. The build command did not complete successfully. Check the build logs above for errors.\n    at getRoutesManifest (/home/geolog/.npm/_npx/69f9afb961c37556/node_modules/@vercel/next/dist/index.js:11336:11)\n    at async Object.build (/home/geolog/.npm/_npx/69f9afb961c37556/node_modules/@vercel/next/dist/index.js:16849:26)\n    at async _Span.trace (/home/geolog/.npm/_npx/69f9afb961c37556/node_modules/@vercel/build-utils/dist/index.js:24976:14)\n    at async doBuild (file:///home/geolog/.npm/_npx/69f9afb961c37556/node_modules/vercel/dist/commands/build/index.js:1038:26)\n    at async _Span.trace (/home/geolog/.npm/_npx/69f9afb961c37556/node_modules/@vercel/build-utils/dist/index.js:24976:14)\n    at async main (file:///home/geolog/.npm/_npx/69f9afb961c37556/node_modules/vercel/dist/commands/build/index.js:615:7)\n    at async main (file:///home/geolog/.npm/_npx/69f9afb961c37556/node_modules/vercel/dist/index.js:24150:18)",
-        "message": "The file \"/home/geolog/Documents/geolog/web/.next/routes-manifest.json\" couldn't be found. This is usually caused by one of the following:\n\n1. The \"Output Directory\" setting in your project is misconfigured. Ensure it matches your Next.js \"distDir\" configuration (defaults to \".next\").\n\n2. If using Turborepo, ensure your task outputs include the Next.js build directory. Add \".next/**\" (or your custom distDir) to the \"outputs\" array in turbo.json for the build task.\n\n3. The build command did not complete successfully. Check the build logs above for errors.",
-        "hideStackTrace": true,
-        "code": "NEXT_NO_ROUTES_MANIFEST",
-        "link": "https://err.sh/vercel/vercel/now-next-routes-manifest"
       }
     }
-  ],
-  "error": {
-    "name": "Error",
-    "stack": "Error: The file \"/home/geolog/Documents/geolog/web/.next/routes-manifest.json\" couldn't be found. This is usually caused by one of the following:\n\n1. The \"Output Directory\" setting in your project is misconfigured. Ensure it matches your Next.js \"distDir\" configuration (defaults to \".next\").\n\n2. If using Turborepo, ensure your task outputs include the Next.js build directory. Add \".next/**\" (or your custom distDir) to the \"outputs\" array in turbo.json for the build task.\n\n3. The build command did not complete successfully. Check the build logs above for errors.\n    at getRoutesManifest (/home/geolog/.npm/_npx/69f9afb961c37556/node_modules/@vercel/next/dist/index.js:11336:11)\n    at async Object.build (/home/geolog/.npm/_npx/69f9afb961c37556/node_modules/@vercel/next/dist/index.js:16849:26)\n    at async _Span.trace (/home/geolog/.npm/_npx/69f9afb961c37556/node_modules/@vercel/build-utils/dist/index.js:24976:14)\n    at async doBuild (file:///home/geolog/.npm/_npx/69f9afb961c37556/node_modules/vercel/dist/commands/build/index.js:1038:26)\n    at async _Span.trace (/home/geolog/.npm/_npx/69f9afb961c37556/node_modules/@vercel/build-utils/dist/index.js:24976:14)\n    at async main (file:///home/geolog/.npm/_npx/69f9afb961c37556/node_modules/vercel/dist/commands/build/index.js:615:7)\n    at async main (file:///home/geolog/.npm/_npx/69f9afb961c37556/node_modules/vercel/dist/index.js:24150:18)",
-    "message": "The file \"/home/geolog/Documents/geolog/web/.next/routes-manifest.json\" couldn't be found. This is usually caused by one of the following:\n\n1. The \"Output Directory\" setting in your project is misconfigured. Ensure it matches your Next.js \"distDir\" configuration (defaults to \".next\").\n\n2. If using Turborepo, ensure your task outputs include the Next.js build directory. Add \".next/**\" (or your custom distDir) to the \"outputs\" array in turbo.json for the build task.\n\n3. The build command did not complete successfully. Check the build logs above for errors.",
-    "hideStackTrace": true,
-    "code": "NEXT_NO_ROUTES_MANIFEST",
-    "link": "https://err.sh/vercel/vercel/now-next-routes-manifest"
-  }
+  ]
 }
